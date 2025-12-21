@@ -1,25 +1,67 @@
+# Akira SDK — Quick Start (for newcomers) 🎯
+
+Short and simple — this folder contains the headers and tiny samples you
+need to build WebAssembly apps for AkiraOS.
+
+What it is
+- **Header-only SDK** — include `include/akira_api.h` in your app. The
+  runtime provides implementations (you do not link a local library by
+  default).
+
+Prerequisites
+- Install a WASI toolchain (wasi-sdk). Typical path: `/opt/wasi-sdk`.
+
+Quick Start — build a sample
+1. Build the small hello-world sample:
+
+```bash
+cd AkiraSDK/wasm_apps/hello_world
+../../build.sh -o hello_world.wasm main.c
+```
+
+2. Build the sensor demo:
+
+```bash
+cd AkiraSDK/wasm_apps/sensor_demo
+../../build.sh -o sensor_demo.wasm main.c
+```
+
+Notes
+- The SDK is header-only. Apps will have undefined `akira_*` imports that the
+  host runtime must resolve at execution time (this is expected).
+- If you need to test against a local AkiraOS checkout, add an include path:
+
+```bash
+../../build.sh -I /path/to/Akira/include -o my_app.wasm main.c
+```
+
+Using CMake
+- `CMakeLists.txt` provided in samples links an INTERFACE target `akira_api` so
+  CMake projects can call `target_link_libraries(... PRIVATE akira_api)` and
+  get the headers automatically.
+
+Troubleshooting
+- If `akira_api.h` is not found, ensure you're running `build.sh` from inside
+  a sample folder, or pass `-I` with the path to `include/`.
+
+Want help?
+- I can add a tiny CI check that builds the samples and verifies they produce
+  wasm artifacts — say the word and I'll add it.
+
+Happy hacking! ✨
 # Akira SDK — WASM App Development Guide 🚀
 
 This `AkiraSDK` folder provides the headers and samples you need to build
-WebAssembly applications for AkiraOS. The SDK is intentionally small and
-works in two modes:
-
-- **Header-only (only mode)**
-  - You compile against `include/akira_api.h` and the runtime supplies the
-    implementations (via dynamic native registration). The SDK is intentionally
-    header-only — this is the only supported usage for building apps.
-
-- **`sdk_export` (optional helper)**
-  - When working inside the full `AkiraOS` repository you may provide an
-    optional `sdk_export` component that builds `libakira_api.a` for local
-    linking. This is a development convenience only and does not change the
-    SDK's header-only nature.
+WebAssembly applications for AkiraOS. The SDK is intentionally small and is
+header-only: apps compile against `include/akira_api.h` and the runtime
+supplies implementations (via dynamic native registration). This is the
+only supported SDK usage.
 
 Contents
  - include/akira_api.h — canonical app-facing header
  - wasm_apps/ — sample apps (Makefile + small manifests)
  - build_wasm_app.sh — small helper script to build apps easily
- - CMakeLists.txt — enables optional `sdk_export` usage, otherwise header-only
+ - CMakeLists.txt — provides a header-only INTERFACE target `akira_api`
 
 Prerequisites
  - WASI SDK installed (clang/ld). Typical path: `/opt/wasi-sdk`.
@@ -40,8 +82,7 @@ cd AkiraSDK/wasm_apps/sensor_demo
 make
 ```
 
-4. Optional CMake flow (CMake sample will link `akira_api` only if `sdk_export`
-   is present):
+4. Optional CMake flow (CMake sample uses the header-only INTERFACE target):
 
 ```bash
 cd AkiraSDK/wasm_apps/hello_world
@@ -53,8 +94,7 @@ cmake --build .
 Build script usage
 - The helper script detects the WASI SDK and sets appropriate flags for
   libc-builtin builds (-nostdlib, -Wl,--allow-undefined). It also adds
-  `AkiraSDK/include` to include paths and will prefer an OS-provided
-  `sdk_export` (if `AKIRA_OS_ROOT` is set).
+  `AkiraSDK/include` to include paths.
 
 Header-only details
 - Apps compiled in header-only mode will contain undefined imports for
@@ -86,8 +126,32 @@ Extras & Troubleshooting
 - If your app can't find `akira_api.h` when using the helper script, ensure
   you're running it from a sample directory (e.g., `wasm_apps/sensor_demo`) so
   the script can add the SDK include path.
-- If you need local linking against `akira_api`, add `sdk_export` in the root
-  of the repo or set `AKIRA_OS_ROOT` to point to the AkiraOS repository.
+ - If you need to use a local copy of `akira_api.h` from the AkiraOS tree,
+   add an include path that points to your checkout (for example `-I/path/to/Akira/include`).
+
+Vendoring / local testing
+- To test against a local AkiraOS checkout, you can either:
+  - Add an include path when using the helper script:
+
+    ```bash
+    ../../build_wasm_app.sh -I /path/to/Akira/include -o my_app.wasm main.c
+    ```
+
+  - Or, for CMake-based samples, add the AkiraOS include directory to your
+    target and (optionally) pass implementation sources if you want to link
+    a local implementation during development:
+
+    ```cmake
+    target_include_directories(hello-world.wasm PRIVATE /path/to/Akira/include)
+    target_sources(hello-world.wasm PRIVATE /path/to/Akira/src/akira_api.c)
+    target_link_libraries(hello-world.wasm PRIVATE akira_api)
+    ```
+
+  Notes:
+  - The SDK itself remains header-only; these steps are for local testing or
+    development of runtime APIs and are not required for normal app authors.
+  - If you prefer copying headers into the SDK for an isolated test, place
+    `akira_api.h` into `AkiraSDK/include/` (for quick local experiments).
 
 ------
 If you'd like I can:
@@ -116,32 +180,14 @@ endif()
 add_subdirectory(${AKIRA_SDK_PATH} akira-sdk-build)
 
 add_executable(hello-world.wasm main.c)
-if(TARGET akira_api)
-  target_link_libraries(hello-world.wasm PRIVATE akira_api)
-else()
-  # Header-only mode: runtime must provide implementations at execution time
-  message(WARNING "Building header-only; runtime must provide akira_api implementations")
-endif()
+target_link_libraries(hello-world.wasm PRIVATE akira_api)
 ```
 
 Standalone build
 -----------------
 The SDK is header-only: samples compile against `akira_api.h` and rely on the
 host runtime to provide implementations at execution time (via native module
-registration with OCRE). If you need a local static library for development
-you may provide a `sdk_export` component to build `libakira_api.a`, but this
-is optional and not a separate SDK mode.
-
-To build when `sdk_export` is present:
-
-```bash
-mkdir -p build && cd build
-cmake ..
-cmake --build .
-```
-
-This will produce `libakira_api.a` (if `sdk_export` is present) and optionally
-`libocre_api.a` if the compatibility target is available.
+registration with OCRE).
 
 2. The SDK also supports Makefile workflows; use `scripts/build_wasm_app.sh` or per-sample Makefiles.
 
@@ -149,20 +195,8 @@ Notes & suggestions
 - Add `CMakeLists.txt` to samples to demonstrate CMake-based builds (WASI toolchain integration).
 - Consider adding an `install()` step and packaging rules later (for system-wide use).
 
-Using the AkiraOS `sdk_export`
------------------------------
-If you're developing within the full `AkiraOS` tree, the SDK will prefer the
-`sdk_export` provided by the OS. For the helper script and Makefile flows set
-the `AKIRA_OS_ROOT` environment variable to the path of the repository root
-so the build script can pick up the exported `akira_api` sources / headers:
-
-```bash
-export AKIRA_OS_ROOT=/path/to/Akira
-./scripts/build_wasm_app.sh -o blink_led.wasm main.c
-```
-
-If `sdk_export` is available, CMake samples will automatically add it and
-alias the `akira_api` target so samples can link it. The default and only
-SDK usage remains header-only: apps built with the SDK depend on the runtime
-to provide `akira_*` functions unless you explicitly link against a local
-`libakira_api.a` produced by `sdk_export`.
+Using AkiraOS
+-------------
+If you're developing within the full `AkiraOS` tree you may still consume
+`akira_api.h` from the OS source tree directly, but `AkiraSDK` itself is
+header-only and does not attempt to link any runtime source files.

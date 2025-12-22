@@ -198,5 +198,9 @@ Notes & suggestions
 Using AkiraOS
 -------------
 If you're developing within the full `AkiraOS` tree you may still consume
+
+## License
+
+The Akira SDK is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
 `akira_api.h` from the OS source tree directly, but `AkiraSDK` itself is
 header-only and does not attempt to link any runtime source files.

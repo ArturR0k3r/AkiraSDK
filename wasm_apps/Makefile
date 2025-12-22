@@ -16,7 +16,7 @@
 WASI_SDK ?= /opt/wasi-sdk
 
 # Sample directories
-SAMPLES = hello_world sensor_demo blink_led
+SAMPLES = hello_world sensor_demo blink_led hid_keyboard_demo
 
 # SD card mount point for install target
 SD_MOUNT ?= /media/$(USER)/AKIRA

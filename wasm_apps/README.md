@@ -393,6 +393,10 @@ wasm_apps/
 │   ├── main.c
 │   ├── Makefile
 │   └── manifest.json
+├── logic_analyzer/
+│   ├── main.c
+│   ├── CMakeLists.txt
+│   └── manifest.json
 └── README.md            # This file
 ```
 

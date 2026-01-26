@@ -8,7 +8,7 @@
 
 **Build powerful embedded applications with WebAssembly** 🎯
 
-[Getting Started](#-getting-started) • [API Reference](API_REFERENCE.md) • [Examples](EXAMPLES.md) • [Tutorials](TUTORIALS.md)
+[Getting Started](#-getting-started) • [API Reference](API_REFERENCE.md) • [Troubleshooting](TROUBLESHOOTING.md) • [Best Practices](BEST_PRACTICES.md)
 
 </div>
 

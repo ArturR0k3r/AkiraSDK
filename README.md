@@ -1,206 +1,237 @@
-# Akira SDK — Quick Start (for newcomers) 🎯
+# 🚀 Akira SDK Documentation
 
-Short and simple — this folder contains the headers and tiny samples you
-need to build WebAssembly apps for AkiraOS.
+<div align="center">
 
-What it is
-- **Header-only SDK** — include `include/akira_api.h` in your app. The
-  runtime provides implementations (you do not link a local library by
-  default).
+![Akira SDK](https://img.shields.io/badge/Akira-SDK-blue?style=for-the-badge)
+![WASM](https://img.shields.io/badge/WASM-Ready-purple?style=for-the-badge)
+![IoT](https://img.shields.io/badge/IoT-Powered-green?style=for-the-badge)
 
-Prerequisites
-- Install a WASI toolchain (wasi-sdk). Typical path: `/opt/wasi-sdk`.
+**Build powerful embedded applications with WebAssembly** 🎯
 
-Quick Start — build a sample
-1. Build the small hello-world sample:
+[Getting Started](#-getting-started) • [API Reference](API_REFERENCE.md) • [Examples](EXAMPLES.md) • [Tutorials](TUTORIALS.md)
 
+</div>
+
+---
+
+## 🌟 What is Akira SDK?
+
+Akira SDK is a **powerful WASM-based framework** for building embedded applications on AkiraOS. It provides a comprehensive API for interacting with hardware peripherals, sensors, displays, and networks - all from the safety and portability of WebAssembly!
+
+### ✨ Key Features
+
+- 🎮 **Display & Input** - Rich graphics and button handling
+- 📡 **RF Communication** - Support for multiple RF chips (nRF24L01, LoRa, CC1101)
+- 🔌 **GPIO & Timers** - Hardware control with event-driven callbacks
+- 📊 **Sensors** - IMU, environmental, and power monitoring
+- 💾 **Storage** - Persistent file storage API
+- 🌐 **Networking** - HTTP and MQTT support
+- ⚡ **Event-Driven** - Efficient callback-based architecture
+- 🔒 **Capability-Based Security** - Fine-grained permission control
+
+---
+
+## 🏗️ Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│         Your WASM Application           │
+│      (Built with Akira SDK)             │
+└─────────────────┬───────────────────────┘
+                  │
+         ┌────────▼────────┐
+         │   Akira API     │
+         │  (akira_api.h)  │
+         └────────┬────────┘
+                  │
+         ┌────────▼────────┐
+         │   AkiraOS       │
+         │   Runtime       │
+         └────────┬────────┘
+                  │
+    ┌─────────────┼─────────────┐
+    │             │             │
+┌───▼───┐    ┌───▼───┐    ┌───▼───┐
+│ GPIO  │    │Display│    │  RF   │
+│Timers │    │ Input │    │Network│
+└───────┘    └───────┘    └───────┘
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- WASM toolchain (Emscripten or WASI SDK)
+- Akira SDK headers
+- AkiraOS-compatible hardware
+
+### Quick Start
+
+1️⃣ **Include the SDK header:**
+```c
+#include "akira_api.h"
+```
+
+2️⃣ **Write your main function:**
+```c
+AKIRA_APP_MAIN() {
+    // Initialize display
+    akira_display_clear(0x0000);  // Black background
+    akira_display_text(10, 10, "Hello Akira! 👋", 0xFFFF);
+    akira_display_flush();
+    
+    // Main event loop
+    while(1) {
+        akira_process_events();
+    }
+    
+    return 0;
+}
+```
+
+3️⃣ **Compile to WASM:**
 ```bash
-cd AkiraSDK/wasm_apps/hello_world
-../../build.sh -o hello_world.wasm main.c
+build.sh -o app.wasm main.c
 ```
 
-2. Build the sensor demo:
+---
 
-```bash
-cd AkiraSDK/wasm_apps/sensor_demo
-../../build.sh -o sensor_demo.wasm main.c
+## 📚 Core Concepts
+
+### 🎯 Event-Driven Architecture
+
+Akira SDK uses an **event-driven model** where your application registers callbacks for various events:
+
+```c
+void on_timer() {
+    akira_log(2, "Timer fired! ⏰");
+}
+
+// Register callback
+akira_register_timer_callback(0, on_timer);
+
+// Process events in main loop
+while(1) {
+    akira_process_events();  // Dispatches events to callbacks
+}
 ```
 
-Notes
-- The SDK is header-only. Apps will have undefined `akira_*` imports that the
-  host runtime must resolve at execution time (this is expected).
-- If you need to test against a local AkiraOS checkout, add an include path:
+### 🔐 Capability-Based Security
 
-```bash
-../../build.sh -I /path/to/Akira/include -o my_app.wasm main.c
-```
+Each API requires specific capabilities in your app manifest:
 
-Using CMake
-- `CMakeLists.txt` provided in samples links an INTERFACE target `akira_api` so
-  CMake projects can call `target_link_libraries(... PRIVATE akira_api)` and
-  get the headers automatically.
+| API | Required Capability |
+|-----|-------------------|
+| Display | `display.write` |
+| Input | `input.read` |
+| GPIO | `gpio.control` |
+| RF | `rf.transceive` |
+| Storage | `storage.read`, `storage.write` |
+| Network | `network.http`, `network.mqtt` |
+| Sensors | `sensor.<type>.read` |
 
-Troubleshooting
-- If `akira_api.h` is not found, ensure you're running `build.sh` from inside
-  a sample folder, or pass `-I` with the path to `include/`.
+### 🔄 Callback Management
 
-Want help?
-- I can add a tiny CI check that builds the samples and verifies they produce
-  wasm artifacts — say the word and I'll add it.
+The SDK supports **up to 64 simultaneous callbacks** across:
+- ⏱️ **16 Timers**
+- 🔌 **256 GPIO pins** (8 ports × 32 pins)
+- 📨 **Unlimited message topics** (within callback limit)
 
-Happy hacking! ✨
-# Akira SDK — WASM App Development Guide 🚀
+---
 
-This `AkiraSDK` folder provides the headers and samples you need to build
-WebAssembly applications for AkiraOS. The SDK is intentionally small and is
-header-only: apps compile against `include/akira_api.h` and the runtime
-supplies implementations (via dynamic native registration). This is the
-only supported SDK usage.
+## 🎨 API Categories
 
-Contents
- - include/akira_api.h — canonical app-facing header
- - wasm_apps/ — sample apps (Makefile + small manifests)
- - build_wasm_app.sh — small helper script to build apps easily
- - CMakeLists.txt — provides a header-only INTERFACE target `akira_api`
+### [📺 Display API](API_REFERENCE.md#display-api)
+Create beautiful UIs with RGB565 graphics
+- Clear, pixel, rectangle, and text drawing
+- Framebuffer management
 
-Prerequisites
- - WASI SDK installed (clang/ld). Typical path: `/opt/wasi-sdk`.
+### [🎮 Input API](API_REFERENCE.md#input-api)
+Handle button presses and user input
+- 10 button types (D-pad, ABXY, power, settings)
+- Event-driven callbacks
 
-Quick Start — recommended workflow
-1. Clone the repo and install WASI SDK.
-2. Build a sample with the helper script (recommended):
+### [📡 RF API](API_REFERENCE.md#rf-api)
+Wireless communication made easy
+- Support for nRF24L01, LoRa, CC1101, and more
+- Send/receive packets with RSSI monitoring
 
-```bash
-cd AkiraSDK/wasm_apps/hello_world
-../../build_wasm_app.sh -o hello_world.wasm main.c
-```
+### [🔌 GPIO & Timer API](API_REFERENCE.md#gpio-and-timer-api)
+Control hardware precisely
+- Register/unregister callbacks
+- Event-driven state changes
 
-3. Or use the sample Makefile (it uses the helper script):
+### [📊 Sensor API](API_REFERENCE.md#sensor-api)
+Read various sensor types
+- IMU (accelerometer + gyroscope)
+- Environmental (temp, humidity, pressure)
+- Power monitoring
 
-```bash
-cd AkiraSDK/wasm_apps/sensor_demo
-make
-```
+### [💾 Storage API](API_REFERENCE.md#storage-api)
+Persistent data storage
+- Read/write files
+- Directory listings
 
-4. Optional CMake flow (CMake sample uses the header-only INTERFACE target):
+### [🌐 Network API](API_REFERENCE.md#network-api)
+Internet connectivity
+- HTTP GET/POST
+- MQTT pub/sub
 
-```bash
-cd AkiraSDK/wasm_apps/hello_world
-mkdir -p build && cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake
-cmake --build .
-```
+### [⚙️ System API](API_REFERENCE.md#system-api)
+System utilities
+- Uptime and memory info
+- Logging and sleep
 
-Build script usage
-- The helper script detects the WASI SDK and sets appropriate flags for
-  libc-builtin builds (-nostdlib, -Wl,--allow-undefined). It also adds
-  `AkiraSDK/include` to include paths.
+---
 
-Header-only details
-- Apps compiled in header-only mode will contain undefined imports for
-  `akira_*` symbols; the host runtime must provide them (that's normal for
-  WAMR libc-builtin). The SDK does not ship function stubs by default.
+## 📖 Documentation Structure
 
-Integrators: runtime registration
-- To expose host functions to WASM apps register a native module using the
-  generic OCRE API: `ocre_register_native_module("akira", symbols, count)`.
-  See `AkiraOS/src/akira/akira_native_exports.c` for an example of registering
-  display, storage, and HTTP helpers.
+- **[API Reference](API_REFERENCE.md)** - Complete API documentation
+- **[Examples](EXAMPLES.md)** - Code examples for common tasks
+- **[Tutorials](TUTORIALS.md)** - Step-by-step guides
+- **[Best Practices](BEST_PRACTICES.md)** - Tips and patterns
+- **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
 
-Samples & Manifests
-- Each sample in `wasm_apps/` contains a `manifest.json` describing required
-  permissions (e.g., gpio, sensor, storage). Make sure the runtime grants
-  those capabilities to the app before executing it.
+---
 
-Testing & CI
-- Add CI that runs a few representative builds (e.g., `hello_world`,
-  `sensor_demo`, `blink_led`) using `build_wasm_app.sh` to catch regressions.
+## 🎯 Example Applications
 
-Contributing samples
-- Add new samples under `wasm_apps/` with:
-  - `main.c`
-  - `manifest.json`
-  - Makefile that uses `../../build_wasm_app.sh`
+Check out these examples to get inspired:
 
-Extras & Troubleshooting
-- If your app can't find `akira_api.h` when using the helper script, ensure
-  you're running it from a sample directory (e.g., `wasm_apps/sensor_demo`) so
-  the script can add the SDK include path.
- - If you need to use a local copy of `akira_api.h` from the AkiraOS tree,
-   add an include path that points to your checkout (for example `-I/path/to/Akira/include`).
+- 🎮 **[Retro Game](EXAMPLES.md#retro-game)** - Simple game with display and input
+- 🌡️ **[Weather Station](EXAMPLES.md#weather-station)** - Sensor reading and display
+- 📡 **[RF Remote](EXAMPLES.md#rf-remote)** - Wireless communication
+- 💾 **[Data Logger](EXAMPLES.md#data-logger)** - Storage and sensors
+- 🌐 **[IoT Dashboard](EXAMPLES.md#iot-dashboard)** - MQTT and display
 
-Vendoring / local testing
-- To test against a local AkiraOS checkout, you can either:
-  - Add an include path when using the helper script:
+---
 
-    ```bash
-    ../../build_wasm_app.sh -I /path/to/Akira/include -o my_app.wasm main.c
-    ```
+## 🤝 Contributing
 
-  - Or, for CMake-based samples, add the AkiraOS include directory to your
-    target and (optionally) pass implementation sources if you want to link
-    a local implementation during development:
+We welcome contributions! Check out our [GitHub repository](https://github.com/drxgoshh/AkiraSDK) to get involved.
 
-    ```cmake
-    target_include_directories(hello-world.wasm PRIVATE /path/to/Akira/include)
-    target_sources(hello-world.wasm PRIVATE /path/to/Akira/src/akira_api.c)
-    target_link_libraries(hello-world.wasm PRIVATE akira_api)
-    ```
+---
 
-  Notes:
-  - The SDK itself remains header-only; these steps are for local testing or
-    development of runtime APIs and are not required for normal app authors.
-  - If you prefer copying headers into the SDK for an isolated test, place
-    `akira_api.h` into `AkiraSDK/include/` (for quick local experiments).
+## 📝 License
 
-------
-If you'd like I can:
-- Add a CI job to verify sample builds (I recommend doing this), or
-- Add a short CONTRIBUTING guide for adding samples.
+Check the repository for licensing information.
 
-Happy hacking! ✨
-# Akira SDK (samples + headers)
+---
 
-This folder contains the Akira SDK used by embedded WebAssembly samples for AkiraOS.
+## 🆘 Support
 
-Design goals (aligned with project-ocre/ocre-sdk):
-- Provide a simple CMake consumable SDK (target: `akira_api`).
-- Include sample WASM apps (Makefile-based and CMake-based examples).
-- Provide a small build helper script at `scripts/build_wasm_app.sh` for Makefile workflows.
+- 📚 [Documentation](API_REFERENCE.md)
+- 🐛 [Issue Tracker](https://github.com/drxgoshh/AkiraSDK/issues)
+- 💬 [Community Forum](#)
 
-Getting started (CMake sample):
+---
 
-1. From a sample's CMake project (e.g. `wasm_apps/hello_world`), add the SDK as a subdirectory:
+<div align="center">
 
-```cmake
-set(AKIRA_SDK_PATH "../../")
-if(NOT EXISTS "${AKIRA_SDK_PATH}/CMakeLists.txt")
-  message(FATAL_ERROR "Akira SDK not found at ${AKIRA_SDK_PATH}")
-endif()
-add_subdirectory(${AKIRA_SDK_PATH} akira-sdk-build)
+**Made with ❤️ for the embedded community**
 
-add_executable(hello-world.wasm main.c)
-target_link_libraries(hello-world.wasm PRIVATE akira_api)
-```
+[⬆ Back to Top](#-akira-sdk-documentation)
 
-Standalone build
------------------
-The SDK is header-only: samples compile against `akira_api.h` and rely on the
-host runtime to provide implementations at execution time (via native module
-registration with OCRE).
-
-2. The SDK also supports Makefile workflows; use `scripts/build_wasm_app.sh` or per-sample Makefiles.
-
-Notes & suggestions
-- Add `CMakeLists.txt` to samples to demonstrate CMake-based builds (WASI toolchain integration).
-- Consider adding an `install()` step and packaging rules later (for system-wide use).
-
-Using AkiraOS
--------------
-If you're developing within the full `AkiraOS` tree you may still consume
-
-## License
-
-The Akira SDK is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
-`akira_api.h` from the OS source tree directly, but `AkiraSDK` itself is
-header-only and does not attempt to link any runtime source files.
+</div>

@@ -18,12 +18,166 @@ extern "C"
 {
 #endif
 
+/* Maximum limits */
+#define AKIRA_MAX_TIMERS 16
+#define AKIRA_MAX_CALLBACKS 64
+
+#define AKIRA_MAX_TOPIC_LEN 128
+#define AKIRA_MAX_PAYLOAD_LEN 128
+#define AKIRA_MAX_CONTENT_TYPE_LEN 64
+
+#define AKIRA_MAX_GPIO_PORTS 8
+#define AKIRA_MAX_GPIO_PINS_PER_PORT 32
+#define AKIRA_MAX_GPIO_PINS 256
+
+
+/**
+ * @brief Timer callback function type
+ */
+typedef void (*timer_callback_func_t)(void);
+
+/**
+ * @brief GPIO callback function type
+ * @param state New GPIO state
+ */
+typedef void (*gpio_callback_func_t)(uint8_t state);
+
+/**
+ * @brief Message callback function type
+ * @param topic The topic of the received message
+ * @param content_type The content type of the message
+ * @param payload The message payload
+ * @param payload_len The length of the payload
+ */
+typedef void (*message_callback_func_t)(const char *topic, const char *content_type, const void *payload, uint32_t payload_len);
+
+/**
+ * @brief Resource types for event handling
+ */
+typedef enum
+{
+    AKIRA_EVENT_TYPE_TIMER,   /**< Timer resource */
+    AKIRA_EVENT_TYPE_GPIO,    /**< GPIO resource */
+    AKIRA_EVENT_TYPE_MESSAGE /**< Message resource */
+} akira_event_type_t;
+
+/**
+ * @brief Structure for event data
+ */
+typedef struct {
+    akira_event_type_t type;
+
+    union {
+        struct {
+            uint32_t timer_id;
+        } timer;
+
+        struct {
+            uint8_t pin;
+            uint8_t port;
+            uint8_t state;
+        } gpio;
+
+        struct {
+            uintptr_t topic;
+            uintptr_t content_type;
+            uintptr_t payload;
+            uint32_t payload_len;
+        } message;
+    } data;
+
+    uintptr_t extra;   // common extra info
+} akira_event_t;
+
+/*===========================================================================*/
+/* Register/Unregister API callbacks                                         */
+/*===========================================================================*/
+
+/**
+ * @brief Register a timer callback for a specific timer ID.
+ * When the timer with this ID fires, the provided callback
+ * will be invoked.
+ *
+ * @param timer_id The ID of the timer
+ * @param callback The function to call when the timer fires
+ * @return 0 on success, negative error code on failure
+ */
+int akira_register_timer_callback(int timer_id, timer_callback_func_t callback);
+
+/**
+ * @brief Register a GPIO callback for a specific pin and port.
+ * When the state of this pin changes, the provided callback
+ * will be invoked.
+ *
+ * @param callback The function to call when the GPIO state changes
+ * @param port The port number
+ * @param pin The pin number
+ * @return 0 on success, negative error code on failure
+ */
+int akira_register_gpio_callback(gpio_callback_func_t callback, int port, int pin);
+
+/**
+ * @brief Register a message callback for a specific topic.
+ * When a message is received on this topic, the provided callback
+ * will be invoked.
+ *
+ * @param callback The function to call when a message is received
+ * @param topic The topic to subscribe to
+ * @return 0 on success, negative error code on failure
+ */
+int akira_register_message_callback(message_callback_func_t callback, const char* topic);
+
+/**
+ * Unregister a timer callback.
+ * After calling this, the specified timer will no longer trigger callbacks.
+ * 
+ * @param timer_id The ID of the timer to unregister
+ * @return 0 on success, negative error code on failure
+ */
+int akira_unregister_timer_callback(int timer_id);
+
+/**
+ * Unregister a GPIO callback.
+ * After calling this, the specified pin will no longer trigger callbacks.
+ * 
+ * @param port The port number
+ * @param pin The pin number
+ * @return 0 on success, negative error code on failure
+ */
+int akira_unregister_gpio_callback(int port, int pin);
+
+/**
+ * Unregister a message callback.
+ * After calling this, messages on the specified topic will no longer
+ * trigger callbacks in this container.
+ * 
+ * @param topic The topic to unregister from
+ * @return 0 on success, negative error code on failure
+ */
+int akira_unregister_message_callback(const char *topic);
+
+/**
+ * @brief Process pending events from the runtime.
+ * Applications should call this function repeatedly in their main loop.
+ * Each call processes up to a maximum number of events to prevent
+ * long blocking operations.
+ */
+void akira_process_events(void);
+
+/**
+ * @brief Get the next event from the runtime event queue.
+ * 
+ * This function is intended for internal use by akira_process_events().
+ * Applications should not call this directly.
+ */
+extern int akira_get_event(akira_event_t *event);
+
+
 /* Compatibility helper for sample entry point */
 #define AKIRA_APP_MAIN() int main(void)
-
-    /*===========================================================================*/
-    /* Display API - Requires: display.write                                     */
-    /*===========================================================================*/
+/*===========================================================================*/
+/* Display API - Requires: display.write                                     */
+/*===========================================================================*/
 
     /**
      * @brief Clear display with solid color
@@ -387,41 +541,6 @@ extern "C"
      * @param message Log message
      */
     void akira_log(int level, const char *message);
-
-    /* ======================================================================== */
-    /* OCRE exported functions (apps can call these directly)                    */
-    /* Only include the commonly-used, exported OCRE runtime functions here.     */
-    /* ======================================================================== */
-
-    /**
-     * @brief Sleep for the specified number of milliseconds
-     */
-    int ocre_sleep(int milliseconds);
-
-    /* Sensor API */
-    int ocre_sensors_init(void);
-    int ocre_sensors_discover(void);
-    int ocre_sensors_open(int sensor_id);
-    int ocre_sensors_get_handle(int index);
-    int ocre_sensors_get_channel_count(int handle);
-    int ocre_sensors_get_channel_type(int handle, int channel);
-    double ocre_sensors_read(int handle, int channel);
-    int ocre_sensors_open_by_name(const char *sensor_name);
-    int ocre_sensors_get_handle_by_name(const char *sensor_name);
-    int ocre_sensors_get_channel_count_by_name(const char *sensor_name);
-    int ocre_sensors_get_channel_type_by_name(const char *sensor_name, int channel);
-    double ocre_sensors_read_by_name(const char *sensor_name, int channel);
-
-    /* GPIO */
-    int ocre_gpio_init(void);
-    int ocre_gpio_configure(int port, int pin, int direction);
-    int ocre_gpio_pin_set(int port, int pin, int state);
-    int ocre_gpio_pin_get(int port, int pin);
-    int ocre_gpio_pin_toggle(int port, int pin);
-
-    /* Messaging */
-    int ocre_publish_message(const char *topic, const char *content_type, const void *payload, uint32_t payload_len);
-    int ocre_subscribe_message(const char *topic);
 
 #ifdef __cplusplus
 }

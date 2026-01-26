@@ -48,6 +48,10 @@ Akira SDK is a **powerful WASM-based framework** for building embedded applicati
          │   AkiraOS       │
          │   Runtime       │
          └────────┬────────┘
+         ┌────────▼────────┐
+         │   AkiraOS       │
+         │   HAL           │
+         └────────┬────────┘
                   │
     ┌─────────────┼─────────────┐
     │             │             │
@@ -70,7 +74,7 @@ Akira SDK is a **powerful WASM-based framework** for building embedded applicati
 ### Quick Start
 
 1️⃣ **Include the SDK header:**
-```c
+```
 #include "akira_api.h"
 ```
 

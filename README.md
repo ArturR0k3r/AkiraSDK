@@ -1,4 +1,4 @@
-# 🚀 Akira SDK Documentation
+# Akira SDK
 
 <div align="center">
 
@@ -6,236 +6,263 @@
 ![WASM](https://img.shields.io/badge/WASM-Ready-purple?style=for-the-badge)
 ![IoT](https://img.shields.io/badge/IoT-Powered-green?style=for-the-badge)
 
-**Build powerful embedded applications with WebAssembly** 🎯
+**Build embedded WebAssembly applications for AkiraOS**
 
-[Getting Started](#-getting-started) • [API Reference](API_REFERENCE.md) • [Troubleshooting](TROUBLESHOOTING.md) • [Best Practices](BEST_PRACTICES.md)
+[API Reference](docs/API_REFERENCE.md) • [Best Practices](docs/BEST_PRACTICES.md) • [Troubleshooting](docs/TROUBLESHOOTING.md) • [Sample Apps](wasm_apps/)
 
 </div>
 
 ---
 
-## 🌟 What is Akira SDK?
+## What is Akira SDK?
 
-Akira SDK is a **powerful WASM-based framework** for building embedded applications on AkiraOS. It provides a comprehensive API for interacting with hardware peripherals, sensors, displays, and networks - all from the safety and portability of WebAssembly!
+Akira SDK provides the C header (`include/akira_api.h`) and sample WASM apps for building applications on AkiraOS. Apps compile to a standalone `.wasm` binary and run inside the WAMR runtime with access to display, GPIO, sensors, BLE, HID, networking, and more — all in 64 KB of linear memory.
 
-### ✨ Key Features
+### Features
 
-- 🎮 **Display & Input** - Rich graphics and button handling
-- 📡 **RF Communication** - Support for multiple RF chips (nRF24L01, LoRa, CC1101)
-- 🔌 **GPIO & Timers** - Hardware control with event-driven callbacks
-- 📊 **Sensors** - IMU, environmental, and power monitoring
-- 💾 **Storage** - Persistent file storage API
-- 🌐 **Networking** - HTTP and MQTT support
-- ⚡ **Event-Driven** - Efficient callback-based architecture
-- 🔒 **Capability-Based Security** - Fine-grained permission control
-
----
-
-## 🏗️ Architecture Overview
-
-```
-┌─────────────────────────────────────────┐
-│         Your WASM Application           │
-│      (Built with Akira SDK)             │
-└─────────────────┬───────────────────────┘
-                  │
-         ┌────────▼────────┐
-         │   Akira API     │
-         │  (akira_api.h)  │
-         └────────┬────────┘
-                  │
-         ┌────────▼────────┐
-         │   AkiraOS       │
-         │   Runtime       │
-         └────────┬────────┘
-         ┌────────▼────────┐
-         │   AkiraOS       │
-         │   HAL           │
-         └────────┬────────┘
-                  │
-    ┌─────────────┼─────────────┐
-    │             │             │
-┌───▼───┐    ┌───▼───┐    ┌───▼───┐
-│ GPIO  │    │Display│    │  RF   │
-│Timers │    │ Input │    │Network│
-└───────┘    └───────┘    └───────┘
-```
+- **Display** — RGB565 graphics: shapes, text (two sizes), bitmaps, progress bars, rounded rects
+- **GPIO** — Simple read/write with configurable pull-ups/pull-downs
+- **Sensors** — IMU, temperature, pressure, humidity, magnetometer, power monitoring
+- **Timers** — Polling timers with elapsed-time queries
+- **BLE** — Arduino-style GATT server with event-loop API
+- **HID** — Keyboard, mouse, gamepad, and consumer (media) keys over BLE or USB
+- **Storage** — Sandboxed per-app file system with FD-based API
+- **Networking** — Async TCP/UDP via shared-memory ring buffers
+- **IPC** — In-process pub/sub messaging between apps
+- **UART / I2C / PWM** — Low-level peripheral access
+- **Power Management** — Battery status, sleep modes, wake sources
+- **Capability-based security** — Every API group requires an explicit manifest capability
 
 ---
 
-## 🚀 Getting Started
+## Repository Structure
+
+```
+AkiraSDK/
+├── include/
+│   └── akira_api.h        # All API declarations — include this in your app
+├── scripts/
+│   └── embed_manifest.py  # Embeds manifest.json into the WASM binary
+├── wasm_apps/
+│   ├── build.sh           # Build all apps (or a single named app)
+│   ├── Makefile           # Master Makefile (make / make clean / make install)
+│   ├── hello_world/       # Minimal printf example
+│   ├── ble_led/           # BLE GATT LED control
+│   ├── macro_pad/         # 5-button HID macro pad
+│   ├── imu_3d/            # 3D orientation visualiser (display + sensor)
+│   ├── cube3d/            # 3D wireframe cube
+│   ├── compass/           # Magnetometer compass
+│   ├── display_test/      # Display primitives test
+│   ├── gpio/              # GPIO read/write demo
+│   ├── imu_timer_test/    # IMU + timer demo
+│   ├── inclinometer/      # Tilt-angle display
+│   ├── logic_analyzer/    # GPIO logic analyser
+│   ├── net_echo/          # TCP echo client
+│   ├── net_server/        # TCP echo server
+│   ├── storage_test/      # Storage read/write/list demo
+│   ├── supervisor/        # App launcher / supervisor UI
+│   └── tetris/            # Tetris game
+└── docs/
+    ├── API_REFERENCE.md   # Complete API documentation
+    ├── BEST_PRACTICES.md  # Patterns and guidelines
+    └── TROUBLESHOOTING.md # Common issues and solutions
+```
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────┐
+│      Your WASM Application   │
+│        (main.c)              │
+└────────────┬─────────────────┘
+             │  #include "akira_api.h"
+             │  extern int display_rect(...);
+             │  extern int sensor_read(...);
+             ▼
+┌──────────────────────────────┐
+│   AkiraOS WAMR Runtime       │
+│  (resolves extern symbols    │
+│   from the env module)       │
+└────────────┬─────────────────┘
+             ▼
+┌──────────────────────────────┐
+│   AkiraOS HAL / Zephyr RTOS  │
+│  GPIO │ Display │ BLE │ Net  │
+└──────────────────────────────┘
+```
+
+Apps are **header-only consumers** — `akira_api.h` declares all functions as `extern`. The runtime provides them at execution time. Do not link any C implementation files.
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- WASM toolchain (Emscripten or WASI SDK)
-- Akira SDK headers
-- AkiraOS-compatible hardware
+- [WASI SDK](https://github.com/WebAssembly/wasi-sdk/releases) installed at `/opt/wasi-sdk` (or set `WASI_SDK`)
+- AkiraOS-compatible hardware (or `native_sim` for host testing)
 
-### Quick Start
+### Quick install of WASI SDK
 
-1️⃣ **Include the SDK header:**
+```bash
+WASI_VERSION=24
+wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION}.0-x86_64-linux.tar.gz
+sudo tar xvf wasi-sdk-${WASI_VERSION}.0-x86_64-linux.tar.gz -C /opt
+sudo ln -sf /opt/wasi-sdk-${WASI_VERSION}.0 /opt/wasi-sdk
 ```
-#include "akira_api.h"
-```
 
-2️⃣ **Write your main function:**
+### Hello World
+
 ```c
-AKIRA_APP_MAIN() {
-    // Initialize display
-    akira_display_clear(0x0000);  // Black background
-    akira_display_text(10, 10, "Hello Akira! 👋", 0xFFFF);
-    akira_display_flush();
-    
-    // Main event loop
-    while(1) {
-        akira_process_events();
-    }
-    
+// main.c
+#include "akira_api.h"
+
+int main(void) {
+    printf("Hello from AkiraOS WASM!");
     return 0;
 }
 ```
 
-3️⃣ **Compile to WASM:**
 ```bash
-build.sh -o app.wasm main.c
+cd wasm_apps/hello_world
+make
+# produces hello_world.wasm
+```
+
+### Minimal manifest
+
+```json
+{
+  "name": "hello_world",
+  "version": "1.0.0",
+  "capabilities": [],
+  "memory_quota": 65536
+}
+```
+
+The manifest is embedded into the WASM binary by `scripts/embed_manifest.py` (called automatically by each app's Makefile).
+
+---
+
+## Building Apps
+
+### Build all apps
+
+```bash
+cd wasm_apps
+./build.sh            # or: make
+```
+
+### Build a specific app
+
+```bash
+cd wasm_apps
+./build.sh hello_world
+# or:
+make -C hello_world
+```
+
+### Build flags
+
+All apps use these standard flags:
+
+```
+-nostdlib                    # No standard library / no WASI imports
+-Wl,--no-entry               # No _start entry point
+-Wl,--export=main            # export main() as WASM entry
+-Wl,--allow-undefined        # Allow env module imports from runtime
+-Wl,--strip-all              # Strip symbols for minimal size
+-z stack-size=4096           # 4 KB stack
+-Wl,--initial-memory=65536   # One 64 KB WASM page
+-Wl,--max-memory=65536
+-I../../include              # akira_api.h
 ```
 
 ---
 
-## 📚 Core Concepts
+## Writing a New App
 
-### 🎯 Event-Driven Architecture
+1. Create a directory under `wasm_apps/my_app/`
+2. Write `main.c` — entry point is `int main(void)`
+3. Create `manifest.json` with required capabilities
+4. Copy a `Makefile` from an existing app and update `APP_NAME`
 
-Akira SDK uses an **event-driven model** where your application registers callbacks for various events:
+### Minimal app template
 
 ```c
-void on_timer() {
-    akira_log(2, "Timer fired! ⏰");
-}
+#include "akira_api.h"
 
-// Register callback
-akira_register_timer_callback(0, on_timer);
+int main(void) {
+    // Initialize
+    display_clear(COLOR_BLACK);
+    display_text(10, 10, "My App", COLOR_WHITE);
+    display_flush();
 
-// Process events in main loop
-while(1) {
-    akira_process_events();  // Dispatches events to callbacks
+    // Poll loop
+    int t = timer_create();
+    timer_start(t);
+
+    while (1) {
+        if (timer_elapsed(t) >= 1000) {
+            timer_start(t);
+            // do periodic work
+        }
+        delay(10000);  // yield 10 ms
+    }
+
+    return 0;
 }
 ```
 
-### 🔐 Capability-Based Security
+### Key rules
 
-Each API requires specific capabilities in your app manifest:
-
-| API | Required Capability |
-|-----|-------------------|
-| Display | `display.write` |
-| Input | `input.read` |
-| GPIO | `gpio.control` |
-| RF | `rf.transceive` |
-| Storage | `storage.read`, `storage.write` |
-| Network | `network.http`, `network.mqtt` |
-| Sensors | `sensor.<type>.read` |
-
-### 🔄 Callback Management
-
-The SDK supports **up to 64 simultaneous callbacks** across:
-- ⏱️ **16 Timers**
-- 🔌 **256 GPIO pins** (8 ports × 32 pins)
-- 📨 **Unlimited message topics** (within callback limit)
+- **No `#include <stdio.h>`** or other stdlib headers — use `akira_api.h`'s `printf()` instead
+- **No WASI imports** — all functions come from the `env` module provided by WAMR
+- **64 KB limit** — use `-Os`, avoid floating-point where possible, prefer static buffers
+- **`delay(microseconds)`** — always yield in your poll loop (not `sleep()`)
+- **Sensor values × 1000** — divide by 1000 to get physical units
 
 ---
 
-## 🎨 API Categories
+## Capability Reference
 
-### [📺 Display API](API_REFERENCE.md#display-api)
-Create beautiful UIs with RGB565 graphics
-- Clear, pixel, rectangle, and text drawing
-- Framebuffer management
-
-### [🎮 Input API](API_REFERENCE.md#input-api)
-Handle button presses and user input
-- 10 button types (D-pad, ABXY, power, settings)
-- Event-driven callbacks
-
-### [📡 RF API](API_REFERENCE.md#rf-api)
-Wireless communication made easy
-- Support for nRF24L01, LoRa, CC1101, and more
-- Send/receive packets with RSSI monitoring
-
-### [🔌 GPIO & Timer API](API_REFERENCE.md#gpio-and-timer-api)
-Control hardware precisely
-- Register/unregister callbacks
-- Event-driven state changes
-
-### [📊 Sensor API](API_REFERENCE.md#sensor-api)
-Read various sensor types
-- IMU (accelerometer + gyroscope)
-- Environmental (temp, humidity, pressure)
-- Power monitoring
-
-### [💾 Storage API](API_REFERENCE.md#storage-api)
-Persistent data storage
-- Read/write files
-- Directory listings
-
-### [🌐 Network API](API_REFERENCE.md#network-api)
-Internet connectivity
-- HTTP GET/POST
-- MQTT pub/sub
-
-### [⚙️ System API](API_REFERENCE.md#system-api)
-System utilities
-- Uptime and memory info
-- Logging and sleep
+| Capability | Required for |
+|------------|-------------|
+| `display.write` | `display_*()` |
+| `gpio.read` | `gpio_read()`, `gpio_configure()` |
+| `gpio.write` | `gpio_write()`, `gpio_configure()` |
+| `sensor.read` | `sensor_read()` |
+| `timer` | `timer_*()` |
+| `ble` | `ble_*()` |
+| `hid` | `hid_*()` |
+| `storage.read` | `storage_open(O_READ)`, `storage_list()` |
+| `storage.write` | `storage_open(O_WRITE/APPEND)`, `storage_delete()` |
+| `network.*` | `net_*()` |
+| `ipc` | `msg_*()` |
+| `app.control` | `app_start()`, `app_stop()`, `app_list()` |
+| `app.switch` | `app_switch()` |
+| `rf.transceive` | `rf_*()` |
+| `uart` | `uart_*()` |
+| `i2c` | `i2c_*()` |
+| `pwm` | `pwm_*()` |
+| `power.read` | `power_get_*()` |
+| `power.control` | `power_set_*()`, `power_wake_*()` |
 
 ---
 
-## 📖 Documentation Structure
+## Documentation
 
-- **[API Reference](API_REFERENCE.md)** - Complete API documentation
-- **[Examples](EXAMPLES.md)** - Code examples for common tasks
-- **[Tutorials](TUTORIALS.md)** - Step-by-step guides
-- **[Best Practices](BEST_PRACTICES.md)** - Tips and patterns
-- **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
-
----
-
-## 🎯 Example Applications
-
-Check out these examples to get inspired:
-
-- 🎮 **[Retro Game](EXAMPLES.md#retro-game)** - Simple game with display and input
-- 🌡️ **[Weather Station](EXAMPLES.md#weather-station)** - Sensor reading and display
-- 📡 **[RF Remote](EXAMPLES.md#rf-remote)** - Wireless communication
-- 💾 **[Data Logger](EXAMPLES.md#data-logger)** - Storage and sensors
-- 🌐 **[IoT Dashboard](EXAMPLES.md#iot-dashboard)** - MQTT and display
+| Document | Description |
+|----------|-------------|
+| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Complete function signatures and examples |
+| [docs/BEST_PRACTICES.md](docs/BEST_PRACTICES.md) | Patterns, memory management, power efficiency |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Build errors, hardware issues, common mistakes |
+| [wasm_apps/README.md](wasm_apps/README.md) | Sample app overview and build instructions |
 
 ---
 
-## 🤝 Contributing
+## License
 
-We welcome contributions! Check out our [GitHub repository](https://github.com/drxgoshh/AkiraSDK) to get involved.
-
----
-
-## 📝 License
-
-Check the repository for licensing information.
-
----
-
-## 🆘 Support
-
-- 📚 [Documentation](API_REFERENCE.md)
-- 🐛 [Issue Tracker](https://github.com/drxgoshh/AkiraSDK/issues)
-- 💬 [Community Forum](#)
-
----
-
-<div align="center">
-
-**Made with ❤️ for the embedded community**
-
-[⬆ Back to Top](#-akira-sdk-documentation)
-
-</div>
+Apache-2.0 — see [LICENSE](LICENSE).

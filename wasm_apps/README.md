@@ -1,408 +1,225 @@
 # AkiraOS WASM Applications
 
-This directory contains WebAssembly (WASM) applications for AkiraOS running on the OCRE runtime with WAMR (WebAssembly Micro Runtime) backend.
+Sample WebAssembly applications for AkiraOS running on the WAMR runtime.
+
+---
 
 ## Available Apps
 
-### 1. Hello World (`hello_world/`)
-Basic "Hello, World!" application demonstrating:
-- App initialization
-- Logging output
-- System sleep
+| App | Capabilities | Description |
+|-----|-------------|-------------|
+| `hello_world` | — | Minimal `printf` example |
+| `display_test` | `display.write` | Display primitives: shapes, text, colors |
+| `gpio` | `gpio.read`, `gpio.write` | GPIO read/write demo |
+| `imu_3d` | `display.write`, `sensor.read` | 3D board orientation using accelerometer |
+| `imu_timer_test` | `sensor.read`, `timer` | IMU polling with timer |
+| `inclinometer` | `display.write`, `sensor.read` | Tilt-angle display |
+| `compass` | `display.write`, `sensor.read` | Magnetometer compass |
+| `cube3d` | `display.write` | Rotating 3D wireframe cube |
+| `ble_led` | `ble`, `gpio.write`, `gpio.read` | BLE GATT LED control |
+| `macro_pad` | `display.write`, `gpio.read`, `hid`, `timer` | 5-button HID macro pad |
+| `storage_test` | `storage.read`, `storage.write` | File read/write/list/delete |
+| `net_echo` | `network.*` | TCP echo client |
+| `net_server` | `network.*` | TCP echo server |
+| `logic_analyzer` | `gpio.read`, `display.write`, `timer` | GPIO logic analyser |
+| `supervisor` | `display.write`, `app.control`, `ipc` | App launcher UI |
+| `tetris` | `display.write`, `gpio.read`, `timer` | Tetris game |
 
-### 2. Blink LED (`blink_led/`)
-LED blinking demonstration showing:
-- GPIO control
-- Timing loops
-- Hardware interaction
-
-### 3. Sensor Demo (`sensor_demo/`)
-Sensor reading application featuring:
-- Reading accelerometer/gyroscope
-- Data formatting
-- Periodic updates
-
-### 4. Display Graphics (`display_graphics/`) ⭐ NEW
-Interactive graphics demo with:
-- Bouncing ball animation
-- Color gradients and patterns
-- Pixel manipulation
-- 60 FPS rendering
-- Score display
-
-### 5. Storage Demo (`storage_demo/`) ⭐ NEW
-File system operations showcase:
-- Reading and writing files
-- File listing
-- Size checking
-- Delete operations
-- Data persistence (high scores, configs)
-
-### 6. GUI Demo (`gui_demo/`) ⭐ NEW - LVGL Graphics
-Modern graphical user interface featuring:
-- Buttons with event callbacks
-- Slider widget with value display
-- Smooth animations (fade in/out)
-- Real-time status updates
-- Professional UI styling
-- 100 FPS interactive experience
-
-## Architecture Overview
-
-- **Runtime**: OCRE Container Supervisor (WAMR backend)
-- **WAMR Mode**: libc-builtin (NOT WASI) with `env` module imports
-- **Memory**: 64KB linear memory per app (one WebAssembly page), backed by PSRAM on ESP32-S3
-- **Entry Point**: `_start` function for new apps, `main` for legacy apps
-- **Build System**: WASI SDK + libc-builtin toolchain
+---
 
 ## Prerequisites
 
-You need the **WASI SDK** to build these apps. See [APP_DEVELOPMENT.md](../../docs/APP_DEVELOPMENT.md) for installation instructions.
+**WASI SDK** must be installed:
 
-Quick install:
 ```bash
-# Download and install WASI SDK
 WASI_VERSION=24
 wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION}.0-x86_64-linux.tar.gz
 sudo tar xvf wasi-sdk-${WASI_VERSION}.0-x86_64-linux.tar.gz -C /opt
 sudo ln -sf /opt/wasi-sdk-${WASI_VERSION}.0 /opt/wasi-sdk
 ```
 
-## Building WASM Apps
+Override the path: `export WASI_SDK=/path/to/your/wasi-sdk`
 
-### Quick Start
+---
 
-**Option 1: Using the build script** (Recommended)
+## Building
+
+### All apps
+
 ```bash
-cd hello_world
-../../build_wasm_app.sh -o hello_world.wasm main.c
+./build.sh          # script
+# or
+make                # Makefile
 ```
 
-**Option 2: Using Make**
+### A specific app
+
+```bash
+./build.sh hello_world
+# or
+make -C hello_world
+```
+
+### Per-app make
+
 ```bash
 cd hello_world
 make
+make clean
 ```
 
-**Option 3: Using CMake** (hello_world only)
-```bash
-cd hello_world
-./build.sh
+---
+
+## App Structure
+
+Each app directory contains:
+
+```
+hello_world/
+├── main.c          # Application source
+├── Makefile        # Per-app build rules
+└── manifest.json   # App metadata and capabilities
 ```
 
-### Build Script: `build_wasm_app.sh`
-
-Comprehensive build tool for all AkiraOS WASM apps:
-
-```bash
-# Basic usage
-./build_wasm_app.sh main.c
-
-# With custom output and optimization
-./build_wasm_app.sh -o my_app.wasm -O3 main.c
-
-# With includes and defines
-./build_wasm_app.sh -I ./include -D DEBUG main.c utils.c
-
-# Custom stack size (8KB instead of 4KB)
-./build_wasm_app.sh -m 8 main.c
-
-# Verbose output
-./build_wasm_app.sh -v main.c
-
-# Show help
-./build_wasm_app.sh -h
-```
-
-**Features:**
-- Automatic WASI SDK detection
-- Configurable optimization levels (-Os, -O0, -O1, -O2, -O3)
-- Include path and preprocessor define support
-- Memory constraint validation
-- Automatic AkiraOS include path handling
-- Colored output with progress indicators
-
-## Available Samples
-
-### hello_world
-
-**Description**: Minimal "Hello World" using putchar()
-
-**Files**:
-- `main.c`: Direct putchar implementation (no stdio)
-- `Makefile`: Simple direct build
-- `CMakeLists.txt`: CMake-based build
-- `manifest.json`: App metadata
-
-**Build**:
-```bash
-cd hello_world
-make              # Direct make
-../../build_wasm_app.sh main.c  # Using build script
-```
-
-**Size**: ~382 bytes (fully stripped)
-
-### sensor_demo
-
-**Description**: Sensor reading example using AkiraOS APIs
-
-**Files**:
-- `main.c`: Demonstrates OCRE sensor API usage
-- `Makefile`: Standard build with akira_api.h
-- `manifest.json`: Sensor permissions configured
-- `../include/akira_api.h`: AkiraOS API header
-
-**Build**:
-```bash
-cd sensor_demo
-make
-../../build_wasm_app.sh main.c
-```
-
-**Permissions**: Requires `sensor` permission in manifest
-
-### blink_led
-
-**Description**: GPIO/LED control example
-
-**Files**:
-- `main.c`: Demonstrates OCRE GPIO API usage
-- `Makefile`: Standard build with akira_api.h
-- `manifest.json`: GPIO permissions configured
-- `../include/akira_api.h`: AkiraOS API header
-
-**Build**:
-```bash
-cd blink_led
-make
-../../build_wasm_app.sh main.c
-```
-
-**Permissions**: Requires `gpio` permission in manifest
-
-## Important: Libc-Builtin vs WASI Mode
-
-**AkiraOS WASM apps must run in libc-builtin mode.** This means:
-
-❌ **Do NOT include**:
-- `#include <stdio.h>`
-- `#include <stdlib.h>`
-- `#include <string.h>`
-- WASI-specific headers
-
-✅ **DO use**:
-- Direct runtime calls (e.g., `putchar()`)
-- AkiraOS APIs via `akira_api.h`
-- External function declarations for env module
-
-**Why?** The WAMR runtime on ESP32 only provides the `env` module with basic I/O. WASI imports cause undefined reference errors at load time.
-
-### Correct Hello World
-```c
-// hello_world.c - CORRECT
-#include <stdint.h>
-
-// Declare external env module function
-extern int putchar(int c);
-
-int main(void) {
-    putchar('H');
-    putchar('i');
-    return 0;
-}
-```
-
-### Wrong Approach
-```c
-// hello_world.c - WRONG
-#include <stdio.h>  // ❌ This pulls in WASI imports
-
-int main(void) {
-    printf("Hi\n");  // ❌ Will fail at load time
-    return 0;
-}
-```
-
-## Compiler Flags Explained
-
-### Standard Compilation
-```bash
--Os              # Optimize for size (critical for 64KB limit)
--nostdlib        # NO standard library = NO WASI imports
--Wall -Wextra    # Enable all warnings for quality
--Wno-unknown-attributes  # Accept some OCRE-specific attributes
-```
-
-### Standard Linking
-```bash
--Wl,--no-entry                      # No default _start entry
--Wl,--export=main                   # Export main as entry point
--Wl,--allow-undefined               # Allow env module imports
--Wl,--strip-all                     # Remove symbols (minimal size)
--z stack-size=4096                  # 4KB stack
--Wl,--initial-memory=65536          # 64KB initial memory
--Wl,--max-memory=65536              # 64KB max (one WASM page)
-```
-
-## Manifest Configuration
-
-Each WASM app requires a `manifest.json`:
+### `manifest.json` fields
 
 ```json
 {
-    "name": "my_app",
-    "version": "1.0.0",
-    "description": "Application description",
-    "author": "Your Name",
-    "entry": "main",              // Entry function (always "main")
-    "heap_kb": 16,                // Heap allocation (in WAMR)
-    "stack_kb": 4,                // Stack allocation (in WAMR)
-    "permissions": ["sensor"],    // Required permissions
-    "restart": {
-        "enabled": true,
-        "max_retries": 5,
-        "delay_ms": 2000
-    }
+  "name": "my_app",
+  "version": "1.0.0",
+  "capabilities": ["display.write", "sensor.read"],
+  "memory_quota": 65536
 }
 ```
 
-**Key Fields**:
-- `entry`: Must be `"main"` (not `_start`)
-- `heap_kb`: Stack/heap space in WAMR (separate from WASM linear memory)
-- `stack_kb`: Stack space within WAMR heap
-- `permissions`: Required capabilities (sensor, gpio, storage, etc.)
+- **`capabilities`** — list of required permissions (see capability table in main README)
+- **`memory_quota`** — WASM linear memory limit in bytes (max 65536 = one page)
 
-## Typical Application Structure
+The manifest is automatically embedded into the `.wasm` binary by `make` using `../scripts/embed_manifest.py`.
 
-```
-my_app/
-├── main.c              # Application code
-├── utils.c             # Helper functions
-├── Makefile            # Build configuration
-├── manifest.json       # App metadata
-└── README.md           # Documentation
-```
+---
 
-### Minimal main.c
+## Writing Apps
+
+### Include the SDK header
+
 ```c
-#include <stdint.h>
+#include "akira_api.h"  // relative path from app directory is ../../include/akira_api.h
+```
 
-// Declare external functions
-extern int putchar(int c);
+### Entry point
 
+```c
 int main(void) {
-    putchar('H');
-    putchar('i');
-    putchar('\n');
+    // your code
     return 0;
 }
 ```
 
-### Using AkiraOS APIs
-```c
-#include <stdint.h>
-#include "akira_api.h"  // AkiraOS WAMR API definitions
+There is no `AKIRA_APP_MAIN()` macro — plain `main()` is the entry point.
 
-int main(void) {
-    ocre_sensors_init();      // Example OCRE sensor setup
-    // Application code
-    return 0;
-}
+### Logging
+
+```c
+printf("value: %d", my_int);  // defined in akira_api.h, no #include <stdio.h>
 ```
+
+### Yielding
+
+```c
+delay(10000);   // 10 000 µs = 10 ms
+delay(1000000); // 1 second
+```
+
+Always call `delay()` in your main loop to avoid spinning the CPU at 100%.
+
+### No stdlib
+
+Do **not** include standard library headers:
+
+```c
+// WRONG — pulls in WASI imports
+#include <stdio.h>
+#include <string.h>
+
+// CORRECT — akira_api.h provides printf() and inline helpers
+#include "akira_api.h"
+```
+
+---
+
+## Build Flags (reference)
+
+All apps use these flags (defined in each app's Makefile):
+
+```makefile
+CFLAGS  = -O2 -nostdlib
+CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
+CFLAGS += -I../../include
+
+LDFLAGS  = -Wl,--no-entry
+LDFLAGS += -Wl,--export=main
+LDFLAGS += -Wl,--allow-undefined
+LDFLAGS += -Wl,--strip-all
+LDFLAGS += -z stack-size=4096
+LDFLAGS += -Wl,--initial-memory=65536
+LDFLAGS += -Wl,--max-memory=65536
+```
+
+---
 
 ## Deploying to Device
 
-### Via SD Card
-```bash
-# With SD card mounted at /media/user/AKIRA
-make install SD_MOUNT=/media/user/AKIRA
-```
+### Via AkiraOS shell
 
-### Via HTTP Upload
-```bash
-curl -X POST -F "app=@hello_world/hello_world.wasm" http://<device-ip>/api/apps/install
-```
-
-### Via Shell
-Copy the `.wasm` file to device storage, then:
 ```
 akira> app scan
 akira> app start hello_world
 ```
 
+### Via HTTP upload
+
+```bash
+curl -X POST -F "app=@hello_world.wasm" http://<device-ip>/api/apps/install
+```
+
+### Via SD card
+
+```bash
+make install SD_MOUNT=/media/$USER/AKIRA
+```
+
+---
+
 ## Memory Layout
 
 ```
-Linear Memory (64KB, one WASM page):
-┌─────────────────────────────┐
-│  Stack (4KB from top)       │  64KB-4KB = 60KB available
-├─────────────────────────────┤
-│                             │
-│  Heap (remaining space)     │  ~60KB for malloc/static data
-│                             │
-├─────────────────────────────┤
-│  Data & BSS                 │
-└─────────────────────────────┘
+Linear Memory (64 KB = one WASM page)
+┌──────────────────────────────────┐ 65536
+│  Stack        (4 KB from top)    │
+├──────────────────────────────────┤ 61440
+│                                  │
+│  Heap + static data (~60 KB)     │
+│                                  │
+├──────────────────────────────────┤
+│  Data & BSS                      │
+└──────────────────────────────────┘ 0
 ```
 
-## Performance Tips
+Tips for keeping size down:
+- Use `-Os` for size-optimized builds
+- Avoid floating-point — pulls in significant polyfill code; use fixed-point (`× 1000`) instead
+- Prefer `static` buffers over `malloc()`
+- Strip with `-Wl,--strip-all`
 
-1. **Use -Os instead of -O0** for best code size
-2. **Limit includes** - each header adds code
-3. **Inline simple functions** to avoid call overhead
-4. **Use uint32_t/uint16_t** instead of int for predictable sizing
-5. **Avoid floating point** if possible (significant code bloat)
+---
 
 ## Troubleshooting
 
-### "failed to link import function (env, putchar)"
-**Cause**: Missing function declaration or wrong header includes
-**Fix**: Declare functions as `extern` without including stdio.h
+See [docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md) for detailed solutions. Quick checklist:
 
-### "region `dram0_0_seg' overflowed"
-**Cause**: WASM binary too large or stack size incorrect
-**Fix**: Use `-Os`, reduce functionality, check Makefile flags
-
-### "allocate linear memory failed"
-**Cause**: WAMR heap too small or PSRAM not configured
-**Fix**: Check ESP32-S3 CONFIG_MEMC=y and PSRAM heap size
-
-### Binary too large (>64KB)
-**Cause**: Excessive code or data
-**Fix**: Reduce functionality, use better compiler flags, check for floating point
-
-## Directory Structure
-
-```
-wasm_apps/
-├── include/
-│   └── akira_api.h      # AkiraOS API header
-├── scripts/
-│   └── build_wasm_app.sh # Common build script
-├── hello_world/
-│   ├── main.c           # Source code
-│   ├── Makefile         # Build rules
-│   ├── manifest.json    # App metadata
-│   └── CMakeLists.txt   # CMake build (optional)
-├── sensor_demo/
-│   ├── main.c
-│   ├── Makefile
-│   └── manifest.json
-├── blink_led/
-│   ├── main.c
-│   ├── Makefile
-│   └── manifest.json
-├── logic_analyzer/
-│   ├── main.c
-│   ├── CMakeLists.txt
-│   └── manifest.json
-└── README.md            # This file
-```
-
-## References
-
-- **OCRE SDK**: https://github.com/project-ocre/ocre-sdk
-- **WAMR**: https://github.com/bytecodealliance/wasm-micro-runtime
-- **WASI**: https://wasi.dev
-- **WebAssembly**: https://webassembly.org
+- **Black screen** → did you call `display_flush()`?
+- **Undefined reference** → check `-Wl,--allow-undefined` and correct include path
+- **`sensor_read()` == `AKIRA_SENSOR_ERROR`** → sensor not present or missing capability
+- **Binary too large** → use `-Os`, avoid FP, check static array sizes
+- **App crashes** → check for large on-stack buffers; move to `static`

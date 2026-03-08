@@ -182,6 +182,92 @@ All apps use these standard flags:
 
 ---
 
+## AOT Compilation (Optional)
+
+By default, apps run as **interpreter bytecode** (`.wasm`). AkiraOS also supports
+**Ahead-of-Time (AOT) compilation** via `wamrc` — the WAMR AOT compiler — which
+cross-compiles a `.wasm` bytecode file into a **native machine-code `.aot` binary**
+that executes directly on the target CPU.
+
+### Interpreter vs AOT
+
+| | `.wasm` (Interpreter) | `.aot` (AOT) |
+|---|---|---|
+| Execution | WAMR interprets bytecode | Native machine code |
+| Speed | Baseline | **10–50× faster** |
+| Portability | Runs on any AkiraOS target | One `.aot` per architecture |
+| Use case | Development, testing, all targets | Compute-heavy apps, games, UI |
+| File required | `app.wasm` | `app-<target>.aot` |
+
+### When to use AOT
+
+- **Games / 3D rendering** (cube3d, tetris, imu_3d) — clear benefit from native speed
+- **Signal processing / math-heavy apps** — interpreter overhead eliminated
+- **Battery-sensitive deployments** — fewer cycles per instruction
+- Keep using `.wasm` for development iteration and multi-target deployments
+
+### Supported AOT targets
+
+| Target alias | Architecture | Board |
+|---|---|---|
+| `xtensa` (default) | Xtensa LX7 | ESP32-S3, Akira Console |
+| `thumb` | Cortex-M33 | nRF54L15DK |
+| `thumbv7em` | Cortex-M7 | STM32 (`b_u585i_iot02a`, `steval_stwinbx1`) |
+| `riscv32` | RISC-V 32-bit | ESP32-C3 |
+| `x86_64` | x86-64 | `native_sim` |
+
+### Building wamrc
+
+`wamrc` is part of the WAMR source tree (included as a submodule in AkiraOS):
+
+```bash
+cd modules/wasm-micro-runtime/wamr-compiler
+cmake . -DWAMR_BUILD_PLATFORM=linux
+make
+sudo cp wamrc /usr/local/bin/   # or set WAMRC=/path/to/wamrc
+```
+
+### AOT compilation workflow
+
+```bash
+# Step 1 — build .wasm normally
+cd wasm_apps
+./build.sh            # produces bin/*.wasm
+
+# Step 2 — AOT-compile all apps for ESP32-S3 (default target)
+./build.sh aot
+# produces bin/*-xtensa.aot
+
+# Step 2 — AOT-compile for a specific target
+./build.sh aot thumb           # nRF54L15
+./build.sh aot thumbv7em       # STM32
+./build.sh aot riscv32         # ESP32-C3
+
+# Or with make:
+make aot                       # xtensa (default)
+make aot-xtensa
+make aot-thumb
+make aot AOT_TARGET=riscv32
+make aot WAMRC=/custom/path/wamrc AOT_TARGET=x86_64
+```
+
+### Deploying an AOT binary
+
+Upload the `.aot` file to the AkiraOS storage in place of (or alongside) the
+`.wasm` file. AkiraOS/WAMR detects the file type at load time and executes it
+as native code. The manifest is still embedded in the same way.
+
+```bash
+# Copy to SD card / storage
+cp bin/tetris-xtensa.aot /media/$USER/AKIRA/apps/tetris.aot
+```
+
+> **Note:** A `.aot` binary is architecture-specific. Do not use an `xtensa.aot`
+> on an ARM board — it will fail to load. Keep the `.wasm` as the portable
+> fallback for cross-target deployments.
+
+---
+
 ## Writing a New App
 
 1. Create a directory under `wasm_apps/my_app/`

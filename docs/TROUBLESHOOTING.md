@@ -467,3 +467,61 @@ timer_free(t);
 - [ ] All file descriptors closed after use
 - [ ] Manifest `capabilities` list matches every API used
 - [ ] `delay()` present in all polling loops
+
+---
+
+## AOT Compilation Issues
+
+### `wamrc: command not found`
+
+`wamrc` is not in PATH. Build it from the WAMR source:
+
+```bash
+cd /path/to/AkiraOS/modules/wasm-micro-runtime/wamr-compiler
+cmake . -DWAMR_BUILD_PLATFORM=linux
+make
+sudo cp wamrc /usr/local/bin/
+# or: export WAMRC=/path/to/wamrc
+```
+
+### `wamrc: unsupported target 'xtensa'`
+
+The locally-built `wamrc` wasn't compiled with Xtensa LLVM backend support. The
+AkiraOS WAMR fork (`ArturR0k3r/wasm-micro-runtime`, branch `AkiraOS_Patch`)
+includes the Xtensa backend. Make sure you're building from that submodule, not
+a generic WAMR checkout.
+
+### `.aot` file fails to load on device
+
+**Possible causes:**
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| "invalid AOT file" | Wrong target arch | Rebuild with correct `AOT_TARGET` |
+| "incompatible version" | wamrc/runtime version mismatch | Rebuild wamrc from same WAMR commit as AkiraOS firmware |
+| "failed to instantiate" | Unsupported AOT feature | Use `.wasm` fallback; file an issue |
+
+Always verify which WAMR commit AkiraOS is built against and use the `wamrc`
+from that same commit:
+
+```bash
+cd modules/wasm-micro-runtime
+git log --oneline -1   # shows the commit
+```
+
+### AOT binary is larger than .wasm
+
+This is expected. AOT binaries contain native machine code (typically 2–5× the
+`.wasm` size) but execute without interpreter overhead.
+
+Use `--size-level=1` and `--opt-level=3` (both set by default in `build.sh` and
+the Makefile) to balance size vs speed.
+
+### App works in .wasm but crashes in .aot
+
+The AOT-compiled binary runs native code, so memory-safety bugs that were masked
+by the interpreter (e.g., out-of-bounds static arrays, stack overflow) may crash
+differently. Debug with the `.wasm` version first, then test the `.aot`.
+
+**Common fix:** increase `-z stack-size` if stack-heavy functions segfault only
+in AOT mode — but remember the 64 KB total limit.

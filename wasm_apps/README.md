@@ -168,6 +168,64 @@ LDFLAGS += -Wl,--max-memory=65536
 
 ---
 
+## AOT Compilation (Optional)
+
+Apps ship as `.wasm` bytecode and run in the WAMR interpreter by default. For
+performance-critical apps (games, 3D, signal processing), you can optionally
+AOT-compile them to native machine code using `wamrc`.
+
+### AOT targets
+
+| Command | Architecture | Board |
+|---------|-------------|-------|
+| `./build.sh aot` | Xtensa LX7 (default) | ESP32-S3, Akira Console |
+| `./build.sh aot thumb` | Cortex-M33 | nRF54L15DK |
+| `./build.sh aot thumbv7em` | Cortex-M7 | STM32 |
+| `./build.sh aot riscv32` | RISC-V 32 | ESP32-C3 |
+| `./build.sh aot x86_64` | x86-64 | native_sim |
+
+### AOT workflow
+
+```bash
+# 1. Build .wasm first
+./build.sh            # produces bin/*.wasm
+
+# 2. AOT-compile to native .aot binaries
+./build.sh aot                     # default: xtensa (ESP32-S3)
+./build.sh aot thumb               # nRF54L15
+
+# Equivalent with make:
+make aot                           # xtensa
+make aot-xtensa
+make aot-thumb
+make aot AOT_TARGET=riscv32
+```
+
+Output files are placed in `bin/` alongside the `.wasm` files:
+```
+bin/tetris.wasm           ← portable interpreter bytecode
+bin/tetris-xtensa.aot     ← native code for ESP32-S3
+bin/tetris-thumb.aot      ← native code for nRF54L15
+```
+
+### Building wamrc
+
+`wamrc` is in the WAMR submodule (already part of AkiraOS):
+
+```bash
+cd /path/to/AkiraOS/modules/wasm-micro-runtime/wamr-compiler
+cmake . -DWAMR_BUILD_PLATFORM=linux
+make
+sudo cp wamrc /usr/local/bin/
+```
+
+Or point directly: `WAMRC=/path/to/wamrc ./build.sh aot`
+
+> See [docs/BEST_PRACTICES.md](../docs/BEST_PRACTICES.md#aot-compilation) for
+> guidance on when to use AOT vs interpreter.
+
+---
+
 ## Deploying to Device
 
 ### Via AkiraOS shell

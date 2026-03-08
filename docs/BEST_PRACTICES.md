@@ -432,3 +432,73 @@ Before deploying an app, verify:
 - [ ] Resources closed/freed on exit paths
 - [ ] Constants used instead of magic numbers
 - [ ] Manifest `capabilities` list is complete
+
+---
+
+## AOT Compilation
+
+### When to use AOT
+
+Use AOT-compiled (`.aot`) binaries instead of bytecode (`.wasm`) when:
+
+- **frame rate matters** — 3D apps (cube3d, imu_3d), games (tetris), animations
+- **math-heavy inner loops** — trigonometry, matrix maths, signal processing
+- **battery life is a concern** — fewer CPU cycles per instruction
+- **final production firmware** — ship fast binaries to end users
+
+Keep using `.wasm` during development (faster iteration, architecture-independent).
+
+### AOT vs interpreter
+
+| Concern | `.wasm` | `.aot` |
+|---------|---------|--------|
+| Build time | Fast | Adds wamrc step |
+| Debug iteration | Best | Rebuild .wasm first, then re-AOT |
+| Target portability | Single binary runs everywhere | One `.aot` per CPU |
+| Execution speed | Baseline | 10–50× faster |
+| File per deployment | `app.wasm` | `app-xtensa.aot` (board-specific) |
+
+### AOT workflow
+
+```bash
+# Step 1 — build .wasm (standard flow)
+cd wasm_apps
+./build.sh                      # all apps → bin/*.wasm
+
+# Step 2 — AOT-compile to native binary
+./build.sh aot                  # ESP32-S3 (default xtensa)
+./build.sh aot thumb            # nRF54L15 (Cortex-M33)
+./build.sh aot thumbv7em        # STM32 (Cortex-M7)
+./build.sh aot riscv32          # ESP32-C3 (RISC-V 32)
+
+# Output: bin/<app>-<target>.aot
+```
+
+### Building wamrc (one-time setup)
+
+```bash
+cd /path/to/AkiraOS/modules/wasm-micro-runtime/wamr-compiler
+cmake . -DWAMR_BUILD_PLATFORM=linux
+make
+sudo cp wamrc /usr/local/bin/
+```
+
+### Performance pattern for AOT apps
+
+The same source code runs in both modes. There is nothing to change in `main.c`
+to benefit from AOT — just upload the `.aot` file instead of `.wasm`. The WAMR
+runtime detects the file format at load time.
+
+For maximum AOT benefit, structure compute-heavy work in tight loops:
+
+```c
+// Good: tight inner loop — AOT eliminates interpreter overhead entirely
+static void matrix_multiply(float a[9], float b[9], float out[9]) {
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) {
+            out[i*3+j] = 0;
+            for (int k = 0; k < 3; k++)
+                out[i*3+j] += a[i*3+k] * b[k*3+j];
+        }
+}
+```

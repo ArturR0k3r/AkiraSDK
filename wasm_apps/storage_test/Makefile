@@ -1,6 +1,6 @@
-# hello_world - AkiraOS WASM Application Makefile
+# storage_test - AkiraOS WASM Application Makefile
 
-APP_NAME   = hello_world
+APP_NAME   = storage_test
 WASI_SDK  ?= /opt/wasi-sdk
 CC         = $(WASI_SDK)/bin/clang
 

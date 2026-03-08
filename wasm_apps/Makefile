@@ -16,7 +16,9 @@
 WASI_SDK ?= /opt/wasi-sdk
 
 # Sample directories
-SAMPLES = hello_world sensor_demo blink_led hid_keyboard_demo
+SAMPLES = ble_led compass cube3d display_test gpio hello_world \
+          imu_3d imu_timer_test inclinometer logic_analyzer \
+          macro_pad net_echo net_server storage_test supervisor tetris
 
 # SD card mount point for install target
 SD_MOUNT ?= /media/$(USER)/AKIRA

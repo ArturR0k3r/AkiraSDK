@@ -1,6 +1,6 @@
-# hello_world - AkiraOS WASM Application Makefile
+# imu_3d - AkiraOS WASM Application Makefile
 
-APP_NAME   = hello_world
+APP_NAME   = imu_3d
 WASI_SDK  ?= /opt/wasi-sdk
 CC         = $(WASI_SDK)/bin/clang
 

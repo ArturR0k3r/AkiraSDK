@@ -1,22 +1,31 @@
-/*
- * @copyright Copyright © contributors to Project Ocre,
- * which has been established as Project Ocre a Series of LF Projects, LLC
- * SPDX-License-Identifier: Apache-2.0
- *
- * AkiraOS Hello World WASM App
+/**
+ * @file hello_world.c
+ * @brief Simple "Hello World" WASM application for AkiraOS
+ * 
+ * Minimal example demonstrating printfging API.
+ * 
+ * @copyright Copyright (c) 2026 AkiraOS Contributors  
+ * @license Apache-2.0
  */
 
-int log(int level, const char *message);
-
-/* Log levels */
-#define LOG_ERROR 0
-#define LOG_WARN 1
-#define LOG_INFO 2
-#define LOG_DEBUG 3
+#include "akira_api.h"
 
 int main(void)
 {
-    log(LOG_INFO, "Hello, World from AkiraOS WASM App!");
-
+    // printf messages at different levels
+    printf( "=================================");
+    printf( "  Hello from AkiraOS WASM!      ");
+    printf( "=================================");
+    printf( "");
+    
+    printf( "[INFO]  This is an info message");
+    printf( "[WARN]  This is a warning message");
+    printf( "[ERROR] This is an error message");
+    
+    printf( "");
+    printf( "WASM app executed successfully!");
+    printf( "SDK Version: 1.0.0");
+    printf( "Runtime: AkiraOS WAMR");
+    
     return 0;
 }

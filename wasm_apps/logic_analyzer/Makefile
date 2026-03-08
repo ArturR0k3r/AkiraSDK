@@ -1,14 +1,17 @@
-WASI_SDK ?= /opt/wasi-sdk
-CC = $(WASI_SDK)/bin/clang
-OBJDUMP = $(WASI_SDK)/bin/wasm-objdump
+# logic_analyzer - AkiraOS WASM Application Makefile
 
-# Include path for akira_api.h
-INCLUDE = -I../include
+APP_NAME   = logic_analyzer
+WASI_SDK  ?= /opt/wasi-sdk
+CC         = $(WASI_SDK)/bin/clang
 
-CFLAGS = -Os -nostdlib $(INCLUDE)
+TARGET  = $(APP_NAME).wasm
+SRCS    = main.c
+
+CFLAGS  = -O2 -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
+CFLAGS += -I../../include
 
-LDFLAGS = -Wl,--no-entry
+LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main
 LDFLAGS += -Wl,--allow-undefined
 LDFLAGS += -Wl,--strip-all
@@ -16,30 +19,17 @@ LDFLAGS += -z stack-size=4096
 LDFLAGS += -Wl,--initial-memory=65536
 LDFLAGS += -Wl,--max-memory=65536
 
-TARGET = logic_analyzer.wasm
-SRCS = main.c
-
 all: $(TARGET)
+	@if [ -f manifest.json ] && [ -f ../../scripts/embed_manifest.py ]; then \
+		python3 ../../scripts/embed_manifest.py $(TARGET) manifest.json $(TARGET) && \
+		echo "  ✓ Manifest embedded"; \
+	fi
 
 $(TARGET): $(SRCS)
-	# Prefer the SDK helper script which will include SDK stubs when available
-ifeq ($(wildcard ../../build_wasm_app.sh),)
-ifeq ($(wildcard ../../build.sh),)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
-else
-	../../build.sh -o $@ $(SRCS)
-endif
-else
-	../../build_wasm_app.sh -o $@ $(SRCS)
-endif
 	@echo "✓ Built: $(TARGET)"
-	@ls -la $(TARGET)
-
-info: $(TARGET)
-	@echo "=== WASM Module Info ==="
-	$(OBJDUMP) -x $(TARGET) | head -60
 
 clean:
 	rm -f $(TARGET)
 
-.PHONY: all clean info
+.PHONY: all clean

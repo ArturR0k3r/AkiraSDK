@@ -1,6 +1,6 @@
-# hello_world - AkiraOS WASM Application Makefile
+# ble_led - AkiraOS WASM Application Makefile
 
-APP_NAME   = hello_world
+APP_NAME   = ble_led
 WASI_SDK  ?= /opt/wasi-sdk
 CC         = $(WASI_SDK)/bin/clang
 

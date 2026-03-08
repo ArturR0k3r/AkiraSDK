@@ -1,8 +1,10 @@
 {
-  "name": "hello_world",
+  "name": "ble_led",
   "version": "1.0.0",
   "capabilities": [
-    "input.read"
+    "ble",
+    "gpio.write",
+    "gpio.read"
   ],
   "memory_quota": 65536
 }

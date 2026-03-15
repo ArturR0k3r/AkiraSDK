@@ -36,6 +36,10 @@ AOT_FLAGS_riscv32  := --target=riscv32 --cpu=generic-rv32 --target-abi=ilp32
 AOT_FLAGS_x86_64   := --target=x86_64
 
 # Sample directories
+# Note: retro/ apps (NES, GB, SMS, etc.) are NOT listed here.
+# They are built using the separate rom_to_wasm.py tool:
+#   python3 retro/tools/rom_to_wasm.py game.nes -o game.wasm
+# See retro/README.md for full instructions.
 SAMPLES = ble_led compass cube3d display_test gpio hello_world \
           imu_3d imu_timer_test inclinometer logic_analyzer \
           macro_pad net_echo net_server storage_test supervisor tetris

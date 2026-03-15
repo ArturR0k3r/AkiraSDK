@@ -1,0 +1,11 @@
+{
+  "name": "nes_game",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "input.read",
+    "app.switch"
+  ],
+  "memory_quota": 262144
+}

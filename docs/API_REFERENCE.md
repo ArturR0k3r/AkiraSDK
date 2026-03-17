@@ -1056,6 +1056,7 @@ Prefer **static buffers** over dynamic allocation in embedded WASM apps — no h
 | Capability | Required for |
 |------------|-------------|
 | `display.write` | All display functions |
+| `input.read` | Button and touch input events |
 | `gpio.read` | `gpio_read()`, `gpio_configure()` |
 | `gpio.write` | `gpio_write()`, `gpio_configure()` |
 | `sensor.read` | `sensor_read()` |

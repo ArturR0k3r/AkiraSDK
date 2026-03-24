@@ -15,7 +15,7 @@
  * Capabilities: display.write, gpio.read, hid
  */
 
-#include "include/akira_api.h"
+#include "../include/akira_api.h"
 
 /* ── Button pins (gpio0, ACTIVE_HIGH, PULL_DOWN) ───────────────────────── */
 #define PIN_UP    4

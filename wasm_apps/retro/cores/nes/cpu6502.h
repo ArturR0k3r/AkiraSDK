@@ -28,24 +28,22 @@ typedef struct {
     uint8_t  y;        /**< Y index register     */
     uint8_t  p;        /**< Processor status     */
     int      cycles;   /**< Cycles used by last instruction */
+    uint8_t *ram;      /**< Direct WRAM pointer for fast stack/ZP access */
+    const uint8_t **rom_pages; /**< 4 × 8KB PRG-ROM page ptrs (from mapper) */
+    uint8_t *sram;     /**< Direct SRAM pointer for code execution from $6000-$7FFF */
 } CPU6502;
 
-/** Memory read callback  — return byte at @p addr */
-typedef uint8_t (*cpu_read_fn )(uint16_t addr, void *ctx);
-/** Memory write callback — write @p val to @p addr */
-typedef void    (*cpu_write_fn)(uint16_t addr, uint8_t val, void *ctx);
-
 /** Reset: read reset vector and initialise registers. */
-void cpu6502_reset(CPU6502 *cpu, cpu_read_fn rd, void *ctx);
+void cpu6502_reset(CPU6502 *cpu, void *ctx);
 
 /**
  * Execute one instruction.
  * @return Number of CPU cycles consumed.
  */
-int  cpu6502_step (CPU6502 *cpu, cpu_read_fn rd, cpu_write_fn wr, void *ctx);
+int  cpu6502_step (CPU6502 *cpu, void *ctx);
 
 /** Trigger a Non-Maskable Interrupt. */
-void cpu6502_nmi  (CPU6502 *cpu, cpu_read_fn rd, cpu_write_fn wr, void *ctx);
+void cpu6502_nmi  (CPU6502 *cpu, void *ctx);
 
 /** Trigger a maskable IRQ (honours I flag). */
-void cpu6502_irq  (CPU6502 *cpu, cpu_read_fn rd, cpu_write_fn wr, void *ctx);
+void cpu6502_irq  (CPU6502 *cpu, void *ctx);

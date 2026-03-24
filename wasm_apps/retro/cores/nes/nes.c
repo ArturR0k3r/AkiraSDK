@@ -15,12 +15,21 @@
  * @license Apache-2.0
  */
 #include "nes.h"
+#include <string.h>
 
-/* ── CPU memory bus callbacks ────────────────────────────────────────── */
+/* ── CPU memory bus ──────────────────────────────────────────────────
+ * Non-static: called directly from cpu6502.c via extern declarations
+ * to avoid WASM call_indirect overhead (function-pointer elimination). */
 
-static uint8_t cpu_read(uint16_t addr, void *ctx)
+uint8_t nes_cpu_read(uint16_t addr, void *ctx)
 {
     NES *n = (NES *)ctx;
+
+    if (addr >= 0x8000u)
+        return n->mapper.prg_page[(addr >> 13) & 3][addr & 0x1FFFu];
+
+    if (addr >= 0x6000u)
+        return n->sram[addr - 0x6000u];
 
     if (addr < 0x2000u)
         return n->wram[addr & 0x7FFu]; /* 2KB WRAM mirrored */
@@ -40,13 +49,10 @@ static uint8_t cpu_read(uint16_t addr, void *ctx)
         n->ctrl_shift[1] <<= 1;
         return bit | 0x40u;
     }
-    if (addr >= 0x4000u && addr < 0x4020u)
-        return 0; /* APU stub */
-
-    return mapper_cpu_read(&n->mapper, addr);
+    return 0; /* APU stub */
 }
 
-static void cpu_write(uint16_t addr, uint8_t val, void *ctx)
+void nes_cpu_write(uint16_t addr, uint8_t val, void *ctx)
 {
     NES *n = (NES *)ctx;
 
@@ -64,7 +70,7 @@ static void cpu_write(uint16_t addr, uint8_t val, void *ctx)
         /* Inline copy — reads must go through the bus */
         uint8_t page[256];
         for (int i = 0; i < 256; i++)
-            page[i] = cpu_read((uint16_t)(base + i), ctx);
+            page[i] = nes_cpu_read((uint16_t)(base + i), ctx);
         ppu_oam_dma(&n->ppu, page);
         /* DMA stalls the CPU for 513 (or 514 on odd PPU cycles) cycles.
          * Signal this to nes_step_frame so the PPU sees the full penalty. */
@@ -83,10 +89,15 @@ static void cpu_write(uint16_t addr, uint8_t val, void *ctx)
         }
         return;
     }
-    if (addr >= 0x4000u && addr < 0x4020u)
-        return; /* APU stub */
-
-    mapper_cpu_write(&n->mapper, addr, val);
+    if (addr >= 0x6000u && addr < 0x8000u) {
+        n->sram[addr - 0x6000u] = val;
+        return;
+    }
+    if (addr >= 0x4020u) {
+        mapper_cpu_write(&n->mapper, addr, val);
+        return;
+    }
+    /* APU stub: ignore writes to $4000-$4013, $4015, $4017 */
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -94,8 +105,7 @@ static void cpu_write(uint16_t addr, uint8_t val, void *ctx)
 int nes_init(NES *nes, const uint8_t *rom, uint32_t rom_size)
 {
     /* Zero all fields */
-    uint8_t *p = (uint8_t *)nes;
-    for (int i = 0; i < (int)sizeof(NES); i++) p[i] = 0;
+    memset(nes, 0, sizeof(NES));
 
     /* Initialise mapper */
     if (mapper_init(&nes->mapper, rom, (int)rom_size) != 0)
@@ -104,8 +114,11 @@ int nes_init(NES *nes, const uint8_t *rom, uint32_t rom_size)
     /* Initialise PPU with mapper and framebuffer */
     ppu_init(&nes->ppu, &nes->mapper, nes->fb);
 
-    /* Initialise CPU and trigger reset sequence */
-    cpu6502_reset(&nes->cpu, cpu_read, nes);
+    /* Initialise CPU — set direct RAM/ROM pointers for fast access */
+    nes->cpu.ram = nes->wram;
+    nes->cpu.rom_pages = (const uint8_t **)nes->mapper.prg_page;
+    nes->cpu.sram = nes->sram;
+    cpu6502_reset(&nes->cpu, nes);
 
     return 0;
 }
@@ -120,24 +133,45 @@ void nes_step_frame(NES *nes)
 {
     int frame_done = 0;
     while (!frame_done) {
-        /* Check for PPU NMI */
+        int total_cycles = 0;
+
+        /* Check for PPU NMI. */
         if (nes->ppu.nmi_pending) {
             nes->ppu.nmi_pending = 0;
-            cpu6502_nmi(&nes->cpu, cpu_read, cpu_write, nes);
+            cpu6502_nmi(&nes->cpu, nes);
+            total_cycles += 7;
         }
 
-        /* Check for mapper IRQ (e.g. MMC3 scanline counter) */
-        if (mapper_irq_pending(&nes->mapper))
-            cpu6502_irq(&nes->cpu, cpu_read, cpu_write, nes);
+        /* Check for mapper IRQ (e.g. MMC3 scanline counter). */
+        if (nes->mapper.irq_pending && !(nes->cpu.p & P_I)) {
+            nes->mapper.irq_pending = 0;
+            cpu6502_irq(&nes->cpu, nes);
+            total_cycles += 7;
+        }
 
-        /* Run one CPU instruction */
-        int cycles = cpu6502_step(&nes->cpu, cpu_read, cpu_write, nes);
+        /* Batch 8 CPU instructions per loop iteration.
+         * Reduces loop overhead vs single-step dispatch.
+         * Worst case NMI/IRQ delay: ~24 cycles (imperceptible). */
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
 
-        /* Account for OAM DMA stall cycles (set in cpu_write on $4014) */
-        cycles += nes->dma_stall;
-        nes->dma_stall = 0;
-
-        /* Advance PPU; it returns 1 when a frame has been completed */
-        frame_done = ppu_run(&nes->ppu, cycles);
+        /* Accumulate PPU dots inline (PPU runs 3× CPU clock). */
+        nes->ppu.dots += total_cycles * 3;
+        if (nes->ppu.dots >= 341)
+            frame_done = ppu_run(&nes->ppu, 0);
     }
 }

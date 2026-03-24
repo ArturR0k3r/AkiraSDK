@@ -34,6 +34,18 @@ typedef struct {
     uint8_t        chr_ram[8192]; /**< 8 KB CHR-RAM (used when chr_banks==0)*/
     int            irq_pending;   /**< Mapper is asserting the /IRQ line   */
 
+    /** Pre-computed PRG-ROM page pointers (4 × 8 KB windows).
+     *  Indexed as: prg_page[(addr >> 13) & 3][addr & 0x1FFF]
+     *  Updated by mapper writes; avoids per-read dispatch.             */
+    const uint8_t *prg_page[4];
+
+    /** Pre-computed CHR page pointers (8 × 1 KB windows).
+     *  Indexed as: chr_page[addr >> 10][addr & 0x3FF]
+     *  Updated by mapper writes; avoids per-read dispatch.
+     *  For Mapper 9 (MMC2 latch-based) this is NOT used; the latch
+     *  side-effect requires going through mapper_ppu_read().           */
+    const uint8_t *chr_page[8];
+
     /** Mapper-private state (zero-initialised on mapper_init) */
     union {
         /** Mapper 1 — MMC1 / SxROM */

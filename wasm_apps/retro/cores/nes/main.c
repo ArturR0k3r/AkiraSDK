@@ -160,14 +160,9 @@ int main(void)
     display_flush();
 
     int settings_held = 0;
+    int frame_count = 0;
 
-    /* Loading-dot state — shown while PPU rendering is not yet enabled. */
-    const int DOT_X0  = 108;
-    const int DOT_Y   = 165;
-    const int DOT_W   =   8;
-    const int DOT_GAP =  12;
-    int boot_dot    = 0;
-    int boot_frames = 0;
+    printf("[NES] Init OK — entering main loop\n");
 
     while (1) {
         /* ── Read input ─────────────────────────────────────────────── */
@@ -193,45 +188,32 @@ int main(void)
             }
             if (choice == MENU_RESTART) {
                 nes_init(&nes, rom_data, rom_size);
-                /* Redraw loading screen and reset dot counter */
                 display_clear(0x0000);
-                display_text_large(80, 100, "NES", 0xFFFF);
-                display_text_large(140, 100, "EMULATOR", 0xFFFF);
-                display_text(90, 140, "Loading ROM...", 0xFFFF);
                 display_rect(0, 0, NES_OFFSET_X, DISP_H, 0x0000);
                 display_rect(NES_OFFSET_X + NES_W, 0, NES_OFFSET_X, DISP_H, 0x0000);
                 display_flush();
-                boot_dot = 0;
-                boot_frames = 0;
+                frame_count = 0;
+                printf("[NES] Restarted\n");
             }
-            /* MENU_RESUME: just continue */
             settings_held = 0;
             continue;
         }
         settings_held = settings_now;
 
         /* ── Run one NES frame ──────────────────────────────────────── */
+        int skip = (frame_count % 3) != 0;  /* render 1 of 3 frames */
+        nes.ppu.skip_render = (uint8_t)skip;
         nes_step_frame(&nes);
+        frame_count++;
 
-        /* ── Display output ─────────────────────────────────────────── */
-        if (nes.ppu.mask & (MASK_SHOW_BG | MASK_SHOW_SP)) {
+        /* ── Display output (skip 2 of 3 frames for ~3× speed) ───── */
+        if (!skip) {
             display_bitmap(NES_OFFSET_X, NES_OFFSET_Y,
                            NES_W, NES_H,
                            nes.fb, NES_FB_BYTES);
             display_flush();
-            /* Yield once per frame so the Zephyr shell thread (same
-             * priority 14) remains responsive without adding sleep time. */
-            delay(0);
-        } else {
-            boot_frames++;
-            if ((boot_frames & 7) == 0) {
-                int x = DOT_X0 + boot_dot * DOT_GAP;
-                display_rect(x, DOT_Y, DOT_W, DOT_W, 0xFFFF);
-                display_flush();
-                boot_dot = (boot_dot + 1) % 8;
-            }
-            delay(8000);   /* no large SPI flush here \u2192 keep WiFi fed */
         }
+        //delay(0);  // Disabled: frameskip already controls speed; kept for optional timing tuning.
     }
 
     return 0;

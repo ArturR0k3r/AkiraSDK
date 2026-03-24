@@ -16,7 +16,7 @@
  * Build: ./build_wasm_apps.sh imu_3d
  */
 
-#include "include/akira_api.h"
+#include "../include/akira_api.h"
 
 /* ---------------------------------------------------------------------------
  * Fixed-point helpers

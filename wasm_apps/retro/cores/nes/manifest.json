@@ -5,7 +5,10 @@
     "display.write",
     "gpio.read",
     "input.read",
-    "app.switch"
+    "app.switch",
+    "timer",
+    "storage.read",
+    "storage.write"
   ],
   "memory_quota": 262144
 }

@@ -73,6 +73,10 @@ typedef struct {
     /* Pending signals */
     int      nmi_pending;/**< Set when NMI should fire              */
 
+    /* Frameskip: when set, skip pixel rendering but still track timing
+     * and sprite-0 hit detection so game logic proceeds correctly.    */
+    uint8_t  skip_render;
+
     /* Output frame buffer (RGB565, NES_W × NES_H pixels) */
     uint16_t *fb;
 } PPU;

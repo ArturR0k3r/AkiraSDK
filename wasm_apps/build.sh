@@ -73,6 +73,7 @@ build_app() {
         -Wl,--max-memory=65536 \
         -I"${SDK_ROOT}/include" \
         -O2 \
+        -Wno-incompatible-library-redeclaration \
         -o "$output_file" \
         "$source_file"
 

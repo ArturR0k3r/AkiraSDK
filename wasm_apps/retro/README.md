@@ -1,25 +1,37 @@
 # AkiraOS Retro Game Emulation
 
 Run classic console game ROMs on AkiraOS hardware.  A ROM file is compiled
-into a self-contained `.wasm` binary that can be deployed like any other
-AkiraOS app — via USB, BLE, or SD card.
+into a self-contained `.aot` binary (Ahead-Of-Time compiled native code)
+that can be deployed like any other AkiraOS app — via USB, BLE, or SD card.
+
+> **WASM vs AOT** — ROM files can also be compiled to `.wasm` for interpreter
+> execution, but AOT binaries run **10–50× faster** and are the recommended
+> format for real hardware.
 
 ## Quick Start
 
 ```bash
-# Convert a ROM to a deployable WASM binary
-python3 tools/rom_to_wasm.py tetris.nes -o tetris.wasm
+# Convert a ROM to a deployable AOT binary (recommended)
+python3 tools/rom_to_aot.py tetris.nes -o tetris.aot
 
-# Deploy tetris.wasm to AkiraOS (SD card example)
-cp tetris.wasm /media/$USER/AKIRA/apps/
+# Deploy to AkiraOS (SD card example)
+cp tetris.aot /media/$USER/AKIRA/apps/
 
 # The app appears in the supervisor launcher and can be started normally
+```
+
+### WASM-only (interpreter)
+
+```bash
+# If you only need a .wasm file (slower, no wamrc required)
+python3 tools/rom_to_wasm.py tetris.nes -o tetris.wasm
 ```
 
 ## Requirements
 
 - [WASI SDK](https://github.com/WebAssembly/wasi-sdk/releases) installed at
   `/opt/wasi-sdk` (or specify `--wasi-sdk /path/to/wasi-sdk`)
+- [wamrc](https://github.com/nicogig/AkiraOS) AOT compiler (for `.aot` builds)
 - Python 3.6+
 - AkiraOS hardware with PSRAM (ESP32-S3 recommended)
 
@@ -52,6 +64,45 @@ cp tetris.wasm /media/$USER/AKIRA/apps/
 
 ## Tool Usage
 
+### rom_to_aot.py (recommended)
+
+Two-stage pipeline: ROM → WASM → AOT native binary.
+
+```
+python3 tools/rom_to_aot.py <rom_file> [options]
+
+Options:
+  -o, --output <file>      Output AOT file (default: <rom_name>.aot)
+  -p, --platform <name>    Platform: auto|nes (default: auto)
+  -n, --name <name>        App name in manifest
+  --wasi-sdk <path>        Path to WASI SDK (default: /opt/wasi-sdk)
+  --wamrc <path>           Path to wamrc binary (default: auto-detect)
+  --target <arch>          AOT target architecture (default: xtensa)
+  --cpu <cpu>              AOT target CPU (default: esp32s3)
+  --opt-level <0-3>        Optimization level (default: 2)
+  --size-level <0-3>       Size optimization level (default: 2)
+  --keep-wasm              Keep intermediate .wasm file
+  -v, --verbose            Verbose output
+```
+
+#### AOT Examples
+
+```bash
+# Auto-detect platform, compile to AOT
+python3 tools/rom_to_aot.py tetris.nes
+
+# Keep the intermediate .wasm file
+python3 tools/rom_to_aot.py galaga.nes -o galaga.aot --keep-wasm
+
+# Maximum speed (larger binary)
+python3 tools/rom_to_aot.py mario.nes --opt-level=3 --size-level=0
+
+# Custom wamrc path, verbose output
+python3 tools/rom_to_aot.py mario.nes --wamrc ~/tools/wamrc -v
+```
+
+### rom_to_wasm.py (interpreter only)
+
 ```
 python3 tools/rom_to_wasm.py <rom_file> [options]
 
@@ -64,7 +115,7 @@ Options:
   -v, --verbose            Verbose output
 ```
 
-### Examples
+#### WASM Examples
 
 ```bash
 # Auto-detect platform from file extension
@@ -144,5 +195,6 @@ retro/
 ├── roms/
 │   └── nes/                    Your .nes ROM files go here
 └── tools/
+    ├── rom_to_aot.py           ROM → AOT packaging tool (recommended)
     └── rom_to_wasm.py          ROM → WASM packaging tool
 ```

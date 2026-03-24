@@ -40,6 +40,7 @@ typedef struct {
     Mapper   mapper;
 
     uint8_t  wram[2048];    /**< 2KB CPU work RAM                  */
+    uint8_t  sram[8192];    /**< 8KB PRG-RAM / battery-backed SRAM */
 
     /* Controller shift registers */
     uint8_t  ctrl_latch;    /**< 1 while $4016 strobe is high      */

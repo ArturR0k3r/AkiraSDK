@@ -21,7 +21,7 @@ TARGET  = $(GAME).wasm
 
 SRCS    = main.c nes.c cpu6502.c ppu.c mapper.c $(ROM_DATA)
 
-CFLAGS  = -O2 -nostdlib
+CFLAGS  = -O3 -flto -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
 CFLAGS += -I$(CURDIR) -I../../../../include
 

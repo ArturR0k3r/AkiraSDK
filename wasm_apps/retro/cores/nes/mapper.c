@@ -45,6 +45,206 @@ static inline const uint8_t *chr8(const Mapper *m, int b)
     return m->chr_rom + (b % m->chr_banks) * 8192;
 }
 
+/* ── Pre-computed PRG page pointers ───────────────────────────────────
+ * Called from mapper_init and every PRG bank-switch write to update
+ * the 4 × 8 KB page pointers (prg_page[0..3]).  Reads from $8000+
+ * then just index: m->prg_page[(addr >> 13) & 3][addr & 0x1FFF].   */
+
+static void update_prg_pages(Mapper *m)
+{
+    switch (m->id) {
+    case 0:
+    case 3: /* CNROM only switches CHR, PRG is NROM */
+        m->prg_page[0] = prg16(m, 0);
+        m->prg_page[1] = prg16(m, 0) + 0x2000;
+        if (m->prg_banks <= 1) {
+            m->prg_page[2] = m->prg_page[0];
+            m->prg_page[3] = m->prg_page[1];
+        } else {
+            m->prg_page[2] = prg16(m, 1);
+            m->prg_page[3] = prg16(m, 1) + 0x2000;
+        }
+        break;
+    case 1: {
+        int mode = (m->s.mmc1.ctrl >> 2) & 3;
+        int bank = m->s.mmc1.prg & 0x0F;
+        if (mode <= 1) {
+            int b = bank & ~1;
+            m->prg_page[0] = prg16(m, b);
+            m->prg_page[1] = prg16(m, b) + 0x2000;
+            m->prg_page[2] = prg16(m, b + 1);
+            m->prg_page[3] = prg16(m, b + 1) + 0x2000;
+        } else if (mode == 2) {
+            m->prg_page[0] = prg16(m, 0);
+            m->prg_page[1] = prg16(m, 0) + 0x2000;
+            m->prg_page[2] = prg16(m, bank);
+            m->prg_page[3] = prg16(m, bank) + 0x2000;
+        } else { /* mode 3 — most common */
+            m->prg_page[0] = prg16(m, bank);
+            m->prg_page[1] = prg16(m, bank) + 0x2000;
+            m->prg_page[2] = prg16(m, m->prg_banks - 1);
+            m->prg_page[3] = prg16(m, m->prg_banks - 1) + 0x2000;
+        }
+        break;
+    }
+    case 2:
+        m->prg_page[0] = prg16(m, m->s.uxrom.prg_bank);
+        m->prg_page[1] = prg16(m, m->s.uxrom.prg_bank) + 0x2000;
+        m->prg_page[2] = prg16(m, m->prg_banks - 1);
+        m->prg_page[3] = prg16(m, m->prg_banks - 1) + 0x2000;
+        break;
+    case 4:
+    case 206: {
+        int banks8   = m->prg_banks * 2;
+        int prg_mode = (m->s.mmc3.bank_sel >> 6) & 1;
+        int r6 = m->s.mmc3.regs[6] % banks8;
+        int r7 = m->s.mmc3.regs[7] % banks8;
+        if (prg_mode == 0) {
+            m->prg_page[0] = prg8(m, r6);
+            m->prg_page[1] = prg8(m, r7);
+            m->prg_page[2] = prg8(m, banks8 - 2);
+            m->prg_page[3] = prg8(m, banks8 - 1);
+        } else {
+            m->prg_page[0] = prg8(m, banks8 - 2);
+            m->prg_page[1] = prg8(m, r7);
+            m->prg_page[2] = prg8(m, r6);
+            m->prg_page[3] = prg8(m, banks8 - 1);
+        }
+        break;
+    }
+    case 7: {
+        int banks32 = m->prg_banks / 2;
+        int bank = (banks32 > 0) ? (m->s.axrom.prg_bank % banks32) : 0;
+        const uint8_t *base = m->prg_rom + bank * 32768;
+        m->prg_page[0] = base;
+        m->prg_page[1] = base + 0x2000;
+        m->prg_page[2] = base + 0x4000;
+        m->prg_page[3] = base + 0x6000;
+        break;
+    }
+    case 9: {
+        int banks8 = m->prg_banks * 2;
+        m->prg_page[0] = prg8(m, m->s.mmc2.prg_bank);
+        m->prg_page[1] = prg8(m, banks8 - 3);
+        m->prg_page[2] = prg8(m, banks8 - 2);
+        m->prg_page[3] = prg8(m, banks8 - 1);
+        break;
+    }
+    case 66: {
+        int banks32 = m->prg_banks / 2;
+        int bank = (banks32 > 0) ? (m->s.gxrom.prg_bank % banks32) : 0;
+        const uint8_t *base = m->prg_rom + bank * 32768;
+        m->prg_page[0] = base;
+        m->prg_page[1] = base + 0x2000;
+        m->prg_page[2] = base + 0x4000;
+        m->prg_page[3] = base + 0x6000;
+        break;
+    }
+    }
+}
+
+/* ── Pre-computed CHR page pointers ───────────────────────────────────
+ * 8 × 1 KB page pointers covering $0000–$1FFF.  Reads from pattern
+ * tables then just index: m->chr_page[addr >> 10][addr & 0x3FF].
+ * Called from mapper_init and every CHR bank-switch write.
+ * Mapper 9 (MMC2) also updates here on latch changes.              */
+
+static void update_chr_pages(Mapper *m)
+{
+    const uint8_t *base;
+
+    switch (m->id) {
+    case 0:
+    case 2:
+        base = m->chr_banks ? m->chr_rom : m->chr_ram;
+        for (int i = 0; i < 8; i++) m->chr_page[i] = base + i * 1024;
+        break;
+
+    case 1:
+        if (m->chr_banks == 0) {
+            for (int i = 0; i < 8; i++) m->chr_page[i] = m->chr_ram + i * 1024;
+            break;
+        }
+        if ((m->s.mmc1.ctrl >> 4) & 1) {
+            const uint8_t *c0 = chr4(m, m->s.mmc1.chr0);
+            const uint8_t *c1 = chr4(m, m->s.mmc1.chr1);
+            for (int i = 0; i < 4; i++) m->chr_page[i]     = c0 + i * 1024;
+            for (int i = 0; i < 4; i++) m->chr_page[4 + i] = c1 + i * 1024;
+        } else {
+            const uint8_t *c = chr8(m, m->s.mmc1.chr0 >> 1);
+            for (int i = 0; i < 8; i++) m->chr_page[i] = c + i * 1024;
+        }
+        break;
+
+    case 3:
+        if (m->chr_banks == 0) {
+            for (int i = 0; i < 8; i++) m->chr_page[i] = m->chr_ram + i * 1024;
+        } else {
+            const uint8_t *c = chr8(m, m->s.cnrom.chr_bank);
+            for (int i = 0; i < 8; i++) m->chr_page[i] = c + i * 1024;
+        }
+        break;
+
+    case 4:
+    case 206: {
+        if (m->chr_banks == 0) {
+            for (int i = 0; i < 8; i++) m->chr_page[i] = m->chr_ram + i * 1024;
+            break;
+        }
+        int cm   = (m->s.mmc3.bank_sel >> 7) & 1;
+        int t1k  = m->chr_banks * 8;
+        int r0   = (m->s.mmc3.regs[0] & 0xFE) % t1k;
+        int r1   = (m->s.mmc3.regs[1] & 0xFE) % t1k;
+        if (cm == 0) {
+            m->chr_page[0] = m->chr_rom + r0       * 1024;
+            m->chr_page[1] = m->chr_rom + (r0 + 1) * 1024;
+            m->chr_page[2] = m->chr_rom + r1       * 1024;
+            m->chr_page[3] = m->chr_rom + (r1 + 1) * 1024;
+            m->chr_page[4] = m->chr_rom + (m->s.mmc3.regs[2] % t1k) * 1024;
+            m->chr_page[5] = m->chr_rom + (m->s.mmc3.regs[3] % t1k) * 1024;
+            m->chr_page[6] = m->chr_rom + (m->s.mmc3.regs[4] % t1k) * 1024;
+            m->chr_page[7] = m->chr_rom + (m->s.mmc3.regs[5] % t1k) * 1024;
+        } else {
+            m->chr_page[0] = m->chr_rom + (m->s.mmc3.regs[2] % t1k) * 1024;
+            m->chr_page[1] = m->chr_rom + (m->s.mmc3.regs[3] % t1k) * 1024;
+            m->chr_page[2] = m->chr_rom + (m->s.mmc3.regs[4] % t1k) * 1024;
+            m->chr_page[3] = m->chr_rom + (m->s.mmc3.regs[5] % t1k) * 1024;
+            m->chr_page[4] = m->chr_rom + r0       * 1024;
+            m->chr_page[5] = m->chr_rom + (r0 + 1) * 1024;
+            m->chr_page[6] = m->chr_rom + r1       * 1024;
+            m->chr_page[7] = m->chr_rom + (r1 + 1) * 1024;
+        }
+        break;
+    }
+
+    case 7:
+        for (int i = 0; i < 8; i++) m->chr_page[i] = m->chr_ram + i * 1024;
+        break;
+
+    case 9: {
+        int t4k = m->chr_banks * 2;
+        uint8_t b0 = m->s.mmc2.latch[0] ? m->s.mmc2.chr_bank_fe[0]
+                                         : m->s.mmc2.chr_bank_fd[0];
+        uint8_t b1 = m->s.mmc2.latch[1] ? m->s.mmc2.chr_bank_fe[1]
+                                         : m->s.mmc2.chr_bank_fd[1];
+        const uint8_t *c0 = m->chr_rom + (b0 % t4k) * 4096;
+        const uint8_t *c1 = m->chr_rom + (b1 % t4k) * 4096;
+        for (int i = 0; i < 4; i++) m->chr_page[i]     = c0 + i * 1024;
+        for (int i = 0; i < 4; i++) m->chr_page[4 + i] = c1 + i * 1024;
+        break;
+    }
+
+    case 66:
+        if (m->chr_banks == 0) {
+            for (int i = 0; i < 8; i++) m->chr_page[i] = m->chr_ram + i * 1024;
+        } else {
+            const uint8_t *c = chr8(m, m->s.gxrom.chr_bank);
+            for (int i = 0; i < 8; i++) m->chr_page[i] = c + i * 1024;
+        }
+        break;
+    }
+}
+
 /* ── iNES header parser ───────────────────────────────────────────────*/
 
 static int parse_ines(Mapper *m, const uint8_t *rom, int rom_size)
@@ -77,14 +277,6 @@ static int parse_ines(Mapper *m, const uint8_t *rom, int rom_size)
 /* ════════════════════════════════════════════════════════════════════ *
  * Mapper 0 — NROM                                                      *
  * ════════════════════════════════════════════════════════════════════ */
-
-static uint8_t m0_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    uint16_t off = addr - 0x8000u;
-    if (m->prg_banks == 1) off &= 0x3FFFu; /* mirror 16 KB */
-    return m->prg_rom[off];
-}
 
 static uint8_t m0_ppu_read(Mapper *m, uint16_t addr)
 {
@@ -132,28 +324,8 @@ static void m1_write(Mapper *m, uint16_t addr, uint8_t val)
     case 2: m->s.mmc1.chr1 = data; break;
     case 3: m->s.mmc1.prg  = data; break;
     }
-}
-
-static uint8_t m1_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    int mode = (m->s.mmc1.ctrl >> 2) & 3;
-    int bank = m->s.mmc1.prg & 0x0Fu;
-
-    if (mode <= 1) {
-        /* 32 KB mode: switch a pair of 16 KB banks */
-        const uint8_t *base = prg16(m, bank & ~1);
-        return (addr < 0xC000u) ? base[addr - 0x8000u]
-                                : base[0x4000u + (addr - 0xC000u)];
-    }
-    if (mode == 2) {
-        /* Fix first bank at $8000, switch selected bank at $C000 */
-        if (addr < 0xC000u) return m->prg_rom[addr - 0x8000u];
-        return prg16(m, bank)[addr - 0xC000u];
-    }
-    /* mode == 3: switch at $8000, fix last bank at $C000 (most common) */
-    if (addr < 0xC000u) return prg16(m, bank)[addr - 0x8000u];
-    return prg16(m, m->prg_banks - 1)[addr - 0xC000u];
+    update_prg_pages(m);
+    update_chr_pages(m);
 }
 
 static uint8_t m1_ppu_read(Mapper *m, uint16_t addr)
@@ -179,17 +351,11 @@ static void m1_ppu_write(Mapper *m, uint16_t addr, uint8_t val)
  * Mapper 2 — UxROM                                                     *
  * ════════════════════════════════════════════════════════════════════ */
 
-static uint8_t m2_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    if (addr < 0xC000u) return prg16(m, m->s.uxrom.prg_bank)[addr - 0x8000u];
-    return prg16(m, m->prg_banks - 1)[addr - 0xC000u]; /* fixed last bank */
-}
-
 static void m2_write(Mapper *m, uint16_t addr, uint8_t val)
 {
     (void)addr;
     m->s.uxrom.prg_bank = val;
+    update_prg_pages(m);
 }
 
 static uint8_t m2_ppu_read(Mapper *m, uint16_t addr)
@@ -208,18 +374,11 @@ static void m2_ppu_write(Mapper *m, uint16_t addr, uint8_t val)
  * Mapper 3 — CNROM                                                     *
  * ════════════════════════════════════════════════════════════════════ */
 
-static uint8_t m3_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    uint16_t off = addr - 0x8000u;
-    if (m->prg_banks == 1) off &= 0x3FFFu;
-    return m->prg_rom[off];
-}
-
 static void m3_write(Mapper *m, uint16_t addr, uint8_t val)
 {
     (void)addr;
     m->s.cnrom.chr_bank = val & 3u;
+    update_chr_pages(m);
 }
 
 static uint8_t m3_ppu_read(Mapper *m, uint16_t addr)
@@ -233,23 +392,6 @@ static uint8_t m3_ppu_read(Mapper *m, uint16_t addr)
  * Mapper 4 — MMC3   (Mapper 206 reuses this with has_irq=0)           *
  * ════════════════════════════════════════════════════════════════════ */
 
-static uint8_t m4_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    int banks8   = m->prg_banks * 2;
-    int prg_mode = (m->s.mmc3.bank_sel >> 6) & 1;
-    int r6       = m->s.mmc3.regs[6] % banks8;
-    int r7       = m->s.mmc3.regs[7] % banks8;
-
-    if (addr < 0xA000u)
-        return prg8(m, prg_mode ? (banks8 - 2) : r6)[addr - 0x8000u];
-    if (addr < 0xC000u)
-        return prg8(m, r7)[addr - 0xA000u];
-    if (addr < 0xE000u)
-        return prg8(m, prg_mode ? r6 : (banks8 - 2))[addr - 0xC000u];
-    return prg8(m, banks8 - 1)[addr - 0xE000u]; /* fixed last 8 KB */
-}
-
 static void m4_write(Mapper *m, uint16_t addr, uint8_t val, int has_irq)
 {
     int even = !(addr & 1u);
@@ -257,6 +399,8 @@ static void m4_write(Mapper *m, uint16_t addr, uint8_t val, int has_irq)
     if (addr < 0xA000u) {
         if (even) m->s.mmc3.bank_sel = val;
         else      m->s.mmc3.regs[m->s.mmc3.bank_sel & 7u] = val;
+        update_prg_pages(m);
+        update_chr_pages(m);
     } else if (addr < 0xC000u) {
         if (even && has_irq)
             m->mirroring = (val & 1u) ? MIRROR_H : MIRROR_V;
@@ -329,19 +473,12 @@ static void m4_scanline(Mapper *m)
  * Mapper 7 — AxROM                                                     *
  * ════════════════════════════════════════════════════════════════════ */
 
-static uint8_t m7_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    int banks32 = m->prg_banks / 2; /* number of 32 KB banks */
-    int bank    = (banks32 > 0) ? (m->s.axrom.prg_bank % banks32) : 0;
-    return m->prg_rom[(bank * 32768) + (addr - 0x8000u)];
-}
-
 static void m7_write(Mapper *m, uint16_t addr, uint8_t val)
 {
     (void)addr;
     m->s.axrom.prg_bank = val & 7u;
     m->mirroring = (val & 0x10u) ? MIRROR_1B : MIRROR_1A;
+    update_prg_pages(m);
 }
 
 /* AxROM always uses CHR-RAM */
@@ -371,23 +508,13 @@ static void m7_ppu_write(Mapper *m, uint16_t addr, uint8_t val)
  *   Latch updates on PPU reads of tile $FD/$FE in each nametable half. *
  * ════════════════════════════════════════════════════════════════════ */
 
-static uint8_t m9_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    int banks8 = m->prg_banks * 2;
-    if (addr < 0xA000u) return prg8(m, m->s.mmc2.prg_bank)[addr - 0x8000u];
-    if (addr < 0xC000u) return prg8(m, banks8 - 3)[addr - 0xA000u];
-    if (addr < 0xE000u) return prg8(m, banks8 - 2)[addr - 0xC000u];
-    return                      prg8(m, banks8 - 1)[addr - 0xE000u];
-}
-
 static void m9_write(Mapper *m, uint16_t addr, uint8_t val)
 {
-    if      (addr < 0xB000u) m->s.mmc2.prg_bank      = val & 0x0Fu;
-    else if (addr < 0xC000u) m->s.mmc2.chr_bank_fd[0] = val & 0x1Fu;
-    else if (addr < 0xD000u) m->s.mmc2.chr_bank_fe[0] = val & 0x1Fu;
-    else if (addr < 0xE000u) m->s.mmc2.chr_bank_fd[1] = val & 0x1Fu;
-    else if (addr < 0xF000u) m->s.mmc2.chr_bank_fe[1] = val & 0x1Fu;
+    if      (addr < 0xB000u) { m->s.mmc2.prg_bank      = val & 0x0Fu; update_prg_pages(m); }
+    else if (addr < 0xC000u) { m->s.mmc2.chr_bank_fd[0] = val & 0x1Fu; update_chr_pages(m); }
+    else if (addr < 0xD000u) { m->s.mmc2.chr_bank_fe[0] = val & 0x1Fu; update_chr_pages(m); }
+    else if (addr < 0xE000u) { m->s.mmc2.chr_bank_fd[1] = val & 0x1Fu; update_chr_pages(m); }
+    else if (addr < 0xF000u) { m->s.mmc2.chr_bank_fe[1] = val & 0x1Fu; update_chr_pages(m); }
     else                     m->mirroring = (val & 1u) ? MIRROR_H : MIRROR_V;
 }
 
@@ -414,19 +541,13 @@ static uint8_t m9_ppu_read(Mapper *m, uint16_t addr)
  * Mapper 66 — GxROM                                                    *
  * ════════════════════════════════════════════════════════════════════ */
 
-static uint8_t m66_cpu_read(const Mapper *m, uint16_t addr)
-{
-    if (addr < 0x8000u) return 0xFF;
-    int banks32 = m->prg_banks / 2;
-    int bank    = (banks32 > 0) ? (m->s.gxrom.prg_bank % banks32) : 0;
-    return m->prg_rom[(bank * 32768) + (addr - 0x8000u)];
-}
-
 static void m66_write(Mapper *m, uint16_t addr, uint8_t val)
 {
     (void)addr;
     m->s.gxrom.prg_bank = (val >> 4) & 3u;
     m->s.gxrom.chr_bank = val & 3u;
+    update_prg_pages(m);
+    update_chr_pages(m);
 }
 
 static uint8_t m66_ppu_read(Mapper *m, uint16_t addr)
@@ -445,33 +566,27 @@ int mapper_init(Mapper *m, const uint8_t *rom, int rom_size)
     if (parse_ines(m, rom, rom_size) != 0) return -1;
 
     switch (m->id) {
-    case 0:                               return 0;
-    case 1:  m->s.mmc1.ctrl = 0x0Cu;    return 0; /* PRG mode 3 on reset */
-    case 2:                               return 0;
-    case 3:                               return 0;
+    case 0:                               break;
+    case 1:  m->s.mmc1.ctrl = 0x0Cu;    break; /* PRG mode 3 on reset */
+    case 2:                               break;
+    case 3:                               break;
     case 4:  /* fall-through */
-    case 206:                             return 0;
-    case 7:  m->mirroring = MIRROR_1A;   return 0;
-    case 9:  m->mirroring = MIRROR_V;    return 0;
-    case 66:                              return 0;
+    case 206:                             break;
+    case 7:  m->mirroring = MIRROR_1A;   break;
+    case 9:  m->mirroring = MIRROR_V;    break;
+    case 66:                              break;
     default:                              return -1;
     }
+    update_prg_pages(m);
+    update_chr_pages(m);
+    return 0;
 }
 
 uint8_t mapper_cpu_read(const Mapper *m, uint16_t addr)
 {
-    switch (m->id) {
-    case 0:   return m0_cpu_read(m, addr);
-    case 1:   return m1_cpu_read(m, addr);
-    case 2:   return m2_cpu_read(m, addr);
-    case 3:   return m3_cpu_read(m, addr);
-    case 4:
-    case 206: return m4_cpu_read(m, addr);
-    case 7:   return m7_cpu_read(m, addr);
-    case 9:   return m9_cpu_read(m, addr);
-    case 66:  return m66_cpu_read(m, addr);
-    default:  return 0xFF;
-    }
+    if (addr >= 0x8000u)
+        return m->prg_page[(addr >> 13) & 3][addr & 0x1FFFu];
+    return 0xFF; /* $4020-$7FFF: open bus / unmapped */
 }
 
 void mapper_cpu_write(Mapper *m, uint16_t addr, uint8_t val)

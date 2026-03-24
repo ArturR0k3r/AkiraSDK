@@ -19,7 +19,7 @@
  * Capabilities: display.write, gpio.read, app.control, ipc
  */
 
-#include "include/akira_api.h"
+#include "../include/akira_api.h"
 
 /* ── Button pins (gpio0, ACTIVE_HIGH with PULL_DOWN) ─────────────────── */
 #define PIN_UP    4

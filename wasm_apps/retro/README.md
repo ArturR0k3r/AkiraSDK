@@ -12,7 +12,7 @@ that can be deployed like any other AkiraOS app — via USB, BLE, or SD card.
 
 ```bash
 # Convert a ROM to a deployable AOT binary (recommended)
-python3 tools/rom_to_aot.py tetris.nes -o tetris.aot
+python3 tools/rom_to_aot.py roms/nes/tetris.nes -o tetris.aot
 
 # Deploy to AkiraOS (SD card example)
 cp tetris.aot /media/$USER/AKIRA/apps/

@@ -218,14 +218,27 @@ that executes directly on the target CPU.
 
 ### Building wamrc
 
-`wamrc` is part of the WAMR source tree (included as a submodule in AkiraOS):
+`wamrc` is part of the WAMR source tree (included as a submodule in AkiraOS).
+The submodule ships with pre-configured CMake build directories — compile with
+ninja directly:
 
 ```bash
-cd modules/wasm-micro-runtime/wamr-compiler
-cmake . -DWAMR_BUILD_PLATFORM=linux
-make
-sudo cp wamrc /usr/local/bin/   # or set WAMRC=/path/to/wamrc
+# 1. Build bundled LLVM with Xtensa backend (one-time, ~5–15 min)
+cd modules/wasm-micro-runtime/core/deps/llvm/build
+ninja -j$(nproc)
+
+# 2. Build wamrc
+cd modules/wasm-micro-runtime/wamr-compiler/build
+ninja -j$(nproc)
+
+# Optional: install to PATH (tools auto-detect wamrc without this)
+sudo cp wamrc /usr/local/bin/
+# or: export WAMRC=/path/to/wasm-micro-runtime/wamr-compiler/build/wamrc
 ```
+
+> **Do not** run `cmake .` from the `wamr-compiler` source directory. Use the
+> existing `build/` subdirectory which is pre-configured for the Xtensa LLVM
+> backend.
 
 ### AOT compilation workflow
 

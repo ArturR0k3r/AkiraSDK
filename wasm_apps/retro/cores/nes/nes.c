@@ -149,9 +149,25 @@ void nes_step_frame(NES *nes)
             total_cycles += 7;
         }
 
-        /* Batch 8 CPU instructions per loop iteration.
+        /* Batch 16 CPU instructions per loop iteration.
          * Reduces loop overhead vs single-step dispatch.
-         * Worst case NMI/IRQ delay: ~24 cycles (imperceptible). */
+         * Worst case NMI/IRQ delay: ~48 cycles (< 1 scanline, imperceptible). */
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
+        total_cycles += cpu6502_step(&nes->cpu, nes);
+        total_cycles += nes->dma_stall; nes->dma_stall = 0;
         total_cycles += cpu6502_step(&nes->cpu, nes);
         total_cycles += nes->dma_stall; nes->dma_stall = 0;
         total_cycles += cpu6502_step(&nes->cpu, nes);

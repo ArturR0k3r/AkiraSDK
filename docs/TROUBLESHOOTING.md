@@ -474,15 +474,34 @@ timer_free(t);
 
 ### `wamrc: command not found`
 
-`wamrc` is not in PATH. Build it from the WAMR source:
+The `wamrc` binary hasn't been built yet. The AkiraOS WAMR submodule ships
+with pre-configured CMake build directories — you just need to compile:
 
 ```bash
-cd /path/to/AkiraOS/modules/wasm-micro-runtime/wamr-compiler
-cmake . -DWAMR_BUILD_PLATFORM=linux
-make
-sudo cp wamrc /usr/local/bin/
-# or: export WAMRC=/path/to/wamrc
+# Step 1 — build the bundled LLVM with Xtensa backend (one-time, ~5–15 min)
+cd AkiraOS/modules/wasm-micro-runtime/core/deps/llvm/build
+ninja -j$(nproc)
+
+# Step 2 — build wamrc
+cd AkiraOS/modules/wasm-micro-runtime/wamr-compiler/build
+ninja -j$(nproc)
 ```
+
+`rom_to_aot.py` and the `wasm_apps` Makefile auto-detect `wamrc` in that
+build directory, so no installation is required. If you prefer it on your
+PATH:
+
+```bash
+# Option A: install system-wide
+sudo cp wamrc /usr/local/bin/
+
+# Option B: env var (per-session or add to ~/.bashrc)
+export WAMRC=$(pwd)/wamrc
+```
+
+> **Do not** run `cmake .` from the `wamr-compiler` source directory — that
+> would create an in-source build unconfigured for Xtensa. Always use the
+> existing `wamr-compiler/build` directory.
 
 ### `wamrc: unsupported target 'xtensa'`
 

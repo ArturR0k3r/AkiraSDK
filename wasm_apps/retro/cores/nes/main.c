@@ -201,12 +201,12 @@ int main(void)
         settings_held = settings_now;
 
         /* ── Run one NES frame ──────────────────────────────────────── */
-        int skip = (frame_count % 3) != 0;  /* render 1 of 3 frames */
+        int skip = (frame_count % 4) != 0;  /* render 1 of 4 frames (~15fps) */
         nes.ppu.skip_render = (uint8_t)skip;
         nes_step_frame(&nes);
         frame_count++;
 
-        /* ── Display output (skip 2 of 3 frames for ~3× speed) ───── */
+        /* ── Display output (skip 3 of 4 frames for ~4× speed) ───── */
         if (!skip) {
             display_bitmap(NES_OFFSET_X, NES_OFFSET_Y,
                            NES_W, NES_H,

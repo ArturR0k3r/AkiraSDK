@@ -476,12 +476,25 @@ cd wasm_apps
 
 ### Building wamrc (one-time setup)
 
+The AkiraOS WAMR submodule ships with pre-configured CMake build directories.
+Do **not** run `cmake` yourself — just compile with ninja:
+
 ```bash
-cd /path/to/AkiraOS/modules/wasm-micro-runtime/wamr-compiler
-cmake . -DWAMR_BUILD_PLATFORM=linux
-make
+# 1. Build bundled LLVM with Xtensa backend (~5–15 min)
+cd AkiraOS/modules/wasm-micro-runtime/core/deps/llvm/build
+ninja -j$(nproc)
+
+# 2. Build wamrc
+cd AkiraOS/modules/wasm-micro-runtime/wamr-compiler/build
+ninja -j$(nproc)
+
+# Optional: make available system-wide
 sudo cp wamrc /usr/local/bin/
+# or add to your shell: export WAMRC=/path/to/wamr-compiler/build/wamrc
 ```
+
+The build tools auto-detect `wamrc` in the build directory, so the install
+step is optional.
 
 ### Performance pattern for AOT apps
 

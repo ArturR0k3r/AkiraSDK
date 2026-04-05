@@ -1239,6 +1239,53 @@ extern int pwm_disable(int32_t channel);
 
 /*
  * =============================================================================
+ * ADC API
+ * Capability: "adc"
+ * =============================================================================
+ *
+ * Hardware configuration comes entirely from board overlay and .conf files:
+ *   Overlay: enable the ADC node and optionally set alias akira-adc = &adcX
+ *   Conf:    CONFIG_ADC=y, CONFIG_AKIRA_WASM_ADC=y
+ *            CONFIG_AKIRA_WASM_ADC_VREF_MV=<mV>
+ *            CONFIG_AKIRA_WASM_ADC_RESOLUTION=<bits>
+ */
+
+/**
+ * @brief Read a raw ADC sample from the specified channel.
+ * @param channel ADC channel index (0-based).
+ * @return Raw sample value on success, negative error code on failure.
+ */
+extern int adc_read(int channel);
+
+/**
+ * @brief Read an ADC channel and return the result in millivolts.
+ * @param channel ADC channel index (0-based).
+ * @return Voltage in millivolts on success, negative error code on failure.
+ */
+extern int adc_read_mv(int channel);
+
+/*
+ * =============================================================================
+ * WDT API
+ * Capability: "wdt"
+ * =============================================================================
+ *
+ * The system watchdog is enabled and auto-fed by AkiraOS when CONFIG_AKIRA_WDT=y.
+ * WASM apps may optionally pet it to signal liveness.
+ */
+
+/**
+ * @brief Feed/pet the system watchdog.
+ *
+ * Signals to the hardware watchdog that the application is still alive.
+ * Useful for long-running tasks where the auto-feed interval may be insufficient.
+ *
+ * @return 0 on success, -ENODEV if watchdog is not active, -EPERM if capability missing.
+ */
+extern int wdt_pet(void);
+
+/*
+ * =============================================================================
  * HELPER MACROS
  * =============================================================================
  */

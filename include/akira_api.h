@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdarg.h>
+#include "akira_console.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -369,6 +370,26 @@ extern int display_rect_outline(int32_t x, int32_t y, int32_t w, int32_t h, uint
  */
 extern int display_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
                            const uint16_t *data, uint32_t data_size);
+
+/**
+ * @brief Write a packed RGB565 buffer directly to the display hardware,
+ *        bypassing the OS framebuffer and issuing a partial SPI window update.
+ *
+ * Much faster than display_bitmap() + display_flush() for full-area game
+ * renderers: no copy to the OS framebuffer, and only w*h pixels are sent
+ * over SPI instead of the full 320*240 frame.
+ *
+ * The caller must have pre-cleared any screen areas outside (x,y,w,h) with
+ * a prior display_flush() call (they remain as-is in the display's GRAM).
+ *
+ * @param x,y        Top-left destination corner
+ * @param w,h        Width and height in pixels
+ * @param data       Pointer to packed RGB565 pixel data (w*h*2 bytes, no stride)
+ * @param data_size  Size of @p data in bytes (must be >= w*h*2)
+ * @return 0 on success, negative error code on failure
+ */
+extern int display_raw_write(int32_t x, int32_t y, int32_t w, int32_t h,
+                              const uint16_t *data, uint32_t data_size);
 
 /**
  * @brief Blit an RGB565 bitmap with a transparent colour key.
@@ -1551,6 +1572,20 @@ extern int net_tx_flush(int32_t handle);
  */
 extern int net_event_pop(void *buf, int32_t len);
 
+/**
+ * @brief Get the device's current IPv4 address as a string.
+ *
+ * Writes a null-terminated dotted-decimal string into @p buf
+ * (e.g. "192.168.1.42"). The buffer must be at least 16 bytes.
+ *
+ * Required capability: "network.*" or "network.read"
+ *
+ * @param buf  Destination buffer (>= 16 bytes).
+ * @param len  Buffer capacity.
+ * @return 0 on success; -ENODATA if not connected / no IP assigned.
+ */
+extern int net_get_ip(char *buf, int32_t len);
+
 /*
  * =============================================================================
  * POWER MANAGEMENT API
@@ -1645,6 +1680,112 @@ extern int power_wake_on_timer(int ms);
  * @return 0 always.
  */
 extern int power_set_low_power(int enable);
+
+/*
+ * =============================================================================
+ * INPUT API (AkiraConsole button events)
+ * =============================================================================
+ * Required capability: "input.read"
+ *
+ * Provides a bitmask-based snapshot of held buttons and an edge-event ring
+ * buffer.  Both functions are non-blocking.  Use AKIRA_BTN_* macros from
+ * akira_console.h to test individual bits.
+ *
+ * Typical usage:
+ *   uint32_t held = (uint32_t)input_get_buttons();
+ *   if (AKIRA_BTN_PRESSED(held, AKIRA_BTN_A)) { ... }
+ *
+ *   akira_input_event_t ev;
+ *   if (input_poll_event(&ev) == 1 && ev.pressed) { ... }
+ */
+
+/** Packed event filled by input_poll_event(). 8 bytes, naturally aligned. */
+typedef struct {
+    uint32_t button_id;  /**< AKIRA_BTN_ID_* — matches zephyr,code in DTS */
+    uint32_t pressed;    /**< 1 = press, 0 = release                       */
+} akira_input_event_t;
+
+/**
+ * @brief Return bitmask of currently held buttons (non-blocking, ISR-safe).
+ * Bit N is set when the button with zephyr,code == N is pressed.
+ * Cast return value to uint32_t before applying AKIRA_BTN_* masks.
+ * @return int32 bitmask (WASM has no uint32 type at the ABI boundary).
+ */
+extern int input_get_buttons(void);
+
+/**
+ * @brief Drain one edge event from the ring buffer (non-blocking).
+ * @param evt  Pointer to an akira_input_event_t in WASM linear memory.
+ * @return 1 if an event was dequeued and written, 0 if queue is empty, <0 error.
+ */
+extern int input_poll_event(akira_input_event_t *evt);
+
+/*
+ * =============================================================================
+ * SYSTEM API (privileged — requires "app.control")
+ * =============================================================================
+ */
+
+/**
+ * @brief Scan /SD:/apps/ for *.wasm files (newline-separated output).
+ *
+ * Lists filenames (not full paths) of every *.wasm file in the SD apps dir
+ * into @p buf separated by newlines.  Requires "app.control" capability.
+ *
+ * @param buf  Output buffer in WASM linear memory.
+ * @param len  Size of @p buf in bytes.
+ * @return Number of files found (≥ 0), or negative errno on error.
+ *         -ENODEV if no SD card is mounted.  -EACCES if capability denied.
+ */
+extern int sd_scan_wasm(char *buf, int len);
+
+/**
+ * @brief Install a WASM app from SD card into the device app store.
+ *
+ * Copies /SD:/apps/<name>.wasm into LittleFS and registers it with the
+ * app manager. The app appears in the launcher immediately on success —
+ * no PC or UART connection required.
+ *
+ * Requires capability: "app.control"
+ *
+ * @param name  App name without the .wasm extension (null-terminated).
+ * @return 0 on success, negative errno on failure:
+ *   -ENOENT  File not found on SD card
+ *   -ENOSPC  LittleFS storage full
+ *   -ENODEV  SD card not mounted
+ *   -EACCES  Capability not granted
+ */
+extern int app_install_from_sd(const char *name);
+
+/*
+ * =============================================================================
+ * SETTINGS API
+ * =============================================================================
+ *
+ * Persistent key-value store backed by NVS flash.
+ * Required manifest capability: "settings.*"
+ *
+ * Keys use namespace/key format: "nes/frameskip", "wifi/ssid", etc.
+ * Values are plain NUL-terminated strings.
+ */
+
+/**
+ * @brief Read a persistent setting into a buffer.
+ * @return 0 on success, -ENOENT if not found, negative errno on error.
+ */
+extern int settings_get(const char *key, char *buf, int32_t len);
+
+/**
+ * @brief Write (create or overwrite) a persistent setting.
+ * @return 0 on success, negative errno on error.
+ */
+extern int settings_set(const char *key, const char *value);
+
+/**
+ * @brief Delete a persistent setting.
+ * @return 0 on success, -ENOENT if not found.
+ */
+extern int settings_delete(const char *key);
 
 
 #ifdef __cplusplus

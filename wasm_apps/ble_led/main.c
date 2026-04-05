@@ -20,7 +20,7 @@
  *   cd wasm_sample && ./build_wasm_apps.sh ble_led
  */
 
-#include "include/akira_api.h"
+#include "akira_api.h"
 
 /* ---- Service / Characteristic UUIDs (custom 128-bit) ---- */
 #define LED_SERVICE_UUID  "19B10000-E8F2-537E-4F6C-D104768A1214"

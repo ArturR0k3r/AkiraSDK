@@ -18,7 +18,7 @@
  *   echo "Hello from client" | ncat 127.0.0.1 9000
  */
 
-#include "include/akira_api.h"
+#include "akira_api.h"
 
 /* ---- tunables ------------------------------------------------------------- */
 #define SRV_PORT           9000

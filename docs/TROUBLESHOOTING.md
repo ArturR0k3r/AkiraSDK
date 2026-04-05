@@ -1,861 +1,546 @@
-# 🔧 Akira SDK Troubleshooting Guide
+# Akira SDK Troubleshooting Guide
 
-Common issues and solutions to help you debug your Akira applications.
+Common issues and solutions when building and running WASM apps on AkiraOS.
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
-- [Display Issues](#-display-issues)
-- [Event Handling Problems](#-event-handling-problems)
-- [Sensor Reading Errors](#-sensor-reading-errors)
-- [RF Communication Issues](#-rf-communication-issues)
-- [Storage Problems](#-storage-problems)
-- [Network Errors](#-network-errors)
-- [Memory Issues](#-memory-issues)
-- [Compilation Errors](#-compilation-errors)
-- [Performance Problems](#-performance-problems)
-- [General Debugging Tips](#-general-debugging-tips)
+- [Build Errors](#build-errors)
+- [Display Issues](#display-issues)
+- [Sensor Problems](#sensor-problems)
+- [GPIO Issues](#gpio-issues)
+- [BLE Issues](#ble-issues)
+- [HID Issues](#hid-issues)
+- [Storage Problems](#storage-problems)
+- [Network Issues](#network-issues)
+- [Memory Problems](#memory-problems)
+- [General Debugging](#general-debugging)
 
----a
+---
 
-## 🖥️ Display Issues
+## Build Errors
 
-### Problem: Display Shows Nothing
+### "Undefined reference to `display_clear`" (or any API function)
 
-**Symptoms:** Screen stays black after drawing
+**Cause:** Missing `-nostdlib` or incorrect include path.
 
-**Possible Causes:**
-1. Forgot to call `akira_display_flush()`
-2. Drawing outside screen bounds
-3. Using color `0x0000` on black background
-
-**Solutions:**
-
-```c
-// ✅ Always flush after drawing
-akira_display_clear(0x0000);
-akira_display_text(10, 10, "Hello", 0xFFFF);
-akira_display_flush();  // DON'T FORGET THIS!
-
-// ✅ Check your coordinates
-int w, h;
-akira_display_get_size(&w, &h);
-printf("Display size: %dx%d\n", w, h);
-
-// ✅ Use visible colors
-akira_display_text(10, 10, "Text", 0xFFFF);  // White on black
+**Fix:**
+```bash
+# Correct flags:
+$(WASI_SDK)/bin/clang \
+    -nostdlib \
+    -Wl,--no-entry \
+    -Wl,--export=main \
+    -Wl,--allow-undefined \
+    -I../../include \
+    -o app.wasm main.c
 ```
 
----
+All `extern` functions in `akira_api.h` are provided by the AkiraOS runtime at link time via `--allow-undefined`. Do not add any `.c` runtime files to the build.
 
-### Problem: Text is Garbled or Missing
+### "region `dram0_0_seg' overflowed" or binary > 64 KB
 
-**Symptoms:** Text appears corrupted or doesn't show
+**Cause:** App is too large. WASM linear memory is limited to one 64 KB page.
 
-**Possible Causes:**
-1. NULL or invalid string pointer
-2. String not null-terminated
-3. Text drawn outside visible area
+**Fix:**
+- Use `-Os` (optimize for size) instead of `-O0`
+- Avoid floating-point where possible — FP pulls in significant polyfill code
+- Reduce static buffer sizes
+- Split functionality across multiple smaller apps
 
-**Solutions:**
+### "failed to link import function (env, printf_native)"
+
+**Cause:** Including `<stdio.h>` brings in WASI imports that the runtime cannot satisfy.
+
+**Fix:** Never include standard library headers. Use the `printf()` defined in `akira_api.h`:
 
 ```c
-// ✅ Ensure strings are null-terminated
-char text[32];
-strncpy(text, source, sizeof(text) - 1);
-text[sizeof(text) - 1] = '\0';  // Guarantee null termination
+// WRONG
+#include <stdio.h>
+printf("value: %d\n", val);
 
-// ✅ Validate string before drawing
+// CORRECT
+#include "akira_api.h"
+printf("value: %d", val);  // akira_api.h provides printf()
+```
+
+### "allocate linear memory failed" on device
+
+**Cause:** WAMR heap too small or PSRAM not configured on ESP32-S3.
+
+**Fix:** Check that `CONFIG_MEMC=y` is set and the PSRAM heap is large enough. Reduce `memory_quota` in the app manifest if needed.
+
+---
+
+## Display Issues
+
+### Screen stays black after drawing
+
+**Cause:** `display_flush()` was not called.
+
+**Fix:** Always call `display_flush()` after composing a frame:
+
+```c
+display_clear(COLOR_BLACK);
+display_text(10, 10, "Hello", COLOR_WHITE);
+display_flush();  // required!
+```
+
+### Text appears corrupted or partially drawn
+
+**Cause 1:** Drawing outside screen bounds.
+
+```c
+// Check dimensions first
+int32_t w, h;
+display_get_size(&w, &h);
+if (x >= 0 && x < w && y >= 0 && y < h) {
+    display_text(x, y, text, color);
+}
+```
+
+**Cause 2:** Passing a NULL or non-null-terminated string.
+
+```c
 if (text && text[0] != '\0') {
-    akira_display_text(10, 10, text, 0xFFFF);
-}
-
-// ✅ Check coordinates are within bounds
-if (x >= 0 && y >= 0 && x < width && y < height) {
-    akira_display_text(x, y, text, color);
+    display_text(x, y, text, color);
 }
 ```
 
----
+### Screen flickers
 
-### Problem: Display Flickers
+**Cause:** Flushing after every draw call instead of once per frame.
 
-**Symptoms:** Screen flashes or flickers rapidly
-
-**Possible Causes:**
-1. Flushing too frequently
-2. Clearing entire screen every frame
-3. No frame rate limiting
-
-**Solutions:**
+**Fix:** Compose the full frame, then flush once:
 
 ```c
-// ✅ Limit frame rate
-void render_loop() {
-    while(1) {
-        update_graphics();
-        akira_system_sleep(16);  // ~60 FPS
-        akira_process_events();
-    }
-}
+// BAD
+display_rect(0, 0, 100, 10, COLOR_RED);   display_flush();
+display_text(5, 0, "label", COLOR_WHITE); display_flush();
 
-// ✅ Only update changed regions
-static int last_value = -1;
-if (value != last_value) {
-    // Clear only the changed area
-    akira_display_rect(x, y, w, h, 0x0000);
-    draw_new_value(value);
-    akira_display_flush();
-    last_value = value;
-}
+// GOOD
+display_rect(0, 0, 100, 10, COLOR_RED);
+display_text(5, 0, "label", COLOR_WHITE);
+display_flush();
 ```
 
----
+### Colors look wrong
 
-### Problem: Colors Look Wrong
-
-**Symptoms:** Colors don't match what you expected
-
-**Possible Causes:**
-1. RGB565 format confusion
-2. Byte order issues
-3. Wrong color values
-
-**Solutions:**
+**Cause:** Confusion between RGB888 and RGB565 format. AkiraOS uses RGB565.
 
 ```c
-// ✅ Use RGB565 format correctly
-// Format: RRRR RGGG GGGB BBBB
+// RGB565 layout: RRRRRGGGGGGBBBBB
+#define COLOR_RED    0xF800   // R=31, G=0,  B=0
+#define COLOR_GREEN  0x07E0   // R=0,  G=63, B=0
+#define COLOR_BLUE   0x001F   // R=0,  G=0,  B=31
 
-// Red (5 bits): 0xF800
-// Green (6 bits): 0x07E0
-// Blue (5 bits): 0x001F
-
-// Create custom colors
-uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
-    return ((r & 0xF8) << 8) |  // Red: 5 bits
-           ((g & 0xFC) << 3) |  // Green: 6 bits
-           (b >> 3);             // Blue: 5 bits
-}
-
-// Test your colors
-akira_display_rect(0, 0, 10, 10, 0xF800);   // Red square
-akira_display_rect(10, 0, 10, 10, 0x07E0);  // Green square
-akira_display_rect(20, 0, 10, 10, 0x001F);  // Blue square
-akira_display_flush();
+// Predefined constants are in akira_api.h
 ```
 
 ---
 
-## ⚡ Event Handling Problems
+## Sensor Problems
 
-### Problem: Callbacks Never Fire
+### `sensor_read()` returns `AKIRA_SENSOR_ERROR`
 
-**Symptoms:** Registered callbacks don't get called
+**Cause 1:** Sensor not present or not enabled in device tree.
 
-**Possible Causes:**
-1. Forgot to call `akira_process_events()`
-2. Callback not properly registered
-3. Wrong timer/GPIO/topic ID
+**Fix:** Check that the hardware is connected and the overlay enables the sensor. Test with a known sensor first (e.g. `SENSOR_CHAN_AMBIENT_TEMP` on boards with an onboard thermometer).
 
-**Solutions:**
+**Cause 2:** Missing `sensor.read` capability in manifest.
+
+**Fix:** Add it to `manifest.json`:
+```json
+{
+  "capabilities": ["sensor.read"]
+}
+```
+
+**Cause 3:** Reading too soon after boot — some sensors need warm-up time.
+
+**Fix:** Add `delay(500000)` (500 ms) before the first read.
+
+### Sensor values seem constant or unrealistic
+
+**Cause:** Not dividing by 1000. `sensor_read()` returns the value scaled by 1000.
 
 ```c
-// ✅ MUST call this in your main loop
-while(1) {
-    akira_process_events();  // This dispatches callbacks!
-}
+// WRONG — treating raw units as physical
+int temp = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+printf("Temp %d C", temp);  // prints 23500, not 23
 
-// ✅ Check registration return value
-int result = akira_register_timer_callback(0, my_callback);
-if (result != 0) {
-    akira_log(0, "Failed to register callback! ❌");
-}
-
-// ✅ Verify IDs are in valid range
-if (timer_id >= 0 && timer_id < AKIRA_MAX_TIMERS) {
-    akira_register_timer_callback(timer_id, callback);
+// CORRECT — integer maths, no FPU needed
+int raw = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+if (raw != AKIRA_SENSOR_ERROR) {
+    printf("Temp %d.%d C", raw / 1000, (raw % 1000) / 100);
 }
 ```
 
 ---
 
-### Problem: Callback Gets Called Multiple Times
+## GPIO Issues
 
-**Symptoms:** Same callback fires repeatedly for one event
+### `gpio_read()` always returns 0 or stuck
 
-**Possible Causes:**
-1. Registered callback multiple times
-2. Multiple callbacks registered for same resource
-3. Not handling event properly
+**Cause 1:** Pin not configured before reading.
 
-**Solutions:**
+**Fix:** Call `gpio_configure()` first:
+```c
+gpio_configure(BTN_PIN, GPIO_INPUT | GPIO_PULL_DOWN);
+```
+
+**Cause 2:** Wrong pull direction — button wiring may expect pull-up.
 
 ```c
-// ✅ Unregister before re-registering
-akira_unregister_timer_callback(0);
-akira_register_timer_callback(0, new_callback);
+// Active-high button (button connects pin to VCC)
+gpio_configure(BTN_PIN, GPIO_INPUT | GPIO_PULL_DOWN);
+// button pressed → pin = 1
 
-// ✅ Check if already registered
-static bool is_registered = false;
-if (!is_registered) {
-    akira_register_timer_callback(0, callback);
-    is_registered = true;
-}
+// Active-low button (button connects pin to GND)
+gpio_configure(BTN_PIN, GPIO_INPUT | GPIO_PULL_UP);
+// button pressed → pin = 0
 ```
 
----
+**Cause 3:** Missing `gpio.read` capability in manifest.
 
-### Problem: Events Are Delayed or Slow
+### `gpio_write()` has no effect
 
-**Symptoms:** Callbacks fire later than expected
-
-**Possible Causes:**
-1. Blocking in callbacks
-2. Not calling `akira_process_events()` frequently
-3. Heavy processing in event loop
-
-**Solutions:**
+**Cause:** Pin not configured as output or missing `gpio.write` capability.
 
 ```c
-// ❌ BAD - blocks for 5 seconds
-void on_button(uint32_t buttons) {
-    akira_system_sleep(5000);  // DON'T DO THIS!
-}
-
-// ✅ GOOD - returns immediately
-static bool action_pending = false;
-void on_button(uint32_t buttons) {
-    action_pending = true;  // Set flag, process later
-}
-
-void on_timer() {
-    if (action_pending) {
-        perform_long_operation();
-        action_pending = false;
-    }
-}
+gpio_configure(LED_PIN, GPIO_OUTPUT | GPIO_OUTPUT_INIT_LOW);
+// Then:
+gpio_write(LED_PIN, 1);
 ```
 
 ---
 
-## 📊 Sensor Reading Errors
+## BLE Issues
 
-### Problem: Sensor Read Returns Error
+### `ble_init()` returns `-EBUSY`
 
-**Symptoms:** `akira_sensor_read()` returns non-zero
+**Cause:** HID mode is already active on the BLE stack.
 
-**Possible Causes:**
-1. Sensor not connected
-2. Wrong sensor type
-3. Sensor needs initialization time
-4. Missing capability in manifest
+**Fix:** Only one BLE mode can be active at a time. Disable HID first (`hid_disable()`) or design the app to use one or the other.
 
-**Solutions:**
+### No `BLE_EVT_CONNECTED` event
+
+**Cause 1:** `ble_advertise()` not called after `ble_init()`.
 
 ```c
-// ✅ Add retry logic with delays
-int read_sensor_with_retry(float *value) {
-    for (int i = 0; i < 3; i++) {
-        if (akira_sensor_read(SENSOR_TYPE_TEMP, value) == 0) {
-            return 0;  // Success
-        }
-        akira_log(1, "Retry sensor read... ⏳");
-        akira_system_sleep(100);
-    }
-    akira_log(0, "Sensor read failed after retries ❌");
-    return -1;
-}
-
-// ✅ Check sensor availability at startup
-void test_sensors() {
-    float dummy;
-    if (akira_sensor_read(SENSOR_TYPE_TEMP, &dummy) == 0) {
-        akira_log(2, "Temperature sensor OK ✅");
-    } else {
-        akira_log(0, "Temperature sensor not available ❌");
-    }
-}
+ble_init();
+ble_advertise();  // required
 ```
 
----
-
-### Problem: Sensor Values Seem Wrong
-
-**Symptoms:** Readings are unrealistic or constant
-
-**Possible Causes:**
-1. Using uninitialized variable
-2. Not checking return value
-3. Sensor calibration needed
-4. Reading too frequently
-
-**Solutions:**
+**Cause 2:** Event loop not running — `ble_event_pop()` must be called repeatedly.
 
 ```c
-// ✅ Always initialize and check
-float temp = 0.0;  // Initialize
-if (akira_sensor_read(SENSOR_TYPE_TEMP, &temp) == 0) {
-    // Only use if read was successful
-    if (temp >= -40.0 && temp <= 85.0) {  // Sanity check
-        process_temperature(temp);
-    } else {
-        akira_log(1, "Temperature out of range ⚠️");
-    }
-} else {
-    akira_log(0, "Failed to read temperature ❌");
-}
-
-// ✅ Don't read too frequently
-#define MIN_SENSOR_INTERVAL_MS 1000
-static uint64_t last_read = 0;
-
-void read_if_ready() {
-    uint64_t now = akira_system_uptime_ms();
-    if (now - last_read >= MIN_SENSOR_INTERVAL_MS) {
-        read_sensor();
-        last_read = now;
-    }
+while (1) {
+    int e = ble_event_pop(evt_buf, sizeof(evt_buf));
+    if (e == BLE_EVT_CONNECTED) { /* ... */ }
+    delay(10000);
 }
 ```
 
----
+**Cause 3:** App stopped advertising after a previous disconnect.
 
-## 📡 RF Communication Issues
+**Fix:** Re-advertise on disconnect:
+```c
+if (e == BLE_EVT_DISCONNECTED) {
+    ble_advertise();
+}
+```
 
-### Problem: RF Init Fails
+### Characteristic writes not received
 
-**Symptoms:** `akira_rf_init()` returns error
-
-**Possible Causes:**
-1. Wrong chip type
-2. Hardware not connected
-3. Missing capability
-4. Already initialized
-
-**Solutions:**
+**Cause:** Characteristic not created with `BLE_PROP_WRITE` or not added to the service before `ble_add_service()`.
 
 ```c
-// ✅ Check all possible chips
-int init_any_rf() {
-    const akira_rf_chip_t chips[] = {
-        AKIRA_RF_CHIP_NRF24L01,
-        AKIRA_RF_CHIP_CC1101,
-        AKIRA_RF_CHIP_SX1276
-    };
-    
-    for (int i = 0; i < sizeof(chips)/sizeof(chips[0]); i++) {
-        if (akira_rf_init(chips[i]) == 0) {
-            akira_log(2, "RF initialized! ✅");
-            return 0;
-        }
-    }
-    
-    akira_log(0, "No RF chip found ❌");
-    return -1;
-}
-
-// ✅ Deinit before reinit
-akira_rf_deinit();
-if (akira_rf_init(AKIRA_RF_CHIP_NRF24L01) == 0) {
-    akira_log(2, "RF reinitialized ✅");
-}
+int ch = ble_char_create(UUID, BLE_PROP_READ | BLE_PROP_WRITE, 20);
+ble_service_add_char(svc, ch);
+ble_add_service(svc);  // must call AFTER adding all chars
 ```
 
 ---
 
-### Problem: Can't Send/Receive RF Data
+## HID Issues
 
-**Symptoms:** `akira_rf_send()` or `akira_rf_receive()` fails
+### `hid_type_string()` / key presses have no effect
 
-**Possible Causes:**
-1. Incorrect frequency
-2. Power level too low
-3. Distance too far
-4. Packet size too large
-5. Timing issues
-
-**Solutions:**
+**Cause 1:** `hid_init()` not called, or wrong transport.
 
 ```c
-// ✅ Configure RF properly
-void setup_rf() {
-    akira_rf_init(AKIRA_RF_CHIP_NRF24L01);
-    
-    // Use common frequency
-    akira_rf_set_frequency(2450000000);  // 2.45 GHz
-    
-    // Use reasonable power
-    akira_rf_set_power(0);  // 0 dBm
-    
-    akira_log(2, "RF configured ⚙️");
-}
-
-// ✅ Check packet size
-#define MAX_RF_PACKET_SIZE 32
-
-void send_packet(const uint8_t *data, size_t len) {
-    if (len > MAX_RF_PACKET_SIZE) {
-        akira_log(1, "Packet too large ⚠️");
-        return;
-    }
-    
-    if (akira_rf_send(data, len) == 0) {
-        akira_log(2, "Packet sent ✅");
-    } else {
-        akira_log(0, "Send failed ❌");
-    }
-}
-
-// ✅ Use appropriate timeout
-uint8_t buffer[64];
-int len = akira_rf_receive(buffer, sizeof(buffer), 5000);  // 5 second timeout
-if (len > 0) {
-    akira_log(2, "Packet received! 📥");
-} else if (len == 0) {
-    akira_log(3, "Timeout - no packet 🕐");
-} else {
-    akira_log(0, "Receive error ❌");
-}
+hid_init(HID_TRANSPORT_BLE, HID_DEVICE_KEYBOARD);
+// wait for connection:
+while (!hid_is_connected()) delay(100000);
 ```
 
----
+**Cause 2:** Missing `hid` capability in manifest.
 
-### Problem: Poor RF Range
+**Cause 3:** BLE HID requires a paired host — make sure the device is paired and the HID profile is active.
 
-**Symptoms:** Communication only works at close range
+### Named shortcut does nothing
 
-**Possible Causes:**
-1. Low transmit power
-2. Interference
-3. Antenna issues
-4. Obstacles
-
-**Solutions:**
+**Cause:** `hid_action_register()` must be called before `hid_action_trigger()`.
 
 ```c
-// ✅ Increase transmit power
-akira_rf_set_power(20);  // Maximum power (check chip specs)
-
-// ✅ Check signal quality
-int16_t rssi;
-if (akira_rf_get_rssi(&rssi) == 0) {
-    akira_log(2, "RSSI: %d dBm 📶", rssi);
-    if (rssi < -90) {
-        akira_log(1, "Weak signal! ⚠️");
-    }
-}
-
-// ✅ Try different frequencies
-void scan_frequencies() {
-    uint32_t freqs[] = {2400000000, 2450000000, 2480000000};
-    
-    for (int i = 0; i < 3; i++) {
-        akira_rf_set_frequency(freqs[i]);
-        // Test communication...
-    }
-}
+hid_action_register("screenshot", HID_MOD_LEFT_GUI, HID_KEY_PRTSCN);
+// later:
+hid_action_trigger("screenshot");
 ```
 
 ---
 
-## 💾 Storage Problems
+## Storage Problems
 
-### Problem: File Read/Write Fails
+### `storage_open()` returns a negative error code
 
-**Symptoms:** Storage operations return negative values
-
-**Possible Causes:**
-1. File doesn't exist (read)
-2. Storage full (write)
-3. Invalid path
-4. Missing capability
-
-**Solutions:**
+**Cause 1:** File does not exist and `STORAGE_O_READ` was used.
 
 ```c
-// ✅ Check if file exists before reading
-int size = akira_storage_size("config.txt");
-if (size >= 0) {
-    char buffer[256];
-    int bytes = akira_storage_read("config.txt", buffer, sizeof(buffer));
-    if (bytes > 0) {
-        akira_log(2, "Read %d bytes ✅", bytes);
-    }
-} else {
-    akira_log(1, "File not found ⚠️");
-}
-
-// ✅ Check write result
-int bytes_written = akira_storage_write("data.txt", data, len);
-if (bytes_written == len) {
-    akira_log(2, "Write successful ✅");
-} else if (bytes_written < 0) {
-    akira_log(0, "Write failed ❌");
-} else {
-    akira_log(1, "Partial write ⚠️");
-}
+// Check with STORAGE_O_WRITE first if file may not exist
+int fd = storage_open("config.txt", STORAGE_O_WRITE);
 ```
 
----
+**Cause 2:** Missing `storage.read` / `storage.write` capability.
 
-### Problem: Storage Full
-
-**Symptoms:** Writes fail with -ENOMEM or similar
-
-**Possible Causes:**
-1. Too much data stored
-2. Not deleting old files
-3. Large log files
-
-**Solutions:**
+**Cause 3:** Path contains `..` — rejected for security.
 
 ```c
-// ✅ Implement log rotation
-void rotate_log() {
-    int size = akira_storage_size("app.log");
-    if (size > 10000) {  // 10KB limit
-        akira_storage_delete("app.log.old");
-        // Could rename app.log to app.log.old
-        akira_storage_delete("app.log");
-        akira_log(2, "Log rotated 🔄");
-    }
-}
+// WRONG
+storage_open("../other_app/secret.txt", STORAGE_O_READ);  // -EACCES
 
-// ✅ Clean up old files
-void cleanup_old_files() {
-    akira_storage_delete("temp.dat");
-    akira_storage_delete("cache.bin");
-    akira_log(2, "Cleanup complete 🧹");
-}
+// CORRECT — relative paths only
+storage_open("config.txt", STORAGE_O_READ);
+storage_open("logs/app.log", STORAGE_O_APPEND);
 ```
 
----
+### `storage_write()` returns `-ENOSPC`
 
-## 🌐 Network Errors
+**Cause:** Storage partition is full.
 
-### Problem: HTTP Request Fails
+**Fix:** Delete old files:
+```c
+storage_delete("old_data.bin");
+storage_delete("logs/app.log");  // implement log rotation
+```
 
-**Symptoms:** `akira_http_get()` returns negative value
+### Forgetting to close a file descriptor
 
-**Possible Causes:**
-1. No network connection
-2. Invalid URL
-3. Server unreachable
-4. Timeout
-
-**Solutions:**
+Always close after use — the platform has a limited number of file descriptors:
 
 ```c
-// ✅ Validate URL format
-bool is_valid_url(const char *url) {
-    return (strncmp(url, "http://", 7) == 0 || 
-            strncmp(url, "https://", 8) == 0);
-}
-
-// ✅ Add retry logic
-int http_get_with_retry(const char *url, uint8_t *buffer, size_t len) {
-    for (int i = 0; i < 3; i++) {
-        int result = akira_http_get(url, buffer, len);
-        if (result > 0) {
-            return result;
-        }
-        akira_log(1, "HTTP retry %d/3 ⏳", i + 1);
-        akira_system_sleep(1000);
-    }
-    return -1;
+int fd = storage_open("x.txt", STORAGE_O_READ);
+if (fd >= 0) {
+    int n = storage_read(fd, buf, sizeof(buf));
+    storage_close(fd);   // always close
 }
 ```
 
 ---
 
-### Problem: MQTT Messages Not Received
+## Network Issues
 
-**Symptoms:** Callback never fires for subscribed topic
+### `net_connect()` never produces `NET_EVT_CONNECTED`
 
-**Possible Causes:**
-1. Wrong topic pattern
-2. Not subscribed correctly
-3. Connection lost
-4. Callback not registered
+**Cause 1:** Not polling `net_event_pop()` in the loop.
 
-**Solutions:**
+**Cause 2:** DNS resolution failed (no network). Check that the device is connected to Wi-Fi first.
+
+**Cause 3:** RX/TX ring buffers not bound before connecting.
 
 ```c
-// ✅ Test subscription
-int result = akira_mqtt_subscribe("test/topic", on_mqtt);
-if (result == 0) {
-    akira_log(2, "Subscribed successfully ✅");
-    
-    // Publish test message
-    const char *msg = "test";
-    akira_mqtt_publish("test/topic", msg, strlen(msg));
-} else {
-    akira_log(0, "Subscribe failed ❌");
-}
-
-// ✅ Use wildcard patterns correctly
-akira_mqtt_subscribe("sensors/+/temp", on_mqtt);  // Any sensor
-akira_mqtt_subscribe("sensors/#", on_mqtt);       // All sensor topics
+int h = net_open(NET_TYPE_TCP);
+net_tx_bind(h, tx_buf, sizeof(tx_buf));   // must bind before connecting
+net_rx_bind(h, rx_buf, sizeof(rx_buf));
+net_connect(h, "example.com", 80);
 ```
 
----
+### Data sent but never received on the other end
 
-## 💾 Memory Issues
-
-### Problem: Out of Memory Errors
-
-**Symptoms:** Operations fail with -ENOMEM
-
-**Possible Causes:**
-1. Memory leaks
-2. Too many allocations
-3. Large stack usage
-4. Fragmentation
-
-**Solutions:**
+**Cause:** `net_tx_flush()` not called after writing to the ring.
 
 ```c
-// ✅ Use static allocation
-static char buffer[1024];  // Instead of malloc
-
-// ✅ Monitor memory usage
-void check_memory() {
-    size_t free = akira_system_free_memory();
-    akira_log(2, "Free memory: %zu bytes 💾", free);
-    
-    if (free < 1000) {
-        akira_log(1, "Low memory! ⚠️");
-    }
-}
-
-// ✅ Limit buffer sizes
-#define MAX_READINGS 100  // Don't make this too large!
-static float readings[MAX_READINGS];
+net_ring_write(tx_buf, sizeof(tx_buf), (uint8_t*)"ping", 4);
+net_tx_flush(h);   // required to push data to network stack
 ```
+
+### `net_ring_write()` returns `-1`
+
+**Cause:** TX ring is full — previous messages not flushed yet.
+
+**Fix:** Call `net_tx_flush(h)` before writing the next message, or increase the ring buffer size.
 
 ---
 
-### Problem: Stack Overflow
+## Memory Problems
 
-**Symptoms:** App crashes or behaves erratically
+### App crashes or behaves erratically
 
-**Possible Causes:**
-1. Large local variables
-2. Deep recursion
-3. Large format strings
-
-**Solutions:**
+**Likely cause:** Stack overflow from large on-stack allocations.
 
 ```c
-// ❌ BAD - large stack allocation
-void process() {
-    char huge[10000];  // Don't do this!
+// BAD — almost the entire 4 KB stack
+void process(void) {
+    uint8_t frame[3000];
 }
 
-// ✅ GOOD - use static
-void process() {
-    static char buffer[10000];  // OK
-}
-
-// ❌ BAD - recursion
-void recursive(int n) {
-    recursive(n + 1);  // Stack overflow!
-}
-
-// ✅ GOOD - iteration
-void iterative(int n) {
-    for (int i = 0; i < n; i++) {
-        // Process...
-    }
+// GOOD — static, off-stack
+static uint8_t frame[3000];
+void process(void) {
+    // use frame
 }
 ```
 
+### `mem_alloc()` returns 0
+
+**Cause:** WASM heap exhausted. The entire memory budget is 64 KB (or `memory_quota` in the manifest), shared by stack, static data, and heap.
+
+**Fix:** Use static buffers and reduce heap allocations.
+
 ---
 
-## 🔨 Compilation Errors
+## General Debugging
 
-### Problem: Undefined Reference to akira_*
+### Add progress logging
 
-**Symptoms:** Linker errors for Akira functions
+```c
+printf("init done");
+// ... code ...
+printf("loop start");
+```
 
-**Solutions:**
+### Test hardware components in isolation
+
+```c
+int main(void) {
+    // Test display only
+    display_clear(COLOR_RED);
+    display_flush();
+    delay(1000000);
+
+    // Test sensor only
+    int raw = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+    printf("temp raw: %d", raw);
+
+    return 0;
+}
+```
+
+### Verify sensor channels available on the board
+
+Not every board has every sensor. Use the shell to check:
+
+```
+akira> sensor list
+```
+
+### Display an error overlay
+
+```c
+void show_error(const char *msg) {
+    display_rect(0, 0, 320, 20, COLOR_RED);
+    display_text(4, 4, msg, COLOR_WHITE);
+    display_flush();
+    printf("ERROR: %s", msg);
+}
+```
+
+### Monitor timing
+
+```c
+int t = timer_create();
+timer_start(t);
+do_something();
+printf("elapsed: %d ms", timer_elapsed(t));
+timer_free(t);
+```
+
+### Debugging checklist
+
+- [ ] Logs visible on the host console (`printf()`)
+- [ ] All return values of host calls checked
+- [ ] `display_flush()` called after composing each frame
+- [ ] `sensor_read()` result compared against `AKIRA_SENSOR_ERROR`
+- [ ] `gpio_configure()` called before `gpio_read()`/`gpio_write()`
+- [ ] All file descriptors closed after use
+- [ ] Manifest `capabilities` list matches every API used
+- [ ] `delay()` present in all polling loops
+
+---
+
+## AOT Compilation Issues
+
+### `wamrc: command not found`
+
+The `wamrc` binary hasn't been built yet. The AkiraOS WAMR submodule ships
+with pre-configured CMake build directories — you just need to compile:
 
 ```bash
-# ✅ Include akira_api.c in compilation
-build.sh -o app.wasm main.c
+# Step 1 — build the bundled LLVM with Xtensa backend (one-time, ~5–15 min)
+cd AkiraOS/modules/wasm-micro-runtime/core/deps/llvm/build
+ninja -j$(nproc)
 
+# Step 2 — build wamrc
+cd AkiraOS/modules/wasm-micro-runtime/wamr-compiler/build
+ninja -j$(nproc)
 ```
 
----
-
-### Problem: Wrong WASM Output
-
-**Symptoms:** Generated WASM doesn't work
-
-**Solutions:**
+`rom_to_aot.py` and the `wasm_apps` Makefile auto-detect `wamrc` in that
+build directory, so no installation is required. If you prefer it on your
+PATH:
 
 ```bash
-# ✅ Use correct flags for standalone WASM
-build.sh -o app.wasm main.c
-# ✅ Check WASM with wasm-objdump
-wasm-objdump -x app.wasm
+# Option A: install system-wide
+sudo cp wamrc /usr/local/bin/
+
+# Option B: env var (per-session or add to ~/.bashrc)
+export WAMRC=$(pwd)/wamrc
 ```
 
----
+> **Do not** run `cmake .` from the `wamr-compiler` source directory — that
+> would create an in-source build unconfigured for Xtensa. Always use the
+> existing `wamr-compiler/build` directory.
 
-## 🐌 Performance Problems
+### `wamrc: unsupported target 'xtensa'`
 
-### Problem: App Runs Slow
+The locally-built `wamrc` wasn't compiled with Xtensa LLVM backend support. The
+AkiraOS WAMR fork (`ArturR0k3r/wasm-micro-runtime`, branch `AkiraOS_Patch`)
+includes the Xtensa backend. Make sure you're building from that submodule, not
+a generic WAMR checkout.
 
-**Symptoms:** Laggy UI, slow response
+### `.aot` file fails to load on device
 
-**Possible Causes:**
-1. Too many display updates
-2. Complex calculations in callbacks
-3. No frame rate limiting
-4. Sensor polling too frequent
+**Possible causes:**
 
-**Solutions:**
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| "invalid AOT file" | Wrong target arch | Rebuild with correct `AOT_TARGET` |
+| "incompatible version" | wamrc/runtime version mismatch | Rebuild wamrc from same WAMR commit as AkiraOS firmware |
+| "failed to instantiate" | Unsupported AOT feature | Use `.wasm` fallback; file an issue |
 
-```c
-// ✅ Limit display updates
-static uint64_t last_update = 0;
-#define UPDATE_INTERVAL_MS 100
+Always verify which WAMR commit AkiraOS is built against and use the `wamrc`
+from that same commit:
 
-void maybe_update_display() {
-    uint64_t now = akira_system_uptime_ms();
-    if (now - last_update >= UPDATE_INTERVAL_MS) {
-        update_display();
-        last_update = now;
-    }
-}
-
-// ✅ Move heavy work to timers
-void on_button(uint32_t buttons) {
-    flag_work_needed = true;  // Just set flag
-}
-
-void on_timer() {
-    if (flag_work_needed) {
-        do_heavy_calculation();  // Do work here
-        flag_work_needed = false;
-    }
-}
-
-// ✅ Profile your code
-uint64_t start = akira_system_uptime_ms();
-expensive_operation();
-uint64_t elapsed = akira_system_uptime_ms() - start;
-akira_log(3, "Operation took %llu ms", elapsed);
+```bash
+cd modules/wasm-micro-runtime
+git log --oneline -1   # shows the commit
 ```
 
----
+### AOT binary is larger than .wasm
 
-## 🔍 General Debugging Tips
+This is expected. AOT binaries contain native machine code (typically 2–5× the
+`.wasm` size) but execute without interpreter overhead.
 
-### Enable Verbose Logging
+Use `--size-level=1` and `--opt-level=3` (both set by default in `build.sh` and
+the Makefile) to balance size vs speed.
 
-```c
-// Add at start of main()
-akira_log(2, "App started 🚀");
-akira_log(2, "Version: 1.0.0");
+### App works in .wasm but crashes in .aot
 
-// Log important events
-akira_log(2, "Sensor read: %.2f", value);
-akira_log(2, "Button pressed: 0x%X", buttons);
-```
+The AOT-compiled binary runs native code, so memory-safety bugs that were masked
+by the interpreter (e.g., out-of-bounds static arrays, stack overflow) may crash
+differently. Debug with the `.wasm` version first, then test the `.aot`.
 
-### Add Debug Display
-
-```c
-#ifdef DEBUG
-void show_debug_overlay() {
-    char dbg[64];
-    
-    // Memory
-    snprintf(dbg, sizeof(dbg), "Mem:%zu", 
-             akira_system_free_memory());
-    akira_display_text(200, 5, dbg, 0xF800);
-    
-    // Uptime
-    snprintf(dbg, sizeof(dbg), "Up:%llu", 
-             akira_system_uptime_ms() / 1000);
-    akira_display_text(200, 20, dbg, 0xF800);
-}
-#endif
-```
-
-### Test in Isolation
-
-```c
-// Test each component separately
-void test_display() {
-    akira_display_clear(0xF800);  // Red screen
-    akira_display_flush();
-    akira_system_sleep(1000);
-}
-
-void test_sensors() {
-    float temp;
-    if (akira_sensor_read(SENSOR_TYPE_TEMP, &temp) == 0) {
-        akira_log(2, "Sensor OK: %.2f", temp);
-    }
-}
-
-AKIRA_APP_MAIN() {
-    test_display();
-    test_sensors();
-    // ...
-}
-```
-
-### Use Assertions
-
-```c
-#define ASSERT(cond) \
-    if (!(cond)) { \
-        akira_log(0, "Assert failed: " #cond); \
-        while(1); \
-    }
-
-void process_data(const char *data) {
-    ASSERT(data != NULL);
-    ASSERT(data[0] != '\0');
-    // Process...
-}
-```
-
----
-
-## 📞 Getting Help
-
-If you're still stuck:
-
-1. **Check the logs** - Look for error messages
-2. **Review the [API Reference](API_REFERENCE.md)** - Verify correct usage
-3. **Try the [Examples](EXAMPLES.md)** - Compare with working code
-4. **Read [Best Practices](BEST_PRACTICES.md)** - Avoid common pitfalls
-5. **Ask the community** - Post on forums with error details
-
----
-
-## 🎯 Debugging Checklist
-
-Before asking for help, verify:
-
-- [ ] Logs enabled and checked
-- [ ] Return values checked
-- [ ] Memory usage reasonable
-- [ ] Callbacks registered correctly
-- [ ] `akira_process_events()` called in loop
-- [ ] Display flushed after drawing
-- [ ] Pointers validated
-- [ ] Bounds checked
-- [ ] Error handling present
-- [ ] Tested each component separately
-
----
-
-[⬆ Back to Top](#-akira-sdk-troubleshooting-guide)
+**Common fix:** increase `-z stack-size` if stack-heavy functions segfault only
+in AOT mode — but remember the 64 KB total limit.

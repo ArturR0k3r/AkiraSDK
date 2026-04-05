@@ -1,0 +1,8 @@
+{
+  "name": "net_server",
+  "version": "1.0.0",
+  "capabilities": [
+    "network.*"
+  ],
+  "memory_quota": 131072
+}

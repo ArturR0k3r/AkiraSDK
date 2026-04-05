@@ -1,47 +1,31 @@
-/*
- * @copyright Copyright © contributors to Project Ocre,
- * which has been established as Project Ocre a Series of LF Projects, LLC
- * SPDX-License-Identifier: Apache-2.0
+/**
+ * @file hello_world.c
+ * @brief Simple "Hello World" WASM application for AkiraOS
  * 
- * AkiraOS Hello World WASM App - minimal no-stdlib version
+ * Minimal example demonstrating printfging API.
  * 
- * Compiles with -nostdlib to avoid WASI imports
- * Calls putchar directly from env module (provided by WAMR libc-builtin)
+ * @copyright Copyright (c) 2026 AkiraOS Contributors  
+ * @license Apache-2.0
  */
 
-/* Declare external functions from env module (WAMR libc-builtin) */
-extern int putchar(int c);
+#include "akira_api.h"
 
 int main(void)
 {
-    putchar('H');
-    putchar('e');
-    putchar('l');
-    putchar('l');
-    putchar('o');
-    putchar(' ');
-    putchar('f');
-    putchar('r');
-    putchar('o');
-    putchar('m');
-    putchar(' ');
-    putchar('W');
-    putchar('A');
-    putchar('S');
-    putchar('M');
-    putchar(' ');
-    putchar('o');
-    putchar('n');
-    putchar(' ');
-    putchar('A');
-    putchar('k');
-    putchar('i');
-    putchar('r');
-    putchar('a');
-    putchar('O');
-    putchar('S');
-    putchar('!');
-    putchar('\n');
+    // printf messages at different levels
+    printf( "=================================");
+    printf( "  Hello from AkiraOS WASM!      ");
+    printf( "=================================");
+    printf( "");
+    
+    printf( "[INFO]  This is an info message");
+    printf( "[WARN]  This is a warning message");
+    printf( "[ERROR] This is an error message");
+    
+    printf( "");
+    printf( "WASM app executed successfully!");
+    printf( "SDK Version: 1.0.0");
+    printf( "Runtime: AkiraOS WAMR");
     
     return 0;
 }

@@ -1,743 +1,517 @@
-# ⭐ Akira SDK Best Practices
+# Akira SDK Best Practices
 
-Write better, more efficient, and more maintainable code with these proven patterns and guidelines.
-
----
-
-## 📑 Table of Contents
-
-- [Event Loop Best Practices](#-event-loop-best-practices)
-- [Memory Management](#-memory-management)
-- [Display Optimization](#-display-optimization)
-- [Callback Design](#-callback-design)
-- [Error Handling](#-error-handling)
-- [Power Efficiency](#-power-efficiency)
-- [Code Organization](#-code-organization)
-- [Security Considerations](#-security-considerations)
-- [Testing & Debugging](#-testing--debugging)
+Patterns and guidelines for writing efficient, reliable WASM apps on AkiraOS.
 
 ---
 
-## 🔄 Event Loop Best Practices
+## Table of Contents
 
-### ✅ DO: Keep Your Main Loop Simple
+- [Main Loop](#main-loop)
+- [Memory Management](#memory-management)
+- [Display Optimization](#display-optimization)
+- [GPIO & Input Polling](#gpio--input-polling)
+- [Sensor Reading](#sensor-reading)
+- [Error Handling](#error-handling)
+- [Power Efficiency](#power-efficiency)
+- [Code Organization](#code-organization)
+
+---
+
+## Main Loop
+
+AkiraOS WASM apps run as a single `main()` function. There is no event dispatcher — you poll hardware directly using `delay()` to yield between iterations.
+
+### DO: Keep the main loop simple
 
 ```c
-AKIRA_APP_MAIN() {
-    // Initialization
-    setup_display();
-    setup_callbacks();
-    
-    // Simple, clean event loop
-    while(1) {
-        akira_process_events();
+#include "akira_api.h"
+
+int main(void) {
+    setup();
+
+    while (1) {
+        poll_buttons();
+        update_display();
+        delay(16000);  // ~60 fps
     }
-    
     return 0;
 }
 ```
 
-### ❌ DON'T: Put Business Logic in Main Loop
+### DO: Use a timer handle for periodic tasks
 
 ```c
-// BAD - cluttered main loop
-AKIRA_APP_MAIN() {
-    while(1) {
-        read_sensors();
-        update_display();
-        check_buttons();
-        process_network();
-        akira_process_events();
+int t = timer_create();
+timer_start(t);
+
+while (1) {
+    if (timer_elapsed(t) >= 1000) {
+        timer_start(t);       // reset
+        read_and_log_sensors();
     }
+    delay(10000);  // yield 10 ms between polls
 }
 ```
 
-**Why?** `akira_process_events()` already dispatches to your callbacks. Keep the main loop focused on event processing.
-
----
-
-### ✅ DO: Use Callbacks for Asynchronous Events
+### DON'T: Busy-spin without yielding
 
 ```c
-void on_timer() {
-    update_sensor_display();
+// BAD — burns 100% CPU
+while (1) {
+    check_buttons();
 }
 
-void on_button(uint32_t buttons) {
-    handle_user_input(buttons);
-}
-
-AKIRA_APP_MAIN() {
-    akira_register_timer_callback(0, on_timer);
-    akira_input_set_callback(on_button);
-    
-    while(1) {
-        akira_process_events();
-    }
+// GOOD — yields to the scheduler
+while (1) {
+    check_buttons();
+    delay(5000);  // 5 ms
 }
 ```
 
 ---
 
-### ❌ DON'T: Block in Callbacks
+## Memory Management
+
+### DO: Use static buffers for fixed-size data
 
 ```c
-// BAD - blocks event processing
-void on_button(uint32_t buttons) {
-    for(int i = 0; i < 1000; i++) {
-        akira_system_sleep(10);  // Blocks for 10 seconds!
-        update_animation();
-    }
+static char log_buf[256];
+static uint16_t frame[320 * 240];  // full framebuffer if needed
+```
+
+Static allocation has no heap fragmentation and no allocation failures.
+
+### DON'T: Use large on-stack buffers
+
+```c
+// BAD — may overflow WASM stack (4KB default)
+void process(void) {
+    char buf[4096];  // almost the entire stack!
+}
+
+// GOOD — static
+static char buf[4096];
+void process(void) {
+    // use buf
 }
 ```
 
-**Why?** Callbacks must return quickly. Use timers or state machines for long operations.
-
----
-
-### ✅ DO: Use State Machines for Complex Logic
+### DO: Check `mem_alloc()` results
 
 ```c
-typedef enum {
-    STATE_IDLE,
-    STATE_READING,
-    STATE_PROCESSING,
-    STATE_COMPLETE
-} AppState;
-
-static AppState state = STATE_IDLE;
-
-void on_timer() {
-    switch(state) {
-        case STATE_IDLE:
-            start_sensor_read();
-            state = STATE_READING;
-            break;
-            
-        case STATE_READING:
-            if (sensor_ready()) {
-                state = STATE_PROCESSING;
-            }
-            break;
-            
-        case STATE_PROCESSING:
-            process_data();
-            state = STATE_COMPLETE;
-            break;
-            
-        case STATE_COMPLETE:
-            display_results();
-            state = STATE_IDLE;
-            break;
-    }
-}
-```
-
----
-
-## 💾 Memory Management
-
-### ✅ DO: Use Static Buffers for Fixed-Size Data
-
-```c
-static char display_buffer[256];
-static uint8_t sensor_readings[MAX_SAMPLES];
-```
-
-**Benefits:**
-- No heap fragmentation
-- Predictable memory usage
-- No allocation failures
-
----
-
-### ❌ DON'T: Use Large Stack Buffers
-
-```c
-void process_data() {
-    char huge_buffer[4096];  // BAD - may overflow stack
-    // ...
-}
-```
-
-**Why?** WASM has limited stack space. Use static or heap allocation for large buffers.
-
----
-
-### ✅ DO: Check Array Bounds
-
-```c
-static int values[MAX_VALUES];
-static int count = 0;
-
-void add_value(int val) {
-    if (count < MAX_VALUES) {
-        values[count++] = val;
-    } else {
-        akira_log(1, "Buffer full! ⚠️");
-    }
-}
-```
-
----
-
-### ✅ DO: Free Resources When Done
-
-```c
-void cleanup() {
-    akira_rf_deinit();
-    akira_unregister_timer_callback(0);
-    akira_unregister_gpio_callback(0, 5);
-}
-```
-
----
-
-## 🎨 Display Optimization
-
-### ✅ DO: Batch Display Updates
-
-```c
-// GOOD - single flush
-void update_screen() {
-    akira_display_clear(0x0000);
-    akira_display_text(10, 10, "Line 1", 0xFFFF);
-    akira_display_text(10, 30, "Line 2", 0xFFFF);
-    akira_display_text(10, 50, "Line 3", 0xFFFF);
-    akira_display_flush();  // Flush once
-}
-```
-
-### ❌ DON'T: Flush After Every Draw
-
-```c
-// BAD - too many flushes
-akira_display_text(10, 10, "Line 1", 0xFFFF);
-akira_display_flush();
-akira_display_text(10, 30, "Line 2", 0xFFFF);
-akira_display_flush();
-akira_display_text(10, 50, "Line 3", 0xFFFF);
-akira_display_flush();
-```
-
-**Why?** Each flush is expensive. Batch all updates, then flush once.
-
----
-
-### ✅ DO: Only Update Changed Regions
-
-```c
-static int last_value = -1;
-
-void update_value(int new_value) {
-    if (new_value != last_value) {
-        // Only redraw if changed
-        akira_display_rect(100, 50, 50, 20, 0x0000);  // Clear old
-        
-        char text[16];
-        snprintf(text, sizeof(text), "%d", new_value);
-        akira_display_text(100, 50, text, 0xFFFF);
-        akira_display_flush();
-        
-        last_value = new_value;
-    }
-}
-```
-
----
-
-### ✅ DO: Limit Frame Rate
-
-```c
-void animation_loop() {
-    while(1) {
-        update_animation();
-        akira_system_sleep(16);  // ~60 FPS
-        akira_process_events();
-    }
-}
-```
-
-**Why?** Higher frame rates waste power and CPU.
-
----
-
-### 💡 Color Palette Tip
-
-```c
-// Define common colors once
-#define COLOR_BG      0x0000
-#define COLOR_TEXT    0xFFFF
-#define COLOR_SUCCESS 0x07E0
-#define COLOR_ERROR   0xF800
-#define COLOR_WARNING 0xFFE0
-
-void show_status(bool success) {
-    uint16_t color = success ? COLOR_SUCCESS : COLOR_ERROR;
-    akira_display_text(10, 10, "Status", color);
-}
-```
-
----
-
-## 🎯 Callback Design
-
-### ✅ DO: Keep Callbacks Short and Fast
-
-```c
-void on_button(uint32_t buttons) {
-    // Quick operation
-    if (buttons & AKIRA_BTN_A) {
-        flag_action_needed = true;
-    }
-}
-
-// Process in main loop or timer
-void on_timer() {
-    if (flag_action_needed) {
-        perform_long_operation();
-        flag_action_needed = false;
-    }
-}
-```
-
----
-
-### ✅ DO: Check for NULL Callbacks
-
-When registering callbacks yourself:
-
-```c
-int my_register_callback(callback_func_t cb) {
-    if (!cb) {
-        akira_log(0, "NULL callback! ❌");
-        return -1;
-    }
-    // Register...
-}
-```
-
----
-
-### ❌ DON'T: Call Callbacks Recursively
-
-```c
-// BAD - can cause stack overflow
-void on_timer() {
-    process_data();
-    on_timer();  // Don't do this!
-}
-```
-
----
-
-### ✅ DO: Handle All Event Cases
-
-```c
-void on_button(uint32_t buttons) {
-    if (buttons & AKIRA_BTN_A) {
-        handle_a();
-    } else if (buttons & AKIRA_BTN_B) {
-        handle_b();
-    } else if (buttons == 0) {
-        handle_release();
-    } else {
-        // Handle unknown combination
-        akira_log(3, "Unknown button combo");
-    }
-}
-```
-
----
-
-## ⚠️ Error Handling
-
-### ✅ DO: Check Return Values
-
-```c
-if (akira_sensor_read(SENSOR_TYPE_TEMP, &temp) != 0) {
-    akira_log(0, "Sensor read failed! ❌");
-    // Handle error...
+uint32_t ptr = mem_alloc(1024);
+if (ptr == 0) {
+    printf("alloc failed");
     return;
 }
-
-// Use the data
-process_temperature(temp);
+// use ptr...
+mem_free(ptr);
 ```
 
 ---
 
-### ❌ DON'T: Ignore Errors
+## Display Optimization
+
+### DO: Batch draw calls and flush once per frame
 
 ```c
-// BAD - ignores potential failure
-akira_sensor_read(SENSOR_TYPE_TEMP, &temp);
-process_temperature(temp);  // temp might be uninitialized!
-```
-
----
-
-### ✅ DO: Provide User Feedback
-
-```c
-void show_error(const char *message) {
-    akira_display_clear(0x0000);
-    akira_display_text(10, 10, "Error! ❌", 0xF800);
-    akira_display_text(10, 30, message, 0xFFFF);
-    akira_display_flush();
-    
-    akira_log(0, message);
+// GOOD — single flush
+void draw_frame(void) {
+    display_clear(COLOR_BLACK);
+    display_text(10, 10, "Line 1", COLOR_WHITE);
+    display_text(10, 28, "Line 2", COLOR_WHITE);
+    display_text(10, 46, "Line 3", COLOR_WHITE);
+    display_flush();  // push everything at once
 }
 ```
 
----
-
-### ✅ DO: Implement Retry Logic
+### DON'T: Flush after every draw call
 
 ```c
-int retry_sensor_read(float *value, int max_retries) {
-    for (int i = 0; i < max_retries; i++) {
-        if (akira_sensor_read(SENSOR_TYPE_TEMP, value) == 0) {
-            return 0;  // Success
-        }
-        akira_system_sleep(100);  // Wait before retry
+// BAD — 3x the work
+display_text(10, 10, "Line 1", COLOR_WHITE);
+display_flush();
+display_text(10, 28, "Line 2", COLOR_WHITE);
+display_flush();
+```
+
+### DO: Only redraw changed regions
+
+```c
+static int last_val = -1;
+
+void update_counter(int val) {
+    if (val == last_val) return;
+    last_val = val;
+
+    display_rect(100, 50, 80, 20, COLOR_BLACK);  // erase old
+    display_number(100, 50, val, COLOR_WHITE);
+    display_flush();
+}
+```
+
+### DO: Limit frame rate
+
+```c
+while (1) {
+    render_frame();
+    delay(33000);  // ~30 fps
+}
+```
+
+### DO: Define your colour palette up top
+
+```c
+#define C_BG     COLOR_BLACK
+#define C_TEXT   COLOR_WHITE
+#define C_OK     COLOR_GREEN
+#define C_ERR    COLOR_RED
+#define C_WARN   COLOR_YELLOW
+```
+
+---
+
+## GPIO & Input Polling
+
+### DO: Detect rising edges for button presses
+
+```c
+static int prev_btn = 0;
+
+void poll_button(void) {
+    int cur = gpio_read(BTN_PIN) == 1;
+    if (cur && !prev_btn) {
+        on_button_press();   // fires once on press
     }
-    return -1;  // Failed after retries
+    prev_btn = cur;
+}
+```
+
+### DO: Configure pins correctly before reading
+
+```c
+void gpio_init(void) {
+    gpio_configure(LED_PIN, GPIO_OUTPUT | GPIO_OUTPUT_INIT_LOW);
+    gpio_configure(BTN_PIN, GPIO_INPUT | GPIO_PULL_DOWN);
+}
+```
+
+### DO: Debounce if needed
+
+```c
+static int debounce_ms = 0;
+
+void poll_button_debounced(int timer_h) {
+    int cur = gpio_read(BTN_PIN) == 1;
+    if (cur && debounce_ms == 0) {
+        on_button_press();
+        debounce_ms = 50;
+    }
+    if (debounce_ms > 0) {
+        // decrement per poll (call every 10 ms → 5 polls = 50 ms)
+        debounce_ms -= 10;
+        if (debounce_ms < 0) debounce_ms = 0;
+    }
 }
 ```
 
 ---
 
-### ✅ DO: Use Defensive Programming
+## Sensor Reading
+
+### DO: Always guard against `AKIRA_SENSOR_ERROR`
 
 ```c
-void process_message(const char *topic, const void *payload, uint32_t len) {
-    // Validate inputs
-    if (!topic || !payload || len == 0) {
-        akira_log(1, "Invalid message parameters ⚠️");
+int raw = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+if (raw == AKIRA_SENSOR_ERROR) {
+    printf("sensor unavailable");
+    return;
+}
+// raw = 23500 → 23.5 °C; use integer maths:
+int whole = raw / 1000;
+int frac  = (raw % 1000) / 100;  // one decimal place
+printf("Temp: %d.%d C", whole, frac);
+```
+
+### DON'T: Use the raw reading without checking
+
+```c
+// BAD — raw might be INT32_MIN on failure
+int raw = sensor_read(SENSOR_CHAN_ACCEL_X);
+do_physics(raw);   // undefined behaviour if raw == AKIRA_SENSOR_ERROR
+```
+
+### DO: Throttle sensor polls
+
+```c
+#define SENSOR_INTERVAL_MS 500
+
+int t = timer_create();
+timer_start(t);
+
+while (1) {
+    if (timer_elapsed(t) >= SENSOR_INTERVAL_MS) {
+        timer_start(t);
+        int raw = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+        if (raw != AKIRA_SENSOR_ERROR) update_display(raw);
+    }
+    delay(10000);
+}
+```
+
+---
+
+## Error Handling
+
+### DO: Check return values of host calls
+
+```c
+int fd = storage_open("config.txt", STORAGE_O_READ);
+if (fd < 0) {
+    printf("open failed: %d", fd);
+    return;
+}
+int n = storage_read(fd, buf, sizeof(buf) - 1);
+storage_close(fd);
+```
+
+### DO: Provide user feedback on errors
+
+```c
+void show_error(const char *msg) {
+    display_clear(COLOR_BLACK);
+    display_text(10, 10, "Error", COLOR_RED);
+    display_text(10, 30, msg, COLOR_WHITE);
+    display_flush();
+    printf("ERR: %s", msg);
+}
+```
+
+### DO: Retry transient failures
+
+```c
+int read_temp_stable(void) {
+    for (int i = 0; i < 3; i++) {
+        int v = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+        if (v != AKIRA_SENSOR_ERROR) return v;
+        delay(200000);  // wait 200 ms before retry
+    }
+    return AKIRA_SENSOR_ERROR;
+}
+```
+
+### DO: Validate pointer parameters
+
+```c
+void process(const char *data, int len) {
+    if (!data || len <= 0 || len > MAX_LEN) {
+        printf("invalid params");
         return;
     }
-    
-    if (len > MAX_PAYLOAD_SIZE) {
-        akira_log(1, "Payload too large ⚠️");
-        return;
-    }
-    
-    // Safe to process
-    handle_message(topic, payload, len);
+    // safe to use
 }
 ```
 
 ---
 
-## 🔋 Power Efficiency
+## Power Efficiency
 
-### ✅ DO: Sleep When Idle
+### DO: Sleep when idle
 
 ```c
-void main_loop() {
-    while(1) {
-        if (has_work()) {
-            do_work();
-        } else {
-            akira_system_sleep(100);  // Sleep when idle
-        }
-        akira_process_events();
+while (1) {
+    if (has_work()) {
+        do_work();
+    } else {
+        delay(100000);  // 100 ms idle sleep
     }
 }
 ```
 
----
-
-### ✅ DO: Reduce Sensor Polling
+### DO: Reduce sensor poll rate on battery
 
 ```c
-// GOOD - read every 5 seconds
-#define SENSOR_INTERVAL_MS 5000
+int pct = power_get_battery_level();
+int interval_ms = (pct < 20) ? 5000 : 1000;  // slower on low battery
+```
 
-void on_timer() {
-    read_sensor();
-}
+### DO: Power down unused peripherals
 
-// BAD - constant polling
-void main_loop() {
-    while(1) {
-        read_sensor();  // Too frequent!
-        akira_system_sleep(10);
-    }
-}
+```c
+// Disable RF if not needed
+// Disable BLE advertising when not expecting connections
+ble_stop_advertise();
+```
+
+### DO: Use deep sleep for long waits
+
+```c
+power_wake_on_timer(30000);           // wake after 30 s
+power_set_mode(POWER_MODE_DEEP_SLEEP);
+// execution resumes here after wake
 ```
 
 ---
 
-### ✅ DO: Disable Unused Features
+## Code Organization
 
-```c
-void cleanup_unused_features() {
-    akira_rf_deinit();  // Power down RF if not needed
-    akira_unregister_timer_callback(unused_timer_id);
-}
-```
-
----
-
-### ✅ DO: Optimize Display Updates
-
-```c
-// Update display only when data changes
-static float last_temp = -999.0;
-
-void update_display(float temp) {
-    if (fabs(temp - last_temp) > 0.1) {  // Threshold
-        // Display update logic
-        last_temp = temp;
-    }
-}
-```
-
----
-
-## 📁 Code Organization
-
-### ✅ DO: Use Meaningful Names
+### DO: Use constants instead of magic numbers
 
 ```c
 // GOOD
-void update_temperature_display(float celsius);
-void handle_button_press(uint32_t button_mask);
+#define UPDATE_INTERVAL_MS  1000
+#define TEMP_WARN_THRESHOLD 3000  // 30.0 °C * 1000
+#define LED_PIN             48
 
 // BAD
-void upd(float t);
-void hndl(uint32_t b);
+if (sensor_read(13) > 3000)
+    gpio_write(48, 1);
 ```
 
----
-
-### ✅ DO: Group Related Functions
+### DO: Group related functionality
 
 ```c
-// sensor.c
-void sensor_init(void);
-float sensor_read_temp(void);
-float sensor_read_humidity(void);
+// sensors.c
+void sensors_init(void) { /* ... */ }
+int  sensors_read_temp(void) { return sensor_read(SENSOR_CHAN_AMBIENT_TEMP); }
 
-// display.c
-void display_init(void);
-void display_update(void);
-void display_clear(void);
+// ui.c
+void ui_init(void) { /* ... */ }
+void ui_update(int temp_raw) { /* ... */ }
 
 // main.c
-AKIRA_APP_MAIN() {
-    sensor_init();
-    display_init();
-    // ...
-}
-```
-
----
-
-### ✅ DO: Use Constants Instead of Magic Numbers
-
-```c
-// GOOD
-#define TEMP_THRESHOLD_LOW   18.0
-#define TEMP_THRESHOLD_HIGH  25.0
-#define UPDATE_INTERVAL_MS   1000
-
-if (temp < TEMP_THRESHOLD_LOW) {
-    set_color(COLOR_BLUE);
-}
-
-// BAD
-if (temp < 18.0) {
-    set_color(0x001F);
-}
-```
-
----
-
-### ✅ DO: Comment Complex Logic
-
-```c
-void calculate_moving_average() {
-    // Use circular buffer to maintain last N samples
-    // When buffer is full, overwrite oldest sample
-    int index = sample_count % BUFFER_SIZE;
-    buffer[index] = new_sample;
-    sample_count++;
-    
-    // Calculate average of all valid samples
-    float sum = 0;
-    int count = (sample_count < BUFFER_SIZE) ? sample_count : BUFFER_SIZE;
-    for (int i = 0; i < count; i++) {
-        sum += buffer[i];
+int main(void) {
+    sensors_init();
+    ui_init();
+    while (1) {
+        ui_update(sensors_read_temp());
+        delay(16000);
     }
-    return sum / count;
+    return 0;
 }
 ```
 
----
-
-## 🔒 Security Considerations
-
-### ✅ DO: Validate Input Sizes
+### DO: Comment non-obvious logic
 
 ```c
-void handle_message(const char *topic, const void *payload, uint32_t len) {
-    if (len > MAX_SAFE_SIZE) {
-        akira_log(0, "Payload too large - rejected ⚠️");
-        return;
-    }
-    
-    // Safe to process
-    process_payload(payload, len);
-}
+// Sensor returns value * 1000; convert to integer degrees
+// e.g. 23456 → 23 °C (truncate, not round)
+int deg_c = raw / 1000;
+```
+
+### DO: Free and close resources
+
+```c
+// Timers
+timer_stop(t);
+timer_free(t);
+
+// Storage
+storage_close(fd);
+
+// BLE
+ble_stop_advertise();
+ble_deinit();
+
+// UART
+uart_close(uart_h);
 ```
 
 ---
 
-### ✅ DO: Use Bounds-Checked Functions
+## Quick Checklist
 
-```c
-// GOOD
-strncpy(dest, src, sizeof(dest) - 1);
-dest[sizeof(dest) - 1] = '\0';
+Before deploying an app, verify:
 
-// BAD
-strcpy(dest, src);  // No bounds checking!
-```
-
----
-
-### ✅ DO: Validate Pointers
-
-```c
-void process_data(const char *data) {
-    if (!data) {
-        akira_log(0, "NULL pointer! ❌");
-        return;
-    }
-    
-    // Safe to use
-    do_something(data);
-}
-```
-
----
-
-### ✅ DO: Sanitize User Input
-
-```c
-void handle_rf_packet(uint8_t *data, size_t len) {
-    // Validate packet structure
-    if (len < sizeof(PacketHeader)) {
-        akira_log(1, "Invalid packet size ⚠️");
-        return;
-    }
-    
-    PacketHeader *hdr = (PacketHeader*)data;
-    
-    // Verify checksum
-    if (!verify_checksum(hdr)) {
-        akira_log(1, "Checksum failed ⚠️");
-        return;
-    }
-    
-    // Safe to process
-    process_valid_packet(hdr);
-}
-```
-
----
-
-## 🧪 Testing & Debugging
-
-### ✅ DO: Use Log Levels Appropriately
-
-```c
-akira_log(0, "Critical error occurred! ❌");      // Error
-akira_log(1, "Warning: retrying operation ⚠️");   // Warning
-akira_log(2, "Sensor read successful ✅");        // Info
-akira_log(3, "Debug: value = 42");               // Debug
-```
-
----
-
-### ✅ DO: Add Debug Visualizations
-
-```c
-#ifdef DEBUG
-void show_debug_info() {
-    akira_display_text(200, 5, "DBG", 0xF800);
-    
-    char dbg[32];
-    snprintf(dbg, sizeof(dbg), "M:%zu", akira_system_free_memory());
-    akira_display_text(180, 110, dbg, 0x7BEF);
-}
-#endif
-```
-
----
-
-### ✅ DO: Test Error Paths
-
-```c
-void test_sensor_failure() {
-    // Simulate sensor failure
-    float dummy;
-    int result = akira_sensor_read(SENSOR_TYPE_INVALID, &dummy);
-    
-    if (result != 0) {
-        akira_log(2, "Error handling works! ✅");
-    }
-}
-```
-
----
-
-### ✅ DO: Monitor Resource Usage
-
-```c
-void log_resources() {
-    size_t free_mem = akira_system_free_memory();
-    uint64_t uptime = akira_system_uptime_ms();
-    
-    char msg[128];
-    snprintf(msg, sizeof(msg), 
-             "Mem: %zu bytes | Uptime: %llu ms", 
-             free_mem, uptime);
-    akira_log(3, msg);
-}
-```
-
----
-
-## 🎯 Quick Reference Checklist
-
-Before deploying your app, verify:
-
-- [ ] Main loop calls `akira_process_events()`
-- [ ] Callbacks return quickly
-- [ ] All return values checked
-- [ ] No large stack allocations
-- [ ] Display updates batched
-- [ ] Errors logged and handled
-- [ ] Resource cleanup on exit
-- [ ] Input validation present
-- [ ] Power-saving measures used
-- [ ] Code is commented
+- [ ] `main()` has an event / poll loop with `delay()`
+- [ ] All `sensor_read()` calls check for `AKIRA_SENSOR_ERROR`
+- [ ] All host-call return values are checked where failure matters
+- [ ] `display_flush()` called once per frame (not after every draw)
+- [ ] GPIO pins configured before reading/writing
+- [ ] No large on-stack buffers (prefer `static`)
+- [ ] Resources closed/freed on exit paths
 - [ ] Constants used instead of magic numbers
-- [ ] Memory leaks checked
+- [ ] Manifest `capabilities` list is complete
 
 ---
 
-## 📚 Additional Resources
+## AOT Compilation
 
-- [API Reference](API_REFERENCE.md) - Complete API documentation
-- [Examples](EXAMPLES.md) - Working code samples
-- [Tutorials](TUTORIALS.md) - Step-by-step guides
-- [Troubleshooting](TROUBLESHOOTING.md) - Common issues
+### When to use AOT
 
----
+Use AOT-compiled (`.aot`) binaries instead of bytecode (`.wasm`) when:
 
-[⬆ Back to Top](#-akira-sdk-best-practices)
+- **frame rate matters** — 3D apps (cube3d, imu_3d), games (tetris), animations
+- **math-heavy inner loops** — trigonometry, matrix maths, signal processing
+- **battery life is a concern** — fewer CPU cycles per instruction
+- **final production firmware** — ship fast binaries to end users
+
+Keep using `.wasm` during development (faster iteration, architecture-independent).
+
+### AOT vs interpreter
+
+| Concern | `.wasm` | `.aot` |
+|---------|---------|--------|
+| Build time | Fast | Adds wamrc step |
+| Debug iteration | Best | Rebuild .wasm first, then re-AOT |
+| Target portability | Single binary runs everywhere | One `.aot` per CPU |
+| Execution speed | Baseline | 10–50× faster |
+| File per deployment | `app.wasm` | `app-xtensa.aot` (board-specific) |
+
+### AOT workflow
+
+```bash
+# Step 1 — build .wasm (standard flow)
+cd wasm_apps
+./build.sh                      # all apps → bin/*.wasm
+
+# Step 2 — AOT-compile to native binary
+./build.sh aot                  # ESP32-S3 (default xtensa)
+./build.sh aot thumb            # nRF54L15 (Cortex-M33)
+./build.sh aot thumbv7em        # STM32 (Cortex-M7)
+./build.sh aot riscv32          # ESP32-C3 (RISC-V 32)
+
+# Output: bin/<app>-<target>.aot
+```
+
+### Building wamrc (one-time setup)
+
+The AkiraOS WAMR submodule ships with pre-configured CMake build directories.
+Do **not** run `cmake` yourself — just compile with ninja:
+
+```bash
+# 1. Build bundled LLVM with Xtensa backend (~5–15 min)
+cd AkiraOS/modules/wasm-micro-runtime/core/deps/llvm/build
+ninja -j$(nproc)
+
+# 2. Build wamrc
+cd AkiraOS/modules/wasm-micro-runtime/wamr-compiler/build
+ninja -j$(nproc)
+
+# Optional: make available system-wide
+sudo cp wamrc /usr/local/bin/
+# or add to your shell: export WAMRC=/path/to/wamr-compiler/build/wamrc
+```
+
+The build tools auto-detect `wamrc` in the build directory, so the install
+step is optional.
+
+### Performance pattern for AOT apps
+
+The same source code runs in both modes. There is nothing to change in `main.c`
+to benefit from AOT — just upload the `.aot` file instead of `.wasm`. The WAMR
+runtime detects the file format at load time.
+
+For maximum AOT benefit, structure compute-heavy work in tight loops:
+
+```c
+// Good: tight inner loop — AOT eliminates interpreter overhead entirely
+static void matrix_multiply(float a[9], float b[9], float out[9]) {
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) {
+            out[i*3+j] = 0;
+            for (int k = 0; k < 3; k++)
+                out[i*3+j] += a[i*3+k] * b[k*3+j];
+        }
+}
+```

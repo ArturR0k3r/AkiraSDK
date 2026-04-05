@@ -1,0 +1,92 @@
+/*
+ * Copyright (c) 2025 AkiraOS Contributors
+ * SPDX-License-Identifier: GPL-3.0-only
+ *
+ * @file akira_console.h
+ * @brief AkiraConsole board constants — display geometry, color theme, button IDs.
+ *
+ * Pure-macro header. No firmware dependencies. Safe to include from any WASM app.
+ * Automatically included by akira_api.h so apps do not need a separate include.
+ */
+
+#ifndef AKIRA_CONSOLE_H
+#define AKIRA_CONSOLE_H
+
+/* ─── Board identity ──────────────────────────────────────────────────────── */
+#define AKIRA_CONSOLE_BOARD_NAME    "AkiraConsole"
+#define AKIRA_CONSOLE_BOARD_REV     "1.0"
+#define AKIRA_CONSOLE_MODEL_STRING  "AkiraConsole/ESP32-S3-N16R8"
+
+/* ─── Display geometry (ST7789V 320×240) ─────────────────────────────────── */
+#define CONSOLE_WIDTH       320
+#define CONSOLE_HEIGHT      240
+
+/* Fixed chrome zones shared by all shell screens */
+#define CONSOLE_HEADER_H    20          /* rows 0–19:   title bar            */
+#define CONSOLE_FOOTER_Y    220         /* rows 220–239: hint bar            */
+#define CONSOLE_FOOTER_H    20
+#define CONSOLE_CONTENT_Y   CONSOLE_HEADER_H
+#define CONSOLE_CONTENT_H   (CONSOLE_FOOTER_Y - CONSOLE_HEADER_H)  /* 200px */
+
+/* List row metrics */
+#define CONSOLE_ROW_H       25          /* pixels per list row               */
+#define CONSOLE_VISIBLE_ROWS (CONSOLE_CONTENT_H / CONSOLE_ROW_H)   /* 8     */
+
+/* ─── Color theme (RGB565) ───────────────────────────────────────────────── */
+/*
+ * All colors are RGB565 values that can be passed directly to display_rect(),
+ * display_text(), and every other display_* primitive.
+ */
+#define CONSOLE_COLOR_BG        0x0000U  /* pure black — default background  */
+#define CONSOLE_COLOR_HEADER    0x2104U  /* very dark gray — header/footer   */
+#define CONSOLE_COLOR_SEP       0x39E7U  /* separator line                   */
+#define CONSOLE_COLOR_ACCENT    0x07FFU  /* cyan — cursor / selection ring   */
+#define CONSOLE_COLOR_TEXT      0xFFFFU  /* white — primary text             */
+#define CONSOLE_COLOR_DIM       0x7BEFU  /* gray — secondary text / hints    */
+#define CONSOLE_COLOR_SEL_BG    0x001FU  /* blue — selected-row background   */
+
+/* State badge colors */
+#define CONSOLE_COLOR_OK        0x07E0U  /* green  — RUNNING                 */
+#define CONSOLE_COLOR_WARN      0xFD20U  /* orange — STOPPED                 */
+#define CONSOLE_COLOR_ERR       0xF800U  /* red    — ERROR / FAILED          */
+#define CONSOLE_COLOR_READY     0x39E7U  /* dim cyan — READY / INSTALLED     */
+
+/* ─── Button IDs (match zephyr,code in DTS overlay) ─────────────────────── */
+/*
+ * Values mirror the `zephyr,code` properties in akiraconsole_esp32s3_procpu.overlay:
+ *   gpio-keys {
+ *     btn_up    { zephyr,code = <2>; };   // UP
+ *     btn_down  { zephyr,code = <3>; };   // DOWN
+ *     btn_left  { zephyr,code = <4>; };   // LEFT
+ *     btn_right { zephyr,code = <5>; };   // RIGHT
+ *     btn_a     { zephyr,code = <6>; };   // A (confirm / select)
+ *     btn_b     { zephyr,code = <7>; };   // B (back / cancel)
+ *     btn_x     { zephyr,code = <8>; };   // X (info / detail)
+ *     btn_y     { zephyr,code = <9>; };   // Y (quick action)
+ *   };
+ *
+ * input_get_buttons() returns a bitmask where bit N = (1 << zephyr,code).
+ */
+#define AKIRA_BTN_ID_UP     2
+#define AKIRA_BTN_ID_DOWN   3
+#define AKIRA_BTN_ID_LEFT   4
+#define AKIRA_BTN_ID_RIGHT  5
+#define AKIRA_BTN_ID_A      6
+#define AKIRA_BTN_ID_B      7
+#define AKIRA_BTN_ID_X      8
+#define AKIRA_BTN_ID_Y      9
+
+/* Bitmasks — OR these against the value returned by input_get_buttons() */
+#define AKIRA_BTN_UP    (1U << AKIRA_BTN_ID_UP)
+#define AKIRA_BTN_DOWN  (1U << AKIRA_BTN_ID_DOWN)
+#define AKIRA_BTN_LEFT  (1U << AKIRA_BTN_ID_LEFT)
+#define AKIRA_BTN_RIGHT (1U << AKIRA_BTN_ID_RIGHT)
+#define AKIRA_BTN_A     (1U << AKIRA_BTN_ID_A)
+#define AKIRA_BTN_B     (1U << AKIRA_BTN_ID_B)
+#define AKIRA_BTN_X     (1U << AKIRA_BTN_ID_X)
+#define AKIRA_BTN_Y     (1U << AKIRA_BTN_ID_Y)
+
+/** Test whether a button is set in a bitmask from input_get_buttons(). */
+#define AKIRA_BTN_PRESSED(mask, btn) (((mask) & (btn)) != 0U)
+
+#endif /* AKIRA_CONSOLE_H */

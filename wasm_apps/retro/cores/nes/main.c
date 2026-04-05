@@ -25,14 +25,21 @@
 extern const uint8_t  rom_data[];
 extern const uint32_t rom_size;
 
-/* ── Display geometry ────────────────────────────────────────────────── */
-#define DISP_W         320
-#define DISP_H         240
-#define NES_OFFSET_X   ((DISP_W - NES_W) / 2)   /* 32 px side bars */
-
-/* Overscan: crop 8 top/bottom lines → render 224 rows */
+/* ── Overscan ────────────────────────────────────────────────────────── */
 #define NES_OVERSCAN   8
 #define NES_CROP_H     (NES_H - 2 * NES_OVERSCAN)   /* 224 */
+
+/* ── Render modes (set at startup by init_display_geometry) ──────────── */
+#define RENDER_LETTERBOX  0   /* disp_w >= NES_W: centre + black bars     */
+#define RENDER_CROP       1   /* 128-255px wide: show centre N pixels      */
+#define RENDER_SCALE2     2   /* <128px wide: 2:1 nearest-neighbour scale  */
+
+static int g_disp_w, g_disp_h;
+static int g_render_mode;
+static int g_nes_dst_x;   /* X on display where NES image starts           */
+static int g_nes_dst_y;   /* Y on display where NES image starts           */
+static int g_nes_src_x;   /* X in NES fb to start reading (crop only)      */
+static int g_nes_draw_w;  /* Pixels written per row                        */
 
 /* ── GPIO pins (akiraconsole) ─────────────────────────────────────────── */
 #define PIN_UP        4
@@ -127,6 +134,85 @@ static void init_gpio(void)
     gpio_configure(PIN_Y,        f);
 }
 
+/* ── Display geometry init ────────────────────────────────────────────── */
+static void init_display_geometry(void)
+{
+    display_get_size(&g_disp_w, &g_disp_h);
+
+    if (g_disp_w >= NES_W) {
+        g_render_mode = RENDER_LETTERBOX;
+        g_nes_dst_x   = (g_disp_w - NES_W) / 2;
+        g_nes_src_x   = 0;
+        g_nes_draw_w  = NES_W;
+    } else if (g_disp_w >= NES_W / 2) {
+        g_render_mode = RENDER_CROP;
+        g_nes_dst_x   = 0;
+        g_nes_src_x   = (NES_W - g_disp_w) / 2;
+        g_nes_draw_w  = g_disp_w;
+    } else {
+        g_render_mode = RENDER_SCALE2;
+        g_nes_draw_w  = NES_W / 2;
+        g_nes_dst_x   = (g_disp_w - g_nes_draw_w) / 2;
+        g_nes_src_x   = 0;
+    }
+
+    int out_h   = (g_render_mode == RENDER_SCALE2) ? NES_H / 2 : NES_H;
+    /* Negative dst_y means the display is shorter than the NES output height:
+     * render_nes_frame will use it to skip NES rows from the top and centre
+     * the visible window.  Positive dst_y centres NES inside a taller display. */
+    g_nes_dst_y = (g_disp_h - out_h) / 2;
+}
+
+/* ── Frame render helper ──────────────────────────────────────────────── */
+/* fb      : NES RGB565 framebuffer (NES_W pixels wide)
+ * src_y   : first NES row to output (e.g. NES_OVERSCAN when overscan on)
+ * rows    : number of NES rows to output                                 */
+static void render_nes_frame(const uint16_t *fb, int src_y, int rows)
+{
+    if (g_render_mode == RENDER_LETTERBOX) {
+        /* Vertical clip: when display is shorter than NES output, g_nes_dst_y is
+         * negative.  Advance the NES source row and shrink the row count so we
+         * only write pixels that fit on screen (centred window). */
+        int dst_y = g_nes_dst_y + src_y;
+        if (dst_y < 0) { src_y += -dst_y; rows -= -dst_y; dst_y = 0; }
+        if (dst_y + rows > g_disp_h) rows = g_disp_h - dst_y;
+        if (rows <= 0) return;
+        display_raw_write(g_nes_dst_x, dst_y,
+                          g_nes_draw_w, rows,
+                          fb + src_y * NES_W,
+                          rows * NES_W * 2);
+    } else if (g_render_mode == RENDER_CROP) {
+        int dst_y = g_nes_dst_y + src_y;
+        if (dst_y < 0) { int skip = -dst_y; src_y += skip; rows -= skip; dst_y = 0; }
+        if (dst_y + rows > g_disp_h) rows = g_disp_h - dst_y;
+        if (rows <= 0) return;
+        static uint16_t s_line[NES_W];
+        for (int r = 0; r < rows; r++) {
+            const uint16_t *src = fb + (src_y + r) * NES_W + g_nes_src_x;
+            __builtin_memcpy(s_line, src, g_nes_draw_w * 2);
+            display_raw_write(g_nes_dst_x, dst_y + r,
+                              g_nes_draw_w, 1,
+                              s_line, g_nes_draw_w * 2);
+        }
+    } else { /* RENDER_SCALE2: src_y and rows are in NES-pixel space (2× scaled down) */
+        int out_y    = src_y / 2;
+        int dst_y    = g_nes_dst_y + out_y;
+        int out_rows = rows / 2;
+        if (dst_y < 0) { int skip = -dst_y; src_y += skip * 2; out_rows -= skip; dst_y = 0; }
+        if (dst_y + out_rows > g_disp_h) out_rows = g_disp_h - dst_y;
+        if (out_rows <= 0) return;
+        static uint16_t s_line[NES_W / 2];
+        for (int r = 0; r < out_rows; r++) {
+            const uint16_t *src = fb + (src_y + r * 2) * NES_W;
+            for (int c = 0; c < g_nes_draw_w; c++)
+                s_line[c] = src[c * 2];
+            display_raw_write(g_nes_dst_x, dst_y + r,
+                              g_nes_draw_w, 1,
+                              s_line, g_nes_draw_w * 2);
+        }
+    }
+}
+
 /* ── Draw helpers ─────────────────────────────────────────────────────── */
 static void draw_header(int x, int y, int w, const char *title)
 {
@@ -156,24 +242,24 @@ static void boot_animation(void)
     display_clear(C_BLACK);
     display_flush();
 
-    int cy = DISP_H / 2;
+    int cy = g_disp_h / 2;
     for (int i = 1; i <= 10; i++) {
-        int half = (DISP_H / 2) * i / 10;
-        display_rect(0, cy - half, DISP_W, half * 2, C_BLACK);
-        display_hline(0, cy - half,     DISP_W, C_WHITE);
-        display_hline(0, cy + half - 1, DISP_W, C_WHITE);
+        int half = (g_disp_h / 2) * i / 10;
+        display_rect(0, cy - half, g_disp_w, half * 2, C_BLACK);
+        display_hline(0, cy - half,     g_disp_w, C_WHITE);
+        display_hline(0, cy + half - 1, g_disp_w, C_WHITE);
         display_flush();
         delay(15000);
     }
 
     /* Boot card */
     display_clear(C_BLACK);
-    display_text_large(88, 60, "RETRO", C_WHITE);
-    display_text_large(116, 90, "NES", C_WHITE);
-    display_hline(40, 125, DISP_W - 80, C_DGRAY);
+    display_text_large(g_disp_w/2 - 40, g_disp_h/4,      "RETRO", C_WHITE);
+    display_text_large(g_disp_w/2 - 24, g_disp_h/4 + 30, "NES",   C_WHITE);
+    display_hline(40, g_disp_h/2 - 15, g_disp_w - 80, C_DGRAY);
 
     /* Loading progress bar */
-    const int bx=40, by=140, bw=DISP_W-80, bh=10;
+    const int bx=40, by=g_disp_h/2, bw=g_disp_w-80, bh=10;
     display_rect_outline(bx-1, by-1, bw+2, bh+2, C_DGRAY);
     display_flush();
 
@@ -184,13 +270,13 @@ static void boot_animation(void)
         delay(10000);
     }
     display_rect(bx, by, bw, bh, C_WHITE);
-    display_text(MENU_PAD, 164, "Loading ROM...", C_DIM);
+    display_text(MENU_PAD, g_disp_h/2 + 20, "Loading ROM...", C_DIM);
 
     /* Scanline wipe overlay */
     display_flush();
     delay(80000);
-    for (int y = 0; y < DISP_H; y += 10) {
-        display_hline(0, y, DISP_W, C_DGRAY);
+    for (int y = 0; y < g_disp_h; y += 10) {
+        display_hline(0, y, g_disp_w, C_DGRAY);
     }
     display_flush();
     delay(60000);
@@ -202,13 +288,13 @@ static void boot_animation(void)
 static void show_error(const char *hdr, const char *msg, const char *hint)
 {
     display_clear(C_BLACK);
-    display_rect(0, 0, DISP_W, HDR_H, 0xF800u);  /* red header */
+    display_rect(0, 0, g_disp_w, HDR_H, 0xF800u);  /* red header */
     display_text(MENU_PAD, 4, hdr, C_WHITE);
     int y = HDR_H + 14;
     display_text(MENU_PAD, y, msg, C_WHITE);  y += 20;
     if (hint) display_text(MENU_PAD, y, hint, C_DIM);
-    display_hline(0, DISP_H - ROW_H, DISP_W, C_DGRAY);
-    display_text(MENU_PAD, DISP_H - ROW_H + (ROW_H-8)/2,
+    display_hline(0, g_disp_h - ROW_H, g_disp_w, C_DGRAY);
+    display_text(MENU_PAD, g_disp_h - ROW_H + (ROW_H-8)/2,
                  "A/B: Return to menu", C_LGRAY);
     display_flush();
     delay(400000);
@@ -222,8 +308,9 @@ static void show_settings_menu(void)
     static const char *FS_LABELS[4] = {
         "Off (60fps)", "Half (30fps)", "1/3 (20fps)", "1/4 (15fps)"
     };
-    const int OW = 180, OH = HDR_H + SM_COUNT * ROW_H;
-    const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
+    const int OW = (g_disp_w >= 190) ? 180 : g_disp_w - 4;
+    const int OH = HDR_H + SM_COUNT * ROW_H;
+    const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
     int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
@@ -274,8 +361,9 @@ static int show_pause_menu(void)
     while (gpio_read(PIN_SETTINGS)) delay(10000);
     delay(40000);
 
-    const int OW = 170, OH = HDR_H + PM_COUNT * ROW_H;
-    const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
+    const int OW = (g_disp_w >= 175) ? 170 : g_disp_w - 4;
+    const int OH = HDR_H + PM_COUNT * ROW_H;
+    const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
     int pu=0, pd=0, pa=0, pb=0, ps=0;
@@ -326,6 +414,7 @@ int main(void)
 {
     init_gpio();
     load_settings();
+    init_display_geometry();
     boot_animation();
 
     if (nes_init(&g_nes, rom_data, rom_size) != 0) {
@@ -336,14 +425,23 @@ int main(void)
         return 1;
     }
 
-    /* Black side-bars and (if overscan) top/bottom bars */
-    display_rect(0,                    0, NES_OFFSET_X, DISP_H, C_BLACK);
-    display_rect(NES_OFFSET_X + NES_W, 0, NES_OFFSET_X, DISP_H, C_BLACK);
-    if (g_overscan) {
-        display_rect(0, 0,                          DISP_W, NES_OVERSCAN,   C_BLACK);
-        display_rect(0, NES_H - NES_OVERSCAN,       DISP_W, NES_OVERSCAN,   C_BLACK);
-        display_rect(0, NES_H,                      DISP_W, DISP_H - NES_H, C_BLACK);
+    /* Black side-bars (letterbox only) and overscan bars.
+     * g_nes_dst_y may be negative when the display is shorter than the NES
+     * output (vertical crop mode), so guard every y-coordinate before drawing. */
+    if (g_render_mode == RENDER_LETTERBOX && g_nes_dst_x > 0) {
+        display_rect(0,                     0, g_nes_dst_x, g_disp_h, C_BLACK);
+        display_rect(g_nes_dst_x + NES_W,   0, g_nes_dst_x, g_disp_h, C_BLACK);
     }
+    if (g_overscan) {
+        int ov_top = g_nes_dst_y;
+        int ov_bot = g_nes_dst_y + NES_H - NES_OVERSCAN;
+        if (ov_top >= 0 && ov_top < g_disp_h)
+            display_rect(0, ov_top, g_disp_w, NES_OVERSCAN, C_BLACK);
+        if (ov_bot >= 0 && ov_bot < g_disp_h)
+            display_rect(0, ov_bot, g_disp_w, NES_OVERSCAN, C_BLACK);
+    }
+    if (g_nes_dst_y > 0)
+        display_rect(0, 0, g_disp_w, g_nes_dst_y, C_BLACK);
     display_flush();
 
     int settings_held = 0;
@@ -367,15 +465,14 @@ int main(void)
         if (settings_now && !settings_held) {
             /* Snapshot the current NES frame into the OS framebuffer so the
              * pause overlay has a correct freeze-frame background.         */
-            if (g_overscan) {
-                display_bitmap(NES_OFFSET_X, NES_OVERSCAN,
-                               NES_W, NES_CROP_H,
-                               g_nes.fb + NES_OVERSCAN * NES_W,
-                               NES_CROP_H * NES_W * 2);
-            } else {
-                display_bitmap(NES_OFFSET_X, 0, NES_W, NES_H,
-                               g_nes.fb, NES_FB_BYTES);
-            }
+            /* Re-use render_nes_frame so the snapshot respects display geometry
+             * (letterbox centering, crop, scale2, and vertical clip on small
+             * displays) instead of blitting the full NES framebuffer blindly. */
+            if (g_overscan)
+                render_nes_frame((const uint16_t *)g_nes.fb, NES_OVERSCAN, NES_CROP_H);
+            else
+                render_nes_frame((const uint16_t *)g_nes.fb, 0, NES_H);
+            display_flush();
             int choice = show_pause_menu();
             if (choice == PM_EXIT) {
                 /* Fade to black */
@@ -385,11 +482,17 @@ int main(void)
             }
             if (choice == PM_RESTART) {
                 nes_init(&g_nes, rom_data, rom_size);
-                display_rect(0, 0, NES_OFFSET_X, DISP_H, C_BLACK);
-                display_rect(NES_OFFSET_X + NES_W, 0, NES_OFFSET_X, DISP_H, C_BLACK);
+                if (g_render_mode == RENDER_LETTERBOX && g_nes_dst_x > 0) {
+                    display_rect(0,                   0, g_nes_dst_x, g_disp_h, C_BLACK);
+                    display_rect(g_nes_dst_x + NES_W, 0, g_nes_dst_x, g_disp_h, C_BLACK);
+                }
                 if (g_overscan) {
-                    display_rect(0, 0,                    DISP_W, NES_OVERSCAN, C_BLACK);
-                    display_rect(0, NES_H - NES_OVERSCAN, DISP_W, NES_OVERSCAN, C_BLACK);
+                    int ov_top = g_nes_dst_y;
+                    int ov_bot = g_nes_dst_y + NES_H - NES_OVERSCAN;
+                    if (ov_top >= 0 && ov_top < g_disp_h)
+                        display_rect(0, ov_top, g_disp_w, NES_OVERSCAN, C_BLACK);
+                    if (ov_bot >= 0 && ov_bot < g_disp_h)
+                        display_rect(0, ov_bot, g_disp_w, NES_OVERSCAN, C_BLACK);
                 }
                 display_flush();
                 frame_count = 0;
@@ -408,19 +511,10 @@ int main(void)
 
         /* ── Push rendered frame to display ──────────────────────── */
         if (!skip) {
-            /* display_raw_write: write directly to display hardware without
-             * copying to the OS framebuffer or flushing the full screen.
-             * Saves ~114 KB of memcpy + 25% SPI bandwidth per frame.    */
-            if (g_overscan) {
-                display_raw_write(NES_OFFSET_X, NES_OVERSCAN,
-                                  NES_W, NES_CROP_H,
-                                  g_nes.fb + NES_OVERSCAN * NES_W,
-                                  NES_CROP_H * NES_W * 2);
-            } else {
-                display_raw_write(NES_OFFSET_X, 0,
-                                  NES_W, NES_H,
-                                  g_nes.fb, NES_FB_BYTES);
-            }
+            if (g_overscan)
+                render_nes_frame((const uint16_t *)g_nes.fb, NES_OVERSCAN, NES_CROP_H);
+            else
+                render_nes_frame((const uint16_t *)g_nes.fb, 0, NES_H);
         }
     }
 

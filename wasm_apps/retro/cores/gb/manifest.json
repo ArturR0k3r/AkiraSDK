@@ -1,0 +1,12 @@
+{
+  "name": "gb_game",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "input.read",
+    "app.switch",
+    "timer"
+  ],
+  "memory_quota": 786432
+}

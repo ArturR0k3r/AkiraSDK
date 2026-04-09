@@ -2,12 +2,12 @@
 """
 rom_to_wasm.py — Convert retro game ROM images to AkiraOS WASM binaries.
 
-Supported platforms (Mapper 0 / NROM for NES):
+Supported platforms:
   .nes  — Nintendo Entertainment System
-  .gb   — Game Boy         (future)
-  .gbc  — Game Boy Color   (future)
-  .sms  — Sega Master System (future)
-  .gg   — Game Gear          (future)
+  .sms  — Sega Master System
+  .gg   — Game Gear
+  .gb   — Game Boy
+  .gbc  — Game Boy Color
   .a26  — Atari 2600         (future)
   .sfc  — Super Nintendo     (future)
   .smc  — Super Nintendo     (future)
@@ -52,26 +52,34 @@ PLATFORMS = {
         'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
         'description': 'Nintendo Entertainment System',
     },
-    # Future platforms (placeholders):
     'gb': {
         'extensions': ['.gb', '.gbc'],
         'magic': b'Nintendo',
         'magic_offset': 0x134,
         'template_dir': 'gb',
-        'sources': ['main.c', 'gb.c'],
+        'sources': ['main.c', 'gb.c', 'cpu.c', 'ppu.c'],
         'stack_size': 8192,
-        'extra_memory': 100 * 1024,
+        # Overhead: GB struct ~460KB (VRAM 16KB + WRAM 32KB + cart RAM 128KB +
+        #           OAM/HRAM + FB 46KB + I/O + code) + headroom
+        'extra_memory': 512 * 1024,
         'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
         'description': 'Game Boy / Game Boy Color',
     },
     'sms': {
         'extensions': ['.sms', '.gg'],
-        'magic': None,
-        'magic_offset': 0,
+        # SMS ROMs ≥32KB have "TMR SEGA" header at 0x7FF0.  Smaller homebrew
+        # ROMs may omit it, so we accept any .sms/.gg by extension alone but
+        # warn when the header is absent.
+        'magic': b'TMR SEGA',
+        'magic_offset': 0x7FF0,
         'template_dir': 'sms',
-        'sources': ['main.c', 'sms.c'],
+        'sources': ['main.c', 'sms.c', 'z80.c', 'vdp.c', 'mapper.c'],
         'stack_size': 8192,
-        'extra_memory': 150 * 1024,
+        # Overhead breakdown:
+        #   SMS machine struct: ~123 KB  (16 KB VRAM + 8 KB WRAM + 96 KB FB + state)
+        #   Code + globals:     ~40 KB
+        #   Headroom:           ~37 KB
+        'extra_memory': 200 * 1024,
         'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
         'description': 'Sega Master System / Game Gear',
     },

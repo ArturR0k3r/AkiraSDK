@@ -12,7 +12,7 @@ that can be deployed like any other AkiraOS app — via USB, BLE, or SD card.
 
 ```bash
 # Convert a ROM to a deployable AOT binary (recommended)
-python3 tools/rom_to_aot.py tetris.nes -o tetris.aot
+python3 tools/rom_to_aot.py roms/nes/tetris.nes -o tetris.aot
 
 # Deploy to AkiraOS (SD card example)
 cp tetris.aot /media/$USER/AKIRA/apps/
@@ -31,9 +31,37 @@ python3 tools/rom_to_wasm.py tetris.nes -o tetris.wasm
 
 - [WASI SDK](https://github.com/WebAssembly/wasi-sdk/releases) installed at
   `/opt/wasi-sdk` (or specify `--wasi-sdk /path/to/wasi-sdk`)
-- [wamrc](https://github.com/nicogig/AkiraOS) AOT compiler (for `.aot` builds)
+- `wamrc` AOT compiler (for `.aot` builds) — see [Building wamrc](#building-wamrc) below
 - Python 3.6+
 - AkiraOS hardware with PSRAM (ESP32-S3 recommended)
+
+## Building wamrc
+
+The AkiraOS WAMR submodule includes a pre-configured CMake build directory for
+`wamrc` and its bundled LLVM. You only need to compile them — no CMake
+configuration step required.
+
+```bash
+# 1. Build the bundled LLVM with Xtensa backend (~5–15 min, one-time)
+cd AkiraOS/modules/wasm-micro-runtime/core/deps/llvm/build
+ninja -j$(nproc)
+
+# 2. Build wamrc
+cd AkiraOS/modules/wasm-micro-runtime/wamr-compiler/build
+ninja -j$(nproc)
+```
+
+`rom_to_aot.py` auto-detects `wamrc` in that build directory — no installation
+needed. Alternatively, make it available system-wide or set an environment
+variable:
+
+```bash
+# Option A: install to PATH
+sudo cp wamrc /usr/local/bin/
+
+# Option B: env var (per-session or add to ~/.bashrc)
+export WAMRC=/path/to/AkiraOS/modules/wasm-micro-runtime/wamr-compiler/build/wamrc
+```
 
 ## Supported Platforms
 

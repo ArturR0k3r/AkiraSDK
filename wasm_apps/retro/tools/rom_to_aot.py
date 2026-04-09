@@ -21,8 +21,8 @@ Options:
   --sdk-root <path>        Path to AkiraSDK root (default: auto-detect)
   --target <arch>          AOT target architecture (default: xtensa)
   --cpu <cpu>              AOT target CPU (default: esp32s3)
-  --opt-level <0-3>        AOT optimization level (default: 2)
-  --size-level <0-3>       AOT code model (0=large,1=medium,2=kernel,3=small; default: 3)
+  --opt-level <0-3>        AOT optimization level (default: 3)
+  --size-level <0-3>       AOT code model (0=large,1=medium,2=kernel,3=small; default: 0)
   --keep-wasm              Keep intermediate .wasm file
   -v, --verbose            Verbose output
 
@@ -208,10 +208,10 @@ def main():
                         help='AOT target architecture (default: xtensa)')
     parser.add_argument('--cpu', default='esp32s3',
                         help='AOT target CPU (default: esp32s3)')
-    parser.add_argument('--opt-level', type=int, default=2, choices=[0,1,2,3],
-                        help='Optimization level (default: 2)')
-    parser.add_argument('--size-level', type=int, default=3, choices=[0,1,2,3],
-                        help='Code model: 0=large,1=medium,2=kernel,3=small (default: 3)')
+    parser.add_argument('--opt-level', type=int, default=3, choices=[0,1,2,3],
+                        help='Optimization level (default: 3)')
+    parser.add_argument('--size-level', type=int, default=0, choices=[0,1,2,3],
+                        help='Code model: 0=large,1=medium,2=kernel,3=small (default: 0)')
     parser.add_argument('--keep-wasm', action='store_true',
                         help='Keep intermediate .wasm file')
     parser.add_argument('-v', '--verbose', action='store_true',

@@ -17,7 +17,7 @@
  *   "capabilities": ["storage.read", "storage.write"]
  */
 
-#include "include/akira_api.h"
+#include "akira_api.h"
 
 /* Pass/fail accounting */
 static int s_pass = 0;

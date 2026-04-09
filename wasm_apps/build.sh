@@ -46,9 +46,10 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 # Function: Build a single WASM app from its subdirectory
+# Args: app_name [app_dir]  (app_dir defaults to ${WASM_APPS_DIR}/${app_name})
 build_app() {
     local app_name=$1
-    local app_dir="${WASM_APPS_DIR}/${app_name}"
+    local app_dir=${2:-"${WASM_APPS_DIR}/${app_name}"}
     local source_file="${app_dir}/main.c"
     local output_file="${OUTPUT_DIR}/${app_name}.wasm"
     local manifest_file="${app_dir}/manifest.json"
@@ -163,7 +164,7 @@ clean_apps() {
 # Function: List available apps
 list_apps() {
     echo -e "${GREEN}Available WASM applications:${NC}"
-    for dir in "${WASM_APPS_DIR}"/*/; do
+    for dir in "${WASM_APPS_DIR}"/*/ "${WASM_APPS_DIR}"/akiraconsole/*/; do
         if [ -f "${dir}main.c" ]; then
             echo "  - $(basename "$dir")"
         fi
@@ -190,7 +191,7 @@ main() {
             echo ""
 
             local failed=0
-            for dir in "${WASM_APPS_DIR}"/*/; do
+            for dir in "${WASM_APPS_DIR}"/*/ "${WASM_APPS_DIR}"/akiraconsole/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
                     if ! aot_app "$name" "$aot_target"; then
@@ -215,10 +216,10 @@ main() {
             echo ""
 
             local failed=0
-            for dir in "${WASM_APPS_DIR}"/*/; do
+            for dir in "${WASM_APPS_DIR}"/*/ "${WASM_APPS_DIR}"/akiraconsole/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
-                    if ! build_app "$name"; then
+                    if ! build_app "$name" "$dir"; then
                         ((failed++)) || true
                     fi
                 fi
@@ -234,9 +235,13 @@ main() {
             fi
             ;;
         *)
-            # Treat as specific app name
+            # Treat as specific app name — search top-level then akiraconsole/
             echo -e "${GREEN}=== Building ${command} ===${NC}"
-            if ! build_app "$command"; then
+            app_dir="${WASM_APPS_DIR}/${command}"
+            if [ ! -f "${app_dir}/main.c" ]; then
+                app_dir="${WASM_APPS_DIR}/akiraconsole/${command}"
+            fi
+            if ! build_app "$command" "$app_dir"; then
                 echo ""
                 echo "Usage: $0 [clean|list|build|aot [target]|APP_NAME]"
                 list_apps

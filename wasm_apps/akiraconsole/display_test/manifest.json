@@ -1,0 +1,9 @@
+{
+  "name": "display_test",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "input.read"
+  ],
+  "memory_quota": 65536
+}

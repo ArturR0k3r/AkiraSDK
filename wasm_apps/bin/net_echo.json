@@ -1,0 +1,8 @@
+{
+  "name": "net_echo",
+  "version": "1.0.0",
+  "capabilities": [
+    "network.*"
+  ],
+  "memory_quota": 65536
+}

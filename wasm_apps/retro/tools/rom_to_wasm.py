@@ -183,14 +183,24 @@ def find_sdk_root(script_dir):
     return None
 
 
-def generate_manifest(name, capabilities, memory_quota):
-    """Return manifest JSON dict."""
-    return {
-        'name': name,
-        'version': '1.0.0',
-        'capabilities': capabilities,
-        'memory_quota': memory_quota,
-    }
+def load_manifest(templates_dir, name, memory_quota, verbose=False):
+    """Load manifest.json from the core template directory and override
+    name and memory_quota with the runtime-computed values."""
+    manifest_path = os.path.join(templates_dir, 'manifest.json')
+    if not os.path.isfile(manifest_path):
+        log(f'  Warning: {manifest_path} not found; using minimal manifest.', verbose)
+        return {
+            'name': name,
+            'version': '1.0.0',
+            'capabilities': [],
+            'memory_quota': memory_quota,
+        }
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    manifest['name'] = name
+    manifest['memory_quota'] = memory_quota
+    log(f'  Manifest loaded from {manifest_path}', verbose)
+    return manifest
 
 
 def compile_wasm(sources, rom_data_c, output, wasi_sdk, include_dirs,
@@ -384,10 +394,11 @@ def main():
             return
 
         # ── Generate and embed manifest ────────────────────────────────
-        manifest = generate_manifest(
+        manifest = load_manifest(
+            templates_dir=templates_dir,
             name=app_name,
-            capabilities=platform['capabilities'],
             memory_quota=memory_bytes,
+            verbose=verbose,
         )
 
         embed_script = os.path.join(sdk_root, 'scripts', 'embed_manifest.py')

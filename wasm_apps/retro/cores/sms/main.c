@@ -58,6 +58,18 @@ static int g_overscan  = 0;                  /* default: off    */
 #define PIN_X        17
 #define PIN_Y        41
 
+/* ── Colours (RGB565) ────────────────────────────────────────────────── */
+#define C_BLACK   0x0000u
+#define C_WHITE   0xFFFFu
+#define C_LGRAY   0xC618u
+#define C_DGRAY   0x4208u
+#define C_DIM     0x528Au
+
+/* ── UI layout ────────────────────────────────────────────────────────── */
+#define ROW_H     26
+#define MENU_PAD  10
+#define HDR_H     22
+
 /* ── Pause menu ──────────────────────────────────────────────────────── */
 #define MENU_RESUME   0
 #define MENU_SETTINGS 1
@@ -66,10 +78,7 @@ static int g_overscan  = 0;                  /* default: off    */
 #define MENU_COUNT    4
 
 static const char *MENU_LABELS[MENU_COUNT] = {
-    "[ Resume Game ]",
-    "[Settings...  ]",
-    "[Restart Game ]",
-    "[Exit to Menu ]",
+    "Resume", "Settings...", "Restart", "Exit to Menu"
 };
 
 /* ── Tiny string helpers ─────────────────────────────────────────────── */
@@ -118,38 +127,50 @@ static void draw_border(void)
     display_rect(0,           img_y + img_h, DISP_W, DISP_H - img_y - img_h, 0x0000);
 }
 
+/* ── Draw helpers ─────────────────────────────────────────────────────── */
+static void draw_header(int x, int y, int w, const char *title)
+{
+    display_rect(x, y, w, HDR_H, C_BLACK);
+    display_text(x + MENU_PAD, y + 4, title, C_WHITE);
+}
+
+static void draw_row(int x, int y, int w,
+                     const char *lbl, const char *val, int sel)
+{
+    uint16_t bg = sel ? C_BLACK : C_WHITE;
+    uint16_t fg = sel ? C_WHITE : C_BLACK;
+    display_rect(x, y, w, ROW_H, bg);
+    display_text(x + MENU_PAD, y + (ROW_H - 8) / 2, lbl, fg);
+    if (val && val[0]) {
+        int vx = x + w - 60;
+        if (vx > x + 80)
+            display_text(vx, y + (ROW_H - 8) / 2, val, sel ? C_LGRAY : C_DIM);
+    }
+    display_hline(x, y + ROW_H - 1, w, C_LGRAY);
+}
+
 /* ── Settings sub-menu ────────────────────────────────────────────────── */
 static void show_settings_menu(void)
 {
     static const char *FS_LABELS[4] = {
         "Off (60fps)", "Half (30fps)", "1/3 (20fps)", "1/4 (15fps)"
     };
-    const int ITEM_H = 22;
-    const int PAD    = 6;
-    const int mw     = 165;
-    const int mh     = PAD + 16 + 3 * ITEM_H + PAD;  /* Frameskip + Overscan + Back */
-    const int mx     = (DISP_W - mw) / 2;
-    const int my     = (DISP_H - mh) / 2;
+    const int OW = 180;
+    const int OH = HDR_H + 3 * ROW_H;  /* Frameskip + Overscan + Back */
+    const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
 
     int cur=0, dirty=1;
     int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
 
     while (1) {
         if (dirty) {
-            display_rect(mx-2, my-2, mw+4, mh+4, 0x4A69);
-            display_rect(mx,   my,   mw,   mh,   0x0821);
-            display_text(mx + PAD, my + PAD, "Settings", 0x07FF);
-            const char *lbls[3]  = { "Frame Skip", "Overscan", "Back" };
-            const char *vals[3]  = { FS_LABELS[g_frameskip], g_overscan?"On":"Off", "" };
-            for (int i = 0; i < 3; i++) {
-                int      iy = my + PAD + 18 + i * ITEM_H;
-                uint32_t bg = (i == cur) ? 0x001F : 0x0821;
-                uint32_t fg = (i == cur) ? 0xFFFF : 0xC618;
-                display_rect(mx, iy - 2, mw, ITEM_H - 2, bg);
-                display_text(mx + PAD,     iy, lbls[i], fg);
-                if (vals[i][0])
-                    display_text(mx + mw - 84, iy, vals[i], fg);
-            }
+            display_rect(OX-2, OY-2, OW+4, OH+4, C_DGRAY);
+            display_rect(OX,   OY,   OW,   OH,   C_WHITE);
+            draw_header(OX, OY, OW, "Settings");
+            int ry = OY + HDR_H;
+            draw_row(OX, ry, OW, "Frame Skip", FS_LABELS[g_frameskip], cur==0); ry += ROW_H;
+            draw_row(OX, ry, OW, "Overscan",   g_overscan?"On":"Off",  cur==1); ry += ROW_H;
+            draw_row(OX, ry, OW, "Back",       "",                     cur==2);
             display_flush();
             dirty = 0;
         }
@@ -179,51 +200,47 @@ static int show_pause_menu(void)
 {
     /* Wait for Settings button release */
     while (gpio_read(PIN_SETTINGS)) delay(10000);
-    delay(50000);
+    delay(40000);
 
-    int cur = 0, redraw = 1;
-    int prev_s = 0, prev_u = 0, prev_d = 0, prev_a = 0, prev_b = 0;
+    const int OW = 170;
+    const int OH = HDR_H + MENU_COUNT * ROW_H;
+    const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
 
-    const int ITEM_H = 22;
-    const int PAD    = 6;
-    const int mw     = 130;
-    const int mh     = PAD + 16 + MENU_COUNT * ITEM_H + PAD;
-    const int mx     = (DISP_W - mw) / 2;
-    const int my     = (DISP_H - mh) / 2;
+    int cur=0, dirty=1;
+    int pu=0, pd=0, pa=0, pb=0, ps=0;
 
     while (1) {
-        if (redraw) {
-            display_rect(mx - 2, my - 2, mw + 4, mh + 4, 0x4A69);
-            display_rect(mx, my, mw, mh, 0x0821);
-            display_text(mx + PAD, my + PAD, "PAUSED", 0x07FF);
-            for (int i = 0; i < MENU_COUNT; i++) {
-                int     iy = my + PAD + 18 + i * ITEM_H;
-                uint32_t bg = (i == cur) ? 0x001F : 0x0821;
-                uint32_t fg = (i == cur) ? 0xFFFF : 0xC618;
-                display_rect(mx, iy - 2, mw, ITEM_H - 2, bg);
-                display_text(mx + PAD, iy, MENU_LABELS[i], fg);
+        if (dirty) {
+            /* Slide-in effect: draw overlay from left edge */
+            for (int x = OX - 20; x <= OX; x += 8) {
+                int cx = x < OX ? x : OX;
+                display_rect(cx-2, OY-2, OW+4, OH+4, C_DGRAY);
+                display_rect(cx,   OY,   OW,   OH,   C_WHITE);
+                draw_header(cx, OY, OW, "PAUSED");
+                int ry = OY + HDR_H;
+                for (int i = 0; i < MENU_COUNT; i++) {
+                    draw_row(cx, ry, OW, MENU_LABELS[i], "", i==cur);
+                    ry += ROW_H;
+                }
+                display_flush();
+                delay(8000);
             }
-            display_flush();
-            redraw = 0;
+            dirty = 0;
         }
+        int s=gpio_read(PIN_SETTINGS);
+        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
+        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
 
-        int s = gpio_read(PIN_SETTINGS);
-        int u = gpio_read(PIN_UP);
-        int d = gpio_read(PIN_DOWN);
-        int a = gpio_read(PIN_A);
-        int b = gpio_read(PIN_B);
-
-        if (s && !prev_s)              return MENU_RESUME;
-        if (u && !prev_u) { cur = (cur > 0) ? cur - 1 : MENU_COUNT - 1; redraw = 1; }
-        if (d && !prev_d) { cur = (cur < MENU_COUNT - 1) ? cur + 1 : 0; redraw = 1; }
-        if (a && !prev_a) {
-            if (cur == MENU_SETTINGS) { show_settings_menu(); redraw = 1; }
-            else return cur;
+        if (s&&!ps) return MENU_RESUME;
+        if (u&&!pu) { cur=(cur+MENU_COUNT-1)%MENU_COUNT; dirty=1; }
+        if (d&&!pd) { cur=(cur+1)%MENU_COUNT;             dirty=1; }
+        if (a&&!pa) {
+            if (cur==MENU_SETTINGS) { show_settings_menu(); dirty=1; continue; }
+            return cur;
         }
-        if (b && !prev_b) return MENU_RESUME;
-
-        prev_s = s; prev_u = u; prev_d = d; prev_a = a; prev_b = b;
-        delay(20000);
+        if (b&&!pb) return MENU_RESUME;
+        pu=u; pd=d; pa=a; pb=b; ps=s;
+        delay(16667);
     }
 }
 

@@ -82,7 +82,7 @@ def find_wamrc():
         )
         for dirpath, dirnames, _ in os.walk(search_root):
             depth = dirpath[len(search_root):].count(os.sep)
-            if depth >= 3:
+            if depth >= 4:
                 dirnames.clear()
                 continue
             # Skip hidden directories

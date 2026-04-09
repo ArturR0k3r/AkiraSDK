@@ -37,6 +37,16 @@ extern const uint32_t rom_size;
 #define SMS_OFFSET_X  ((DISP_W - SMS_W) / 2)   /* 32 px left margin  */
 #define SMS_OFFSET_Y  ((DISP_H - SMS_H) / 2)   /* 24 px top margin   */
 
+/* ── Overscan ─────────────────────────────────────────────────────────── */
+#define SMS_OVERSCAN      8
+#define SMS_CROP_H        (SMS_H - 2 * SMS_OVERSCAN)   /* 176 px */
+#define SMS_CROP_OFFSET_Y ((DISP_H - SMS_CROP_H) / 2)  /* 32 px  */
+
+/* ── Frameskip ───────────────────────────────────────────────────────── */
+static const int FS_MOD[4] = {1, 2, 3, 4};  /* 60 / 30 / 20 / 15 fps */
+static int g_frameskip = 1;                  /* default: 30 fps */
+static int g_overscan  = 0;                  /* default: off    */
+
 /* ── GPIO pin assignments ────────────────────────────────────────────── */
 #define PIN_UP        4
 #define PIN_DOWN      5
@@ -50,15 +60,120 @@ extern const uint32_t rom_size;
 
 /* ── Pause menu ──────────────────────────────────────────────────────── */
 #define MENU_RESUME   0
-#define MENU_RESTART  1
-#define MENU_EXIT     2
-#define MENU_COUNT    3
+#define MENU_SETTINGS 1
+#define MENU_RESTART  2
+#define MENU_EXIT     3
+#define MENU_COUNT    4
 
 static const char *MENU_LABELS[MENU_COUNT] = {
     "[ Resume Game ]",
+    "[Settings...  ]",
     "[Restart Game ]",
     "[Exit to Menu ]",
 };
+
+/* ── Tiny string helpers ─────────────────────────────────────────────── */
+static int satoi(const char *s)
+{
+    int v = 0;
+    while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');
+    return v;
+}
+static void sitoa(int v, char *b, int max)
+{
+    if (v == 0) { b[0]='0'; b[1]='\0'; return; }
+    char t[8]; int ti=0, i=0;
+    while (v>0 && ti<7) { t[ti++]='0'+v%10; v/=10; }
+    while (ti-->0 && i<max-1) b[i++]=t[ti];
+    b[i]='\0';
+}
+
+/* ── Settings persistence ────────────────────────────────────────────── */
+static void load_settings(void)
+{
+    char buf[8];
+    if (settings_get("sms/frameskip", buf, sizeof(buf)) == 0) {
+        g_frameskip = satoi(buf);
+        if (g_frameskip < 0) g_frameskip = 0;
+        if (g_frameskip > 3) g_frameskip = 3;
+    }
+    if (settings_get("sms/overscan", buf, sizeof(buf)) == 0)
+        g_overscan = satoi(buf) ? 1 : 0;
+}
+static void save_int(const char *key, int val)
+{
+    char buf[8];
+    sitoa(val, buf, sizeof(buf));
+    settings_set(key, buf);
+}
+
+/* ── Border bars ─────────────────────────────────────────────────────────── */
+static void draw_border(void)
+{
+    int img_y = g_overscan ? SMS_CROP_OFFSET_Y : SMS_OFFSET_Y;
+    int img_h = g_overscan ? SMS_CROP_H        : SMS_H;
+    display_rect(0,                    0, SMS_OFFSET_X,              DISP_H, 0x0000);
+    display_rect(SMS_OFFSET_X + SMS_W, 0, SMS_OFFSET_X,              DISP_H, 0x0000);
+    display_rect(0,                    0, DISP_W,              img_y,        0x0000);
+    display_rect(0,           img_y + img_h, DISP_W, DISP_H - img_y - img_h, 0x0000);
+}
+
+/* ── Settings sub-menu ────────────────────────────────────────────────── */
+static void show_settings_menu(void)
+{
+    static const char *FS_LABELS[4] = {
+        "Off (60fps)", "Half (30fps)", "1/3 (20fps)", "1/4 (15fps)"
+    };
+    const int ITEM_H = 22;
+    const int PAD    = 6;
+    const int mw     = 165;
+    const int mh     = PAD + 16 + 3 * ITEM_H + PAD;  /* Frameskip + Overscan + Back */
+    const int mx     = (DISP_W - mw) / 2;
+    const int my     = (DISP_H - mh) / 2;
+
+    int cur=0, dirty=1;
+    int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
+
+    while (1) {
+        if (dirty) {
+            display_rect(mx-2, my-2, mw+4, mh+4, 0x4A69);
+            display_rect(mx,   my,   mw,   mh,   0x0821);
+            display_text(mx + PAD, my + PAD, "Settings", 0x07FF);
+            const char *lbls[3]  = { "Frame Skip", "Overscan", "Back" };
+            const char *vals[3]  = { FS_LABELS[g_frameskip], g_overscan?"On":"Off", "" };
+            for (int i = 0; i < 3; i++) {
+                int      iy = my + PAD + 18 + i * ITEM_H;
+                uint32_t bg = (i == cur) ? 0x001F : 0x0821;
+                uint32_t fg = (i == cur) ? 0xFFFF : 0xC618;
+                display_rect(mx, iy - 2, mw, ITEM_H - 2, bg);
+                display_text(mx + PAD,     iy, lbls[i], fg);
+                if (vals[i][0])
+                    display_text(mx + mw - 84, iy, vals[i], fg);
+            }
+            display_flush();
+            dirty = 0;
+        }
+        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
+        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
+        int l=gpio_read(PIN_LEFT),r=gpio_read(PIN_RIGHT);
+
+        if (u&&!pu) { cur=(cur+2)%3; dirty=1; }
+        if (d&&!pd) { cur=(cur+1)%3; dirty=1; }
+        if ((l&&!pl)||(r&&!pr)) {
+            int delta = (r&&!pr) ? 1 : -1;
+            if (cur==0) { g_frameskip=(g_frameskip+delta+4)%4; save_int("sms/frameskip",g_frameskip); dirty=1; }
+            if (cur==1) { g_overscan^=1; save_int("sms/overscan",g_overscan); dirty=1; }
+        }
+        if (a&&!pa) {
+            if (cur==0) { g_frameskip=(g_frameskip+1)%4; save_int("sms/frameskip",g_frameskip); dirty=1; }
+            else if (cur==1) { g_overscan^=1; save_int("sms/overscan",g_overscan); dirty=1; }
+            else break;
+        }
+        if (b&&!pb) break;
+        pu=u; pd=d; pa=a; pb=b; pl=l; pr=r;
+        delay(20000);
+    }
+}
 
 static int show_pause_menu(void)
 {
@@ -101,7 +216,11 @@ static int show_pause_menu(void)
         if (s && !prev_s)              return MENU_RESUME;
         if (u && !prev_u) { cur = (cur > 0) ? cur - 1 : MENU_COUNT - 1; redraw = 1; }
         if (d && !prev_d) { cur = (cur < MENU_COUNT - 1) ? cur + 1 : 0; redraw = 1; }
-        if ((a && !prev_a) || (b && !prev_b)) return cur;
+        if (a && !prev_a) {
+            if (cur == MENU_SETTINGS) { show_settings_menu(); redraw = 1; }
+            else return cur;
+        }
+        if (b && !prev_b) return MENU_RESUME;
 
         prev_s = s; prev_u = u; prev_d = d; prev_a = a; prev_b = b;
         delay(20000);
@@ -132,6 +251,7 @@ int main(void)
     printf("AkiraOS SMS Emulator\n");
 
     init_gpio();
+    load_settings();
 
     display_clear(0x0000);
     display_text_large(60, 100, "SMS", 0xFFFF);
@@ -148,11 +268,7 @@ int main(void)
         return 1;
     }
 
-    /* Black border bars — SMS is 256×192 on a 320×240 screen */
-    display_rect(0,             0, SMS_OFFSET_X,              DISP_H, 0x0000);
-    display_rect(SMS_OFFSET_X + SMS_W, 0, SMS_OFFSET_X,      DISP_H, 0x0000);
-    display_rect(0,             0, DISP_W,            SMS_OFFSET_Y,   0x0000);
-    display_rect(0, SMS_OFFSET_Y + SMS_H, DISP_W,     SMS_OFFSET_Y,   0x0000);
+    draw_border();
     display_flush();
 
     int settings_held = 0;
@@ -185,11 +301,7 @@ int main(void)
             }
             if (choice == MENU_RESTART) {
                 sms_init(&sms, rom_data, rom_size);
-                display_clear(0x0000);
-                display_rect(0,             0, SMS_OFFSET_X,         DISP_H, 0x0000);
-                display_rect(SMS_OFFSET_X + SMS_W, 0, SMS_OFFSET_X,  DISP_H, 0x0000);
-                display_rect(0,             0, DISP_W,       SMS_OFFSET_Y,    0x0000);
-                display_rect(0, SMS_OFFSET_Y + SMS_H, DISP_W, SMS_OFFSET_Y,   0x0000);
+                draw_border();
                 display_flush();
                 frame_count = 0;
                 printf("[SMS] Restarted\n");
@@ -199,20 +311,25 @@ int main(void)
         }
         settings_held = settings_now;
 
-        /* ── Run one SMS frame + optional render skip ──────────────── *
-         * Skip rendering every other frame (frameskip 2:1).  The Z80
-         * still runs at full speed; only the VDP scanline renderer is
-         * skipped on odd frames, halving the rendering cost.           */
-        int skip = frame_count & 1;
+        /* ── Run one SMS frame + optional render skip ────────────────── */
+        int mod  = FS_MOD[g_frameskip];
+        int skip = (frame_count % mod) != 0;
         sms.vdp.skip_render = (uint8_t)skip;
         sms_step_frame(&sms);
         frame_count++;
 
-        /* ── Display ────────────────────────────────────────────────── */
+        /* ── Display ──────────────────────────────────────────────────── */
         if (!skip) {
-            display_bitmap(SMS_OFFSET_X, SMS_OFFSET_Y,
-                           SMS_W, SMS_H,
-                           sms.fb, SMS_FB_BYTES);
+            if (g_overscan) {
+                display_bitmap(SMS_OFFSET_X, SMS_CROP_OFFSET_Y,
+                               SMS_W, SMS_CROP_H,
+                               (uint8_t *)sms.fb + SMS_W * SMS_OVERSCAN * 2,
+                               SMS_W * SMS_CROP_H * 2);
+            } else {
+                display_bitmap(SMS_OFFSET_X, SMS_OFFSET_Y,
+                               SMS_W, SMS_H,
+                               sms.fb, SMS_FB_BYTES);
+            }
             display_flush();
         }
     }

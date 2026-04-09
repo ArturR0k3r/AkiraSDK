@@ -6,7 +6,10 @@
     "gpio.read",
     "input.read",
     "app.switch",
-    "timer"
+    "timer",
+    "storage.read",
+    "storage.write",
+    "settings.*"
   ],
   "memory_quota": 786432
 }

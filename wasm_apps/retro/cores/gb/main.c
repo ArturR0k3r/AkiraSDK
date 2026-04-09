@@ -39,6 +39,10 @@ extern const uint32_t rom_size;
 #define GB_OFFSET_X   ((DISP_W - GB_W) / 2)    /* 80 px */
 #define GB_OFFSET_Y   ((DISP_H - GB_H) / 2)    /* 48 px */
 
+/* ── Frameskip ───────────────────────────────────────────────────────── */
+static const int FS_MOD[4] = {1, 2, 3, 4};  /* 60 / 30 / 20 / 15 fps */
+static int g_frameskip = 1;                  /* default: 30 fps (every other frame) */
+
 /* ── GPIO pin assignments ────────────────────────────────────────────── */
 #define PIN_UP        4
 #define PIN_DOWN      5
@@ -52,15 +56,110 @@ extern const uint32_t rom_size;
 
 /* ── Pause menu ──────────────────────────────────────────────────────── */
 #define MENU_RESUME   0
-#define MENU_RESTART  1
-#define MENU_EXIT     2
-#define MENU_COUNT    3
+#define MENU_SETTINGS 1
+#define MENU_RESTART  2
+#define MENU_EXIT     3
+#define MENU_COUNT    4
 
 static const char *MENU_LABELS[MENU_COUNT] = {
     "[ Resume Game ]",
+    "[Settings...  ]",
     "[Restart Game ]",
     "[Exit to Menu ]",
 };
+
+/* ── Tiny string helpers ─────────────────────────────────────────────── */
+static int satoi(const char *s)
+{
+    int v = 0;
+    while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');
+    return v;
+}
+static void sitoa(int v, char *b, int max)
+{
+    if (v == 0) { b[0]='0'; b[1]='\0'; return; }
+    char t[8]; int ti=0, i=0;
+    while (v>0 && ti<7) { t[ti++]='0'+v%10; v/=10; }
+    while (ti-->0 && i<max-1) b[i++]=t[ti];
+    b[i]='\0';
+}
+
+/* ── Settings persistence ────────────────────────────────────────────── */
+static void load_settings(void)
+{
+    char buf[8];
+    if (settings_get("gb/frameskip", buf, sizeof(buf)) == 0) {
+        g_frameskip = satoi(buf);
+        if (g_frameskip < 0) g_frameskip = 0;
+        if (g_frameskip > 3) g_frameskip = 3;
+    }
+}
+static void save_int(const char *key, int val)
+{
+    char buf[8];
+    sitoa(val, buf, sizeof(buf));
+    settings_set(key, buf);
+}
+
+/* ── Settings sub-menu ────────────────────────────────────────────────── */
+static void show_settings_menu(void)
+{
+    static const char *FS_LABELS[4] = {
+        "Off (60fps)", "Half (30fps)", "1/3 (20fps)", "1/4 (15fps)"
+    };
+    const int ITEM_H = 22;
+    const int PAD    = 6;
+    const int mw     = 160;
+    const int mh     = PAD + 16 + 2 * ITEM_H + PAD;  /* Frameskip + Back */
+    const int mx     = (DISP_W - mw) / 2;
+    const int my     = (DISP_H - mh) / 2;
+
+    int cur=0, dirty=1;
+    int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
+
+    while (1) {
+        if (dirty) {
+            display_rect(mx-2, my-2, mw+4, mh+4, 0x4A69);
+            display_rect(mx,   my,   mw,   mh,   0x0821);
+            display_text(mx + PAD, my + PAD, "Settings", 0x07FF);
+            /* Frameskip row */
+            int iy0 = my + PAD + 18;
+            uint32_t bg0 = (cur==0) ? 0x001F : 0x0821;
+            uint32_t fg0 = (cur==0) ? 0xFFFF : 0xC618;
+            display_rect(mx, iy0 - 2, mw, ITEM_H - 2, bg0);
+            display_text(mx + PAD,      iy0, "Frame Skip",           fg0);
+            display_text(mx + mw - 84,  iy0, FS_LABELS[g_frameskip], fg0);
+            /* Back row */
+            int iy1 = iy0 + ITEM_H;
+            uint32_t bg1 = (cur==1) ? 0x001F : 0x0821;
+            uint32_t fg1 = (cur==1) ? 0xFFFF : 0xC618;
+            display_rect(mx, iy1 - 2, mw, ITEM_H - 2, bg1);
+            display_text(mx + PAD, iy1, "Back", fg1);
+            display_flush();
+            dirty = 0;
+        }
+        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
+        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
+        int l=gpio_read(PIN_LEFT),r=gpio_read(PIN_RIGHT);
+
+        if (u&&!pu) { cur=(cur+1)%2; dirty=1; }
+        if (d&&!pd) { cur=(cur+1)%2; dirty=1; }
+        if ((l&&!pl)||(r&&!pr)) {
+            if (cur == 0) {
+                g_frameskip = (g_frameskip + ((r&&!pr)?1:-1) + 4) % 4;
+                save_int("gb/frameskip", g_frameskip);
+                dirty = 1;
+            }
+        }
+        if (a&&!pa) {
+            if (cur==0) { g_frameskip=(g_frameskip+1)%4; save_int("gb/frameskip",g_frameskip); dirty=1; }
+            else break;
+        }
+        if (b&&!pb) break;
+        pu=u; pd=d; pa=a; pb=b; pl=l; pr=r;
+        delay(20000);
+    }
+}
 
 static int show_pause_menu(void)
 {
@@ -102,7 +201,11 @@ static int show_pause_menu(void)
         if (s && !prev_s)              return MENU_RESUME;
         if (u && !prev_u) { cur = (cur > 0) ? cur - 1 : MENU_COUNT - 1; redraw = 1; }
         if (d && !prev_d) { cur = (cur < MENU_COUNT - 1) ? cur + 1 : 0; redraw = 1; }
-        if ((a && !prev_a) || (b && !prev_b)) return cur;
+        if (a && !prev_a) {
+            if (cur == MENU_SETTINGS) { show_settings_menu(); redraw = 1; }
+            else return cur;
+        }
+        if (b && !prev_b) return MENU_RESUME;
 
         prev_s = s; prev_u = u; prev_d = d; prev_a = a; prev_b = b;
         delay(20000);
@@ -143,6 +246,7 @@ int main(void)
     printf("AkiraOS GB/GBC Emulator\n");
 
     init_gpio();
+    load_settings();
 
     display_clear(0x0000);
     display_text_large(46, 100, "GB", 0xFFFF);
@@ -193,7 +297,8 @@ int main(void)
         settings_held = settings_now;
 
         /* ── Run one GB frame + optional render skip ────────────────── */
-        int skip = frame_count & 1;
+        int mod  = FS_MOD[g_frameskip];
+        int skip = (frame_count % mod) != 0;
         gb.ppu.skip_render = (uint8_t)skip;
         gb_step_frame(&gb);
         frame_count++;

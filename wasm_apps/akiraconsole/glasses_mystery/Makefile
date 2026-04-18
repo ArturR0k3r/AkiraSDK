@@ -10,7 +10,7 @@ SRCS    = main.c engine.c world.c entities.c dialogue.c
 
 CFLAGS  = -O2 -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
-CFLAGS += -I../../include
+CFLAGS += -I../../../include
 
 LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main
@@ -21,8 +21,8 @@ LDFLAGS += -Wl,--initial-memory=131072
 LDFLAGS += -Wl,--max-memory=131072
 
 all: $(TARGET)
-	@if [ -f manifest.json ] && [ -f ../../scripts/embed_manifest.py ]; then \
-		python3 ../../scripts/embed_manifest.py $(TARGET) manifest.json $(TARGET) && \
+	@if [ -f manifest.json ] && [ -f ../../../scripts/embed_manifest.py ]; then \
+		python3 ../../../scripts/embed_manifest.py $(TARGET) manifest.json $(TARGET) && \
 		echo "  ✓ Manifest embedded"; \
 	fi
 

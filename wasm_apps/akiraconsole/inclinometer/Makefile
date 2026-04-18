@@ -9,7 +9,7 @@ SRCS    = main.c
 
 CFLAGS  = -O2 -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
-CFLAGS += -I../../include -I../..
+CFLAGS += -I../../../include
 
 LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main

@@ -54,10 +54,40 @@ build_app() {
     local output_file="${OUTPUT_DIR}/${app_name}.wasm"
     local manifest_file="${app_dir}/manifest.json"
 
-    if [ ! -f "$source_file" ]; then
-        echo -e "${YELLOW}Warning: Source not found: $source_file${NC}"
+    if [ ! -f "${app_dir}/main.c" ]; then
+        echo -e "${YELLOW}Warning: Source not found: ${app_dir}/main.c${NC}"
         return 1
     fi
+
+    # If app has its own Makefile, delegate to it
+    if [ -f "${app_dir}/Makefile" ]; then
+        echo -e "${GREEN}Building ${app_name} (Makefile)...${NC}"
+        if make -C "$app_dir" 2>&1; then
+            local built_wasm="${app_dir}/${app_name}.wasm"
+            if [ -f "$built_wasm" ]; then
+                cp "$built_wasm" "$output_file"
+                local size
+                size=$(stat -c%s "$output_file" 2>/dev/null || stat -f%z "$output_file")
+                echo -e "${GREEN}✓ Built: ${app_name}.wasm (${size} bytes)${NC}"
+                if [ -f "$manifest_file" ]; then
+                    cp "$manifest_file" "${OUTPUT_DIR}/${app_name}.json"
+                fi
+                return 0
+            else
+                echo -e "${RED}✗ Makefile succeeded but ${app_name}.wasm not found${NC}"
+                return 1
+            fi
+        else
+            echo -e "${RED}✗ Build failed: ${app_name}${NC}"
+            return 1
+        fi
+    fi
+
+    # Collect all .c source files in the app directory
+    local source_files=()
+    for src in "${app_dir}"/*.c; do
+        [ -f "$src" ] && source_files+=("$src")
+    done
 
     echo -e "${GREEN}Building ${app_name}...${NC}"
 
@@ -73,10 +103,11 @@ build_app() {
         -Wl,--initial-memory=65536 \
         -Wl,--max-memory=65536 \
         -I"${SDK_ROOT}/include" \
+        -I"${SDK_ROOT}" \
         -O2 \
         -Wno-incompatible-library-redeclaration \
         -o "$output_file" \
-        "$source_file"
+        "${source_files[@]}"
 
     if [ $? -eq 0 ]; then
         local size

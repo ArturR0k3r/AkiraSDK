@@ -1,6 +1,6 @@
-# net_server - AkiraOS WASM Application Makefile
+# pixel_dungeon - AkiraOS WASM Application Makefile
 
-APP_NAME   = net_server
+APP_NAME   = pixel_dungeon
 WASI_SDK  ?= /opt/wasi-sdk
 CC         = $(WASI_SDK)/bin/clang
 
@@ -9,7 +9,7 @@ SRCS    = main.c
 
 CFLAGS  = -O2 -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
-CFLAGS += -I../../include -I../..
+CFLAGS += -I../../include
 
 LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main

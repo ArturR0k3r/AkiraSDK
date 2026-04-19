@@ -12,8 +12,8 @@
  *   Crops grow in real-time (frame-counted). 4 crop types with
  *   different grow times and sell values.
  *
- * @copyright Copyright (c) 2026 AkiraOS Contributors
- * @license Apache-2.0
+ * @copyright Copyright (c) 2026 PenEngineering S.R.L
+* @license Apache-2.0
  */
 
 #include "akira_api.h"

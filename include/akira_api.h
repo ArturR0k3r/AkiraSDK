@@ -9,8 +9,8 @@
  * All native functions are declared as extern and automatically become imports
  * when compiled with WASI SDK and -nostdlib flag.
  * 
- * @copyright Copyright (c) 2026 AkiraOS Contributors
- * @license Apache-2.0
+ * @copyright Copyright (c) 2026 PenEngineering S.R.L
+* @license Apache-2.0
  */
 
 #ifndef AKIRA_API_H

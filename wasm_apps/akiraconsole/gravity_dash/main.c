@@ -11,8 +11,8 @@
  *   from right to left. Speed increases over time. Collect gems
  *   for bonus points. Survive as long as possible.
  *
- * @copyright Copyright (c) 2026 AkiraOS Contributors
- * @license Apache-2.0
+ * @copyright Copyright (c) 2026 PenEngineering S.R.L
+* @license Apache-2.0
  */
 
 #include "akira_api.h"

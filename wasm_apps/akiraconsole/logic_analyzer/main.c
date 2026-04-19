@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2026 AkiraOS Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2026 PenEngineering S.R.L
+* SPDX-License-Identifier: Apache-2.0
  */
 
 /**

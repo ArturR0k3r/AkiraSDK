@@ -10,8 +10,8 @@
  * 
  * The app reads from GPIO 5 (input) and mirrors the state to GPIO 40 (output).
  * 
- * @copyright Copyright (c) 2026 AkiraOS Contributors
- * @license Apache-2.0
+ * @copyright Copyright (c) 2026 PenEngineering S.R.L
+* @license Apache-2.0
  */
 
 #include "akira_api.h"

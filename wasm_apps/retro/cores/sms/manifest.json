@@ -1,0 +1,15 @@
+{
+  "name": "sms_game",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "input.read",
+    "app.switch",
+    "timer",
+    "storage.read",
+    "storage.write",
+    "settings.*"
+  ],
+  "memory_quota": 393216
+}

@@ -11,6 +11,8 @@
  * 
  * @copyright Copyright (c) 2026 PenEngineering S.R.L
 * @license Apache-2.0
+ * @stability stable
+ * @since 1.0
  */
 
 #ifndef AKIRA_API_H

@@ -589,7 +589,7 @@ static void render_about(void) {
 
     /* Two-column info grid */
     display_text(ROW_PAD, y, "Firmware", C_GRAY);
-    display_text(110,      y, "v1.4.8",  C_BLACK); y += 18;
+    display_text(110,      y, "v1.5.4",  C_BLACK); y += 18;
     display_text(ROW_PAD, y, "Shell",    C_GRAY);
     display_text(110,      y, "v3.0.0",  C_BLACK); y += 18;
     display_text(ROW_PAD, y, "Board",    C_GRAY);

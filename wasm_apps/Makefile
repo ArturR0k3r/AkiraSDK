@@ -35,15 +35,20 @@ AOT_FLAGS_thumbv7em := --target=thumb --cpu=cortex-m7
 AOT_FLAGS_riscv32  := --target=riscv32 --cpu=generic-rv32 --target-abi=ilp32
 AOT_FLAGS_x86_64   := --target=x86_64
 
-# Sample directories
-# Note: retro/ apps (NES, GB, SMS, etc.) are NOT listed here.
-# They are built using the separate rom_to_wasm.py tool:
-#   python3 retro/tools/rom_to_wasm.py game.nes -o game.wasm
-# See retro/README.md for full instructions.
-SAMPLES = akira_shell \
-          ble_led compass cube3d display_test gpio hello_world \
-          imu_3d imu_timer_test inclinometer logic_analyzer \
-          macro_pad net_echo net_server storage_test supervisor tetris
+# App directories by category
+GENERIC_APPS = ble_led gpio hello_world net_echo net_server storage_test
+
+CONSOLE_APPS = akira_shell compass cube3d display_test \
+               glasses_mystery gravity_dash imu_3d imu_timer_test inclinometer \
+               logic_analyzer macro_pad pixel_dungeon pixel_farmer \
+               space_invaders supervisor tetris
+
+# Retro games: pre-built .aot files (no wasi-sdk compile step needed)
+RETRO_GAMES = galaga megaman megaman3 persia tetris zelda
+
+# Combined list with category prefixes (for MAKE -C targets)
+SAMPLES = $(addprefix generic/,$(GENERIC_APPS)) \
+          $(addprefix console_apps/,$(CONSOLE_APPS))
 
 # SD card mount point for install target
 SD_MOUNT ?= /media/$(USER)/AKIRA
@@ -54,7 +59,7 @@ RED = \033[0;31m
 YELLOW = \033[1;33m
 NC = \033[0m
 
-.PHONY: all clean install check aot aot-xtensa aot-thumb aot-riscv32 help $(SAMPLES)
+.PHONY: all clean install check aot aot-xtensa aot-thumb aot-riscv32 help $(SAMPLES) $(addprefix generic/,$(GENERIC_APPS)) $(addprefix console_apps/,$(CONSOLE_APPS))
 
 all: check $(SAMPLES)
 	@echo ""
@@ -66,15 +71,16 @@ all: check $(SAMPLES)
 		echo "  $$f ($$size bytes)"; \
 	done
 
-$(SAMPLES):
+$(addprefix generic/,$(GENERIC_APPS)) $(addprefix console_apps/,$(CONSOLE_APPS)):
 	@echo -e "$(GREEN)Building $@...$(NC)"
 	@$(MAKE) -C $@ WASI_SDK=$(WASI_SDK) --no-print-directory
 
 clean:
 	@echo "Cleaning all samples..."
 	@for dir in $(SAMPLES); do \
-		$(MAKE) -C $$dir clean --no-print-directory; \
+		$(MAKE) -C $$dir clean --no-print-directory 2>/dev/null || true; \
 	done
+	@rm -rf bin/
 	@echo -e "$(GREEN)✓ Clean complete$(NC)"
 
 # AOT compilation — converts pre-built .wasm files to native .aot
@@ -89,7 +95,7 @@ aot:
 	@echo -e "$(GREEN)=== AOT Compiling for $(AOT_TARGET) ===$(NC)"
 	@FLAGS="$(AOT_FLAGS_$(AOT_TARGET))"; \
 	if [ -z "$$FLAGS" ]; then FLAGS="--target=$(AOT_TARGET)"; fi; \
-	for app in $(SAMPLES); do \
+	for app in $(GENERIC_APPS) $(CONSOLE_APPS); do \
 		wasm="bin/$$app.wasm"; \
 		out="bin/$$app-$(AOT_TARGET).aot"; \
 		if [ ! -f "$$wasm" ]; then \
@@ -139,13 +145,14 @@ install: all
 	fi
 	@mkdir -p "$(SD_MOUNT)/apps"
 	@for dir in $(SAMPLES); do \
-		if [ -f "$$dir/$$dir.wasm" ]; then \
-			cp "$$dir/$$dir.wasm" "$(SD_MOUNT)/apps/"; \
-			echo "  Copied $$dir.wasm"; \
+		app=$$(basename $$dir); \
+		if [ -f "$$dir/$$app.wasm" ]; then \
+			cp "$$dir/$$app.wasm" "$(SD_MOUNT)/apps/"; \
+			echo "  Copied $$app.wasm"; \
 		fi; \
 		if [ -f "$$dir/manifest.json" ]; then \
-			cp "$$dir/manifest.json" "$(SD_MOUNT)/apps/$$dir.manifest.json"; \
-			echo "  Copied $$dir.manifest.json"; \
+			cp "$$dir/manifest.json" "$(SD_MOUNT)/apps/$$app.manifest.json"; \
+			echo "  Copied $$app.manifest.json"; \
 		fi; \
 	done
 	@sync
@@ -154,10 +161,9 @@ install: all
 info:
 	@echo "=== AkiraOS WASM Samples ==="
 	@echo ""
-	@echo "Samples:"
-	@for dir in $(SAMPLES); do \
-		echo "  - $$dir"; \
-	done
+	@echo "Generic apps:  $(GENERIC_APPS)"
+	@echo "Console apps:  $(CONSOLE_APPS)"
+	@echo "Retro games:   $(RETRO_GAMES)"
 	@echo ""
 	@echo "WASI SDK: $(WASI_SDK)"
 	@echo "wamrc:    $(WAMRC)"

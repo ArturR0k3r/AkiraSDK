@@ -1,0 +1,12 @@
+{
+  "name": "galaga",
+  "display_name": "Galaga",
+  "version": "1.0.0",
+  "category": "retro_games",
+  "capabilities": [
+    "display.write",
+    "input.read"
+  ],
+  "memory_quota": 262144,
+  "min_akiraos_version": "1.0.0"
+}

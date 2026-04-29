@@ -1,0 +1,12 @@
+{
+  "name": "pixel_dungeon",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "app.switch"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
+}

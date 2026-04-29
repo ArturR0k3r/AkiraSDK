@@ -188,14 +188,14 @@ aot_app() {
 clean_apps() {
     echo -e "${YELLOW}Cleaning WASM apps...${NC}"
     rm -rf "$OUTPUT_DIR"
-    find "$WASM_APPS_DIR" -maxdepth 2 -name "*.wasm" -delete
+    find "$WASM_APPS_DIR" -maxdepth 3 -name "*.wasm" -delete
     echo -e "${GREEN}Clean complete${NC}"
 }
 
 # Function: List available apps
 list_apps() {
     echo -e "${GREEN}Available WASM applications:${NC}"
-    for dir in "${WASM_APPS_DIR}"/*/ "${WASM_APPS_DIR}"/akiraconsole/*/; do
+    for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
         if [ -f "${dir}main.c" ]; then
             echo "  - $(basename "$dir")"
         fi
@@ -222,7 +222,7 @@ main() {
             echo ""
 
             local failed=0
-            for dir in "${WASM_APPS_DIR}"/*/ "${WASM_APPS_DIR}"/akiraconsole/*/; do
+            for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
                     if ! aot_app "$name" "$aot_target"; then
@@ -247,7 +247,7 @@ main() {
             echo ""
 
             local failed=0
-            for dir in "${WASM_APPS_DIR}"/*/ "${WASM_APPS_DIR}"/akiraconsole/*/; do
+            for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
                     if ! build_app "$name" "$dir"; then
@@ -266,11 +266,14 @@ main() {
             fi
             ;;
         *)
-            # Treat as specific app name — search top-level then akiraconsole/
+            # Treat as specific app name — search generic/, console_apps/, retro_games/
             echo -e "${GREEN}=== Building ${command} ===${NC}"
-            app_dir="${WASM_APPS_DIR}/${command}"
+            app_dir="${WASM_APPS_DIR}/generic/${command}"
             if [ ! -f "${app_dir}/main.c" ]; then
-                app_dir="${WASM_APPS_DIR}/akiraconsole/${command}"
+                app_dir="${WASM_APPS_DIR}/console_apps/${command}"
+            fi
+            if [ ! -f "${app_dir}/main.c" ]; then
+                app_dir="${WASM_APPS_DIR}/retro_games/${command}"
             fi
             if ! build_app "$command" "$app_dir"; then
                 echo ""

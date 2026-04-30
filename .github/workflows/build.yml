@@ -44,7 +44,7 @@ jobs:
           cache-dependency-path: ${{ env.AKIRA_CLI_DIR }}/go.sum
       - run: |
           cd ${{ env.AKIRA_CLI_DIR }}
-          go build -o $GITHUB_WORKSPACE/akira-cli ./...
+          go build -o $GITHUB_WORKSPACE/akira-cli .
 
       - name: Install Python dependencies
         run: pip install --quiet Pillow
@@ -149,7 +149,7 @@ jobs:
           cache-dependency-path: ${{ env.AKIRA_CLI_DIR }}/go.sum
       - run: |
           cd ${{ env.AKIRA_CLI_DIR }}
-          go build -o $GITHUB_WORKSPACE/akira-cli ./...
+          go build -o $GITHUB_WORKSPACE/akira-cli .
 
       - name: Install Python dependencies
         run: pip install --quiet Pillow
@@ -240,7 +240,7 @@ jobs:
           cache-dependency-path: ${{ env.AKIRA_CLI_DIR }}/go.sum
       - run: |
           cd ${{ env.AKIRA_CLI_DIR }}
-          go build -o $GITHUB_WORKSPACE/akira-cli ./...
+          go build -o $GITHUB_WORKSPACE/akira-cli .
 
       - name: Install Python dependencies
         run: pip install --quiet Pillow
@@ -318,7 +318,7 @@ jobs:
           cache-dependency-path: ${{ env.AKIRA_CLI_DIR }}/go.sum
       - run: |
           cd ${{ env.AKIRA_CLI_DIR }}
-          go build -o $GITHUB_WORKSPACE/akira-cli ./...
+          go build -o $GITHUB_WORKSPACE/akira-cli .
 
       - name: Download all .akpkg artifacts
         uses: actions/download-artifact@v4

@@ -53,7 +53,14 @@ jobs:
         env:
           AKIRA_SIGNING_KEY: ${{ secrets.AKIRA_SIGNING_KEY }}
         run: |
-          echo "$AKIRA_SIGNING_KEY" | base64 -d > /tmp/privkey.pem
+          if [ -z "$AKIRA_SIGNING_KEY" ]; then
+            echo "Warning: AKIRA_SIGNING_KEY not set, signing will be skipped"
+            touch /tmp/privkey.pem
+          elif echo "$AKIRA_SIGNING_KEY" | grep -q "BEGIN"; then
+            printf '%s\n' "$AKIRA_SIGNING_KEY" > /tmp/privkey.pem
+          else
+            echo "$AKIRA_SIGNING_KEY" | base64 -d > /tmp/privkey.pem
+          fi
           chmod 600 /tmp/privkey.pem
 
       - name: Build, pack and sign generic apps
@@ -104,7 +111,11 @@ jobs:
             slug="generic-${app}"
             pkg="${{ env.DIST_DIR }}/${slug}.akpkg"
             ./akira-cli pack "$wasm" "$manifest" -o "$pkg"
-            ./akira-cli sign "$pkg" --key /tmp/privkey.pem
+            if [ -s /tmp/privkey.pem ]; then
+              ./akira-cli sign "$pkg" --key /tmp/privkey.pem
+            else
+              echo "  Skipping signing (no key)"
+            fi
 
             # Copy icon PNG for catalogue icon_url
             if [ -f "${app_dir}icon.png" ]; then
@@ -158,7 +169,14 @@ jobs:
         env:
           AKIRA_SIGNING_KEY: ${{ secrets.AKIRA_SIGNING_KEY }}
         run: |
-          echo "$AKIRA_SIGNING_KEY" | base64 -d > /tmp/privkey.pem
+          if [ -z "$AKIRA_SIGNING_KEY" ]; then
+            echo "Warning: AKIRA_SIGNING_KEY not set, signing will be skipped"
+            touch /tmp/privkey.pem
+          elif echo "$AKIRA_SIGNING_KEY" | grep -q "BEGIN"; then
+            printf '%s\n' "$AKIRA_SIGNING_KEY" > /tmp/privkey.pem
+          else
+            echo "$AKIRA_SIGNING_KEY" | base64 -d > /tmp/privkey.pem
+          fi
           chmod 600 /tmp/privkey.pem
 
       - name: Build, pack and sign console apps
@@ -205,7 +223,11 @@ jobs:
             slug="console_apps-${app}"
             pkg="${{ env.DIST_DIR }}/${slug}.akpkg"
             ./akira-cli pack "$wasm" "$manifest" -o "$pkg"
-            ./akira-cli sign "$pkg" --key /tmp/privkey.pem
+            if [ -s /tmp/privkey.pem ]; then
+              ./akira-cli sign "$pkg" --key /tmp/privkey.pem
+            else
+              echo "  Skipping signing (no key)"
+            fi
 
             if [ -f "${app_dir}icon.png" ]; then
               cp "${app_dir}icon.png" "${{ env.DIST_DIR }}/${slug}-icon.png"
@@ -249,7 +271,14 @@ jobs:
         env:
           AKIRA_SIGNING_KEY: ${{ secrets.AKIRA_SIGNING_KEY }}
         run: |
-          echo "$AKIRA_SIGNING_KEY" | base64 -d > /tmp/privkey.pem
+          if [ -z "$AKIRA_SIGNING_KEY" ]; then
+            echo "Warning: AKIRA_SIGNING_KEY not set, signing will be skipped"
+            touch /tmp/privkey.pem
+          elif echo "$AKIRA_SIGNING_KEY" | grep -q "BEGIN"; then
+            printf '%s\n' "$AKIRA_SIGNING_KEY" > /tmp/privkey.pem
+          else
+            echo "$AKIRA_SIGNING_KEY" | base64 -d > /tmp/privkey.pem
+          fi
           chmod 600 /tmp/privkey.pem
 
       - name: Pack and sign retro games
@@ -282,7 +311,11 @@ jobs:
             pkg="${{ env.DIST_DIR }}/${slug}.akpkg"
             # Pack .aot as the wasm payload (akira-cli pack accepts any binary)
             ./akira-cli pack "$aot" "$manifest" -o "$pkg"
-            ./akira-cli sign "$pkg" --key /tmp/privkey.pem
+            if [ -s /tmp/privkey.pem ]; then
+              ./akira-cli sign "$pkg" --key /tmp/privkey.pem
+            else
+              echo "  Skipping signing (no key)"
+            fi
 
             if [ -f "${game_dir}icon.png" ]; then
               cp "${game_dir}icon.png" "${{ env.DIST_DIR }}/${slug}-icon.png"

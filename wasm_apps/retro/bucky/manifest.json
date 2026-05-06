@@ -1,13 +1,14 @@
 {
-  "name": "pixel_farmer",
+  "name": "bucky",
+  "display_name": "Bucky",
   "version": "1.0.0",
+  "category": "retro_games",
   "capabilities": [
     "display.write",
     "input.read",
     "gpio.read",
-    "app.switch",
-    "timer"
+    "settings*"
   ],
-  "memory_quota": 131072,
+  "memory_quota": 262144,
   "min_akiraos_version": "1.0.0"
 }

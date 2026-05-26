@@ -1806,6 +1806,23 @@ extern int sd_scan_wasm(char *buf, int len);
  */
 extern int app_install_from_sd(const char *name);
 
+/**
+ * app_run_from_sd(name) → int
+ *
+ * Loads and runs a WASM app directly from the SD card without writing anything
+ * to flash. The app runs transiently; it disappears from memory when it exits.
+ *
+ * @param name  App name (bare name without extension, e.g. "my_game")
+ * @return 0 on success, negative errno on failure.
+ *   -ENOENT  File not found on SD card
+ *   -EEXIST  App already installed — use app_switch() instead
+ *   -EBUSY   App already running from SD
+ *   -ENOMEM  Not enough PSRAM to load binary
+ *   -ENOSPC  No free transient app slots
+ *   -EACCES  Capability not granted
+ */
+extern int app_run_from_sd(const char *name);
+
 /*
  * =============================================================================
  * SETTINGS API

@@ -52,7 +52,7 @@ static int g_frameskip = 1;                  /* default: 30 fps (every other fra
 #define PIN_B        16
 #define PIN_X        17
 #define PIN_Y        41
-#define PIN_SETTINGS  2
+#define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BLACK   0x0000u
@@ -238,7 +238,7 @@ static void init_gpio(void)
     gpio_configure(PIN_B,        flags);
     gpio_configure(PIN_X,        flags);
     gpio_configure(PIN_Y,        flags);
-    gpio_configure(PIN_SETTINGS, flags);
+    gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 }
 
 /* ── GB machine (static: avoids stack overflow) ──────────────────────── */

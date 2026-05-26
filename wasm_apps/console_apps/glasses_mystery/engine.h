@@ -65,7 +65,7 @@ char *itoa(int value, char *str, int base);
 #define BTN_RIGHT     7
 #define BTN_A         15
 #define BTN_B         16
-#define BTN_SETTINGS  2
+#define BTN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
 
 #define GPIO_INPUT     (1U << 0)
 #define GPIO_PULL_DOWN (1U << 5)

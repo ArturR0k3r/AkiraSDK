@@ -48,7 +48,7 @@ static int g_nes_draw_w;  /* Pixels written per row                        */
 #define PIN_RIGHT     7
 #define PIN_A        15
 #define PIN_B        16
-#define PIN_SETTINGS  2
+#define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
 #define PIN_X        17
 #define PIN_Y        41
 
@@ -129,7 +129,7 @@ static void init_gpio(void)
     gpio_configure(PIN_RIGHT,    f);
     gpio_configure(PIN_A,        f);
     gpio_configure(PIN_B,        f);
-    gpio_configure(PIN_SETTINGS, f);
+    gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(PIN_X,        f);
     gpio_configure(PIN_Y,        f);
 }

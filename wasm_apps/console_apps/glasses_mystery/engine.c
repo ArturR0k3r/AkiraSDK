@@ -22,7 +22,7 @@ void input_init(input_t *inp) {
     gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     for (int i = 0; i < INPUT_COUNT; i++) {
         inp->held[i] = 0;

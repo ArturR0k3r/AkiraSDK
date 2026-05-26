@@ -30,7 +30,7 @@
 #define BTN_RIGHT    7
 #define BTN_A        15
 #define BTN_B        16
-#define BTN_SETTINGS 2
+#define BTN_SETTINGS 0    /* BTN.OK = GPIO0, active-low pull-up */
 
 /* ── Colours ─────────────────────────────────────────────────────────── */
 #define COL_BG        0x0000
@@ -590,7 +590,7 @@ int main(void)
     gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     /* Title screen */
     display_clear(0x0000);

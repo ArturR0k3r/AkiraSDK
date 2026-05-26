@@ -54,7 +54,7 @@ static int g_overscan  = 0;                  /* default: off    */
 #define PIN_RIGHT     7
 #define PIN_A        15
 #define PIN_B        16
-#define PIN_SETTINGS  2
+#define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
 #define PIN_X        17
 #define PIN_Y        41
 
@@ -254,7 +254,7 @@ static void init_gpio(void)
     gpio_configure(PIN_RIGHT,    flags);
     gpio_configure(PIN_A,        flags);
     gpio_configure(PIN_B,        flags);
-    gpio_configure(PIN_SETTINGS, flags);
+    gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(PIN_X,        flags);
     gpio_configure(PIN_Y,        flags);
 }

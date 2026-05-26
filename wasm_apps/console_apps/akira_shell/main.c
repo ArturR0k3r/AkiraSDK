@@ -486,7 +486,7 @@ static void render_sd(void) {
         }
     }
     draw_scrollbar(g_sd_count, g_scroll);
-    draw_footer("A:Install/Launch  B:Back");
+    draw_footer("A:Launch  B:Back");
     display_flush();
 }
 
@@ -750,30 +750,31 @@ int main(void)
             if(e.a && g_sd_count>0){
                 const char *sdn = g_sdnames[g_cursor];
                 if(g_sd_inst[g_cursor]){
+                    /* Already installed — launch via normal app_switch path */
                     scopy(g_launch, sdn, NAME_LEN);
                 } else {
-                    /* Install feedback */
+                    /* Run directly from SD card — no flash install needed */
                     draw_header("SD Card");
                     display_rect(0, CT_Y, SCR_W, CT_H, C_WHITE);
                     display_circle_fill(ROW_PAD+6, CT_Y+30, 6, C_BLACK);
-                    display_text_large(ROW_PAD+20, CT_Y+22, "Installing...", C_BLACK);
+                    display_text_large(ROW_PAD+20, CT_Y+22, "Launching...", C_BLACK);
                     display_text(ROW_PAD, CT_Y+50, sdn, C_GRAY);
                     display_flush();
 
-                    int ret = app_install_from_sd(sdn);
-                    display_rect(0, CT_Y, SCR_W, CT_H, C_WHITE);
-                    if(ret>=0){
-                        g_sd_inst[g_cursor]=1; refresh_apps();
-                        display_circle_fill(ROW_PAD+6, CT_Y+30, 6, C_BLACK);
-                        display_text_large(ROW_PAD+20, CT_Y+22, "Installed!", C_BLACK);
-                        display_text(ROW_PAD, CT_Y+50, sdn, C_GRAY);
-                        display_flush(); delay(700000);
+                    int ret = app_run_from_sd(sdn);
+                    if(ret == 0){
+                        return 0;  /* SD app started — shell exits cleanly */
+                    }
+                    /* -EEXIST means it's already installed, fall back to launch */
+                    if(ret == -17){
+                        scopy(g_launch, sdn, NAME_LEN);
                     } else {
+                        display_rect(0, CT_Y, SCR_W, CT_H, C_WHITE);
                         display_circle_fill(ROW_PAD+6, CT_Y+30, 6, C_ERR);
                         display_text_large(ROW_PAD+20, CT_Y+22, "Failed!", C_ERR);
                         display_flush(); delay(700000);
+                        dirty=1;
                     }
-                    dirty=1;
                 }
             }
             if(e.b){ g_screen=SCR_HOME; g_cursor=0; g_scroll=0; render_home(); }

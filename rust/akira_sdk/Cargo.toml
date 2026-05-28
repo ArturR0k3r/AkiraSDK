@@ -1,0 +1,16 @@
+[package]
+name = "akira_sdk"
+version = "1.0.0"
+edition = "2021"
+description = "AkiraOS WASM SDK — Rust bindings for the native API"
+authors = ["AkiraOS Contributors"]
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true

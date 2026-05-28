@@ -6,7 +6,9 @@
 #   ./build.sh                     - Build all WASM apps (.wasm)
 #   ./build.sh clean               - Clean all WASM apps
 #   ./build.sh list                - List available apps
-#   ./build.sh <app_name>          - Build a specific app
+#   ./build.sh <app_name>          - Build a specific app (C, Rust, or Python)
+#   ./build.sh rust/<app_name>     - Build a Rust app (e.g. rust/hello_world)
+#   ./build.sh python/<app_name>   - Build a Python app (e.g. python/hello_world)
 #   ./build.sh aot [target]        - AOT-compile all .wasm → .aot
 #                                    targets: xtensa (default, ESP32-S3),
 #                                             thumb (nRF54L15),
@@ -15,18 +17,23 @@
 #                                             x86_64 (native_sim)
 #
 # Environment variables:
-#   WASI_SDK=/opt/wasi-sdk         - Path to WASI SDK (for .wasm compilation)
+#   WASI_SDK=/opt/wasi-sdk         - Path to WASI SDK (C apps)
 #   WAMRC=wamrc                    - Path to wamrc AOT compiler
+#   MICROPYTHON_WASM=...           - Path to micropython.wasm (Python apps)
+#   CARGO=cargo                    - Path to the cargo binary (Rust apps)
 
 set -e
 
 # Configuration
 WASI_SDK=${WASI_SDK:-/opt/wasi-sdk}
 WAMRC=${WAMRC:-wamrc}
+CARGO=${CARGO:-cargo}
 WASM_APPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK_ROOT="$(dirname "$WASM_APPS_DIR")"
 OUTPUT_DIR="${WASM_APPS_DIR}/bin"
 EMBED_SCRIPT="${SDK_ROOT}/scripts/embed_manifest.py"
+PY_TO_WASM="${SDK_ROOT}/scripts/py_to_wasm.py"
+MICROPYTHON_WASM=${MICROPYTHON_WASM:-${SDK_ROOT}/python/runtime/micropython.wasm}
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,12 +41,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Ensure WASI SDK is available
+# WASI SDK is required for C apps only — warn but do not abort
 if [ ! -d "$WASI_SDK" ]; then
-    echo -e "${RED}Error: WASI SDK not found at $WASI_SDK${NC}"
-    echo "Set WASI_SDK environment variable or install from:"
-    echo "  https://github.com/WebAssembly/wasi-sdk"
-    exit 1
+    echo -e "${YELLOW}Warning: WASI SDK not found at $WASI_SDK (C apps will not build)${NC}"
+    echo "  Set WASI_SDK or install from: https://github.com/WebAssembly/wasi-sdk"
 fi
 
 # Create output directory
@@ -192,12 +197,115 @@ clean_apps() {
     echo -e "${GREEN}Clean complete${NC}"
 }
 
+# Function: Build a Rust WASM app
+# Args: app_name app_dir
+build_rust_app() {
+    local app_name=$1
+    local app_dir=$2
+    local output_file="${OUTPUT_DIR}/${app_name}.wasm"
+    local manifest_file="${app_dir}/manifest.json"
+
+    if ! command -v "$CARGO" &>/dev/null; then
+        echo -e "${RED}Error: cargo not found (CARGO=${CARGO})${NC}"
+        echo "  Install Rust: https://rustup.rs/"
+        echo "  Then: rustup target add wasm32-unknown-unknown"
+        return 1
+    fi
+
+    echo -e "${GREEN}Building ${app_name} (Rust)...${NC}"
+    if ! "$CARGO" build --manifest-path "${app_dir}/Cargo.toml" \
+            --target wasm32-unknown-unknown --release 2>&1; then
+        echo -e "${RED}✗ Rust build failed: ${app_name}${NC}"
+        return 1
+    fi
+
+    # cargo puts the output at target/wasm32-unknown-unknown/release/<name>.wasm
+    # For cdylib the name matches the [lib] name in Cargo.toml; use a glob to find it.
+    local built_wasm
+    built_wasm=$(find "${app_dir}/target/wasm32-unknown-unknown/release" \
+        -maxdepth 1 -name '*.wasm' ! -name '*-*' 2>/dev/null | head -1)
+
+    if [ -z "$built_wasm" ] || [ ! -f "$built_wasm" ]; then
+        echo -e "${RED}✗ WASM output not found after cargo build${NC}"
+        return 1
+    fi
+
+    cp "$built_wasm" "$output_file"
+
+    if [ -f "$manifest_file" ] && [ -f "$EMBED_SCRIPT" ]; then
+        python3 "$EMBED_SCRIPT" "$output_file" "$manifest_file" "$output_file"
+        cp "$manifest_file" "${OUTPUT_DIR}/${app_name}.json"
+        echo -e "  ${GREEN}✓ Manifest embedded${NC}"
+    fi
+
+    local size
+    size=$(stat -c%s "$output_file" 2>/dev/null || stat -f%z "$output_file")
+    echo -e "${GREEN}✓ Built: ${app_name}.wasm (${size} bytes)${NC}"
+    return 0
+}
+
+# Function: Build a Python WASM app via py_to_wasm.py
+# Args: app_name app_dir
+build_python_app() {
+    local app_name=$1
+    local app_dir=$2
+    local output_file="${OUTPUT_DIR}/${app_name}.wasm"
+    local manifest_file="${app_dir}/manifest.json"
+    local script_file="${app_dir}/main.py"
+
+    if [ ! -f "$script_file" ]; then
+        echo -e "${YELLOW}Warning: main.py not found in ${app_dir}${NC}"
+        return 1
+    fi
+
+    if [ ! -f "$MICROPYTHON_WASM" ]; then
+        echo -e "${RED}Error: micropython.wasm not found at ${MICROPYTHON_WASM}${NC}"
+        echo "  Set MICROPYTHON_WASM=/path/to/micropython.wasm"
+        echo "  See: ${SDK_ROOT}/python/runtime/README.md"
+        return 1
+    fi
+
+    echo -e "${GREEN}Building ${app_name} (Python)...${NC}"
+
+    local py_args=("$script_file" -o "$output_file"
+        --runtime "$MICROPYTHON_WASM"
+        --sdk-root "$SDK_ROOT")
+    [ -f "$manifest_file" ] && py_args+=(--manifest "$manifest_file")
+
+    if ! python3 "$PY_TO_WASM" "${py_args[@]}"; then
+        echo -e "${RED}✗ Python WASM build failed: ${app_name}${NC}"
+        return 1
+    fi
+
+    if [ -f "$manifest_file" ]; then
+        cp "$manifest_file" "${OUTPUT_DIR}/${app_name}.json"
+    fi
+
+    local size
+    size=$(stat -c%s "$output_file" 2>/dev/null || stat -f%z "$output_file")
+    echo -e "${GREEN}✓ Built: ${app_name}.wasm (${size} bytes)${NC}"
+    return 0
+}
+
 # Function: List available apps
 list_apps() {
     echo -e "${GREEN}Available WASM applications:${NC}"
+    echo "  [C]"
     for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
         if [ -f "${dir}main.c" ]; then
-            echo "  - $(basename "$dir")"
+            echo "    - $(basename "$dir")"
+        fi
+    done
+    echo "  [Rust]"
+    for dir in "${WASM_APPS_DIR}"/rust/*/; do
+        if [ -f "${dir}Cargo.toml" ]; then
+            echo "    - rust/$(basename "$dir")"
+        fi
+    done
+    echo "  [Python]"
+    for dir in "${SDK_ROOT}/python/apps/"*/ "${WASM_APPS_DIR}/python/"*/; do
+        if [ -f "${dir}main.py" ]; then
+            echo "    - python/$(basename "$dir")"
         fi
     done
 }
@@ -242,15 +350,39 @@ main() {
             ;;
         all|build)
             echo -e "${GREEN}=== Building AkiraOS WASM Applications ===${NC}"
-            echo "WASI SDK: $WASI_SDK"
-            echo "Output:   $OUTPUT_DIR"
+            echo "WASI SDK:          $WASI_SDK"
+            echo "MICROPYTHON_WASM:  $MICROPYTHON_WASM"
+            echo "Output:            $OUTPUT_DIR"
             echo ""
 
             local failed=0
+
+            # ── C / Makefile apps ────────────────────────────────────────────
             for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
                     if ! build_app "$name" "$dir"; then
+                        ((failed++)) || true
+                    fi
+                fi
+            done
+
+            # ── Rust apps ────────────────────────────────────────────────────
+            for dir in "${WASM_APPS_DIR}"/rust/*/; do
+                if [ -f "${dir}Cargo.toml" ]; then
+                    name=$(basename "$dir")
+                    if ! build_rust_app "$name" "$dir"; then
+                        ((failed++)) || true
+                    fi
+                fi
+            done
+
+            # ── Python apps ──────────────────────────────────────────────────
+            # Check both AkiraSDK/python/apps/ (SDK templates) and wasm_apps/python/ (user)
+            for dir in "${SDK_ROOT}/python/apps/"*/ "${WASM_APPS_DIR}/python/"*/; do
+                if [ -f "${dir}main.py" ]; then
+                    name=$(basename "$dir")
+                    if ! build_python_app "$name" "$dir"; then
                         ((failed++)) || true
                     fi
                 fi
@@ -266,20 +398,48 @@ main() {
             fi
             ;;
         *)
-            # Treat as specific app name — search generic/, console_apps/, retro_games/
+            # Treat as specific app name: rust/<name>, python/<name>, or plain <name>
             echo -e "${GREEN}=== Building ${command} ===${NC}"
-            app_dir="${WASM_APPS_DIR}/generic/${command}"
-            if [ ! -f "${app_dir}/main.c" ]; then
-                app_dir="${WASM_APPS_DIR}/console_apps/${command}"
-            fi
-            if [ ! -f "${app_dir}/main.c" ]; then
-                app_dir="${WASM_APPS_DIR}/retro_games/${command}"
-            fi
-            if ! build_app "$command" "$app_dir"; then
-                echo ""
-                echo "Usage: $0 [clean|list|build|aot [target]|APP_NAME]"
-                list_apps
-                exit 1
+
+            if [[ "$command" == rust/* ]]; then
+                # Explicit Rust prefix: e.g. rust/hello_world
+                app_name=$(basename "$command")
+                app_dir="${WASM_APPS_DIR}/rust/${app_name}"
+                if [ ! -f "${app_dir}/Cargo.toml" ]; then
+                    echo -e "${RED}Error: Rust app not found: ${app_dir}${NC}"
+                    exit 1
+                fi
+                build_rust_app "$app_name" "$app_dir" || exit 1
+
+            elif [[ "$command" == python/* ]]; then
+                # Explicit Python prefix: e.g. python/hello_world
+                app_name=$(basename "$command")
+                # Search SDK templates, then wasm_apps/python
+                app_dir="${SDK_ROOT}/python/apps/${app_name}"
+                if [ ! -f "${app_dir}/main.py" ]; then
+                    app_dir="${WASM_APPS_DIR}/python/${app_name}"
+                fi
+                if [ ! -f "${app_dir}/main.py" ]; then
+                    echo -e "${RED}Error: Python app not found: ${app_name}${NC}"
+                    exit 1
+                fi
+                build_python_app "$app_name" "$app_dir" || exit 1
+
+            else
+                # Plain name — probe C paths
+                app_dir="${WASM_APPS_DIR}/generic/${command}"
+                if [ ! -f "${app_dir}/main.c" ]; then
+                    app_dir="${WASM_APPS_DIR}/console_apps/${command}"
+                fi
+                if [ ! -f "${app_dir}/main.c" ]; then
+                    app_dir="${WASM_APPS_DIR}/retro_games/${command}"
+                fi
+                if ! build_app "$command" "$app_dir"; then
+                    echo ""
+                    echo "Usage: $0 [clean|list|build|aot [target]|rust/<name>|python/<name>|APP_NAME]"
+                    list_apps
+                    exit 1
+                fi
             fi
             ;;
     esac

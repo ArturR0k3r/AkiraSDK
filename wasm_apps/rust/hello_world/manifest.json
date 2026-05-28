@@ -1,0 +1,9 @@
+{
+  "name": "hello_world_rust",
+  "version": "1.0.0",
+  "capabilities": [
+    "input.read"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.0.0"
+}

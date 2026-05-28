@@ -3,22 +3,34 @@
 # Build all sample WASM apps for AkiraOS
 #
 # Usage:
-#   make              - Build all samples (.wasm)
-#   make clean        - Clean all samples
-#   make install      - Install to SD card (if mounted)
-#   make check        - Verify WASI SDK installation
-#   make aot          - AOT-compile all .wasm → .aot for AOT_TARGET (default: xtensa)
-#   make aot-xtensa   - AOT-compile for ESP32-S3 (Xtensa LX7)
-#   make aot-thumb    - AOT-compile for nRF54L15/STM32 (Cortex-M33/M7)
-#   make aot-riscv32  - AOT-compile for ESP32-C3 (RISC-V 32)
+#   make                    - Build all samples (.wasm) — C, Rust, and Python
+#   make build-rust         - Build Rust apps only
+#   make build-python       - Build Python apps only
+#   make clean              - Clean all samples
+#   make install            - Install to SD card (if mounted)
+#   make check              - Verify toolchain (WASI SDK + Rust + Python)
+#   make aot                - AOT-compile all .wasm → .aot for AOT_TARGET (default: xtensa)
+#   make aot-xtensa         - AOT-compile for ESP32-S3 (Xtensa LX7)
+#   make aot-thumb          - AOT-compile for nRF54L15/STM32 (Cortex-M33/M7)
+#   make aot-riscv32        - AOT-compile for ESP32-C3 (RISC-V 32)
 #
 # Requirements:
-#   - WASI SDK installed (see docs/APP_DEVELOPMENT.md)
-#   - Set WASI_SDK environment variable or install to /opt/wasi-sdk
-#   - For AOT: wamrc built from modules/wasm-micro-runtime/wamr-compiler
+#   C apps:      WASI SDK installed (see docs/APP_DEVELOPMENT.md)
+#   Rust apps:   cargo + rustup target add wasm32-unknown-unknown
+#   Python apps: python3 + MICROPYTHON_WASM=/path/to/micropython.wasm
+#   AOT:         wamrc built from modules/wasm-micro-runtime/wamr-compiler
 
 # WASI SDK path (override with: make WASI_SDK=/path/to/wasi-sdk)
 WASI_SDK ?= /opt/wasi-sdk
+
+# Rust toolchain
+CARGO ?= cargo
+
+# Python runtime for Python WASM apps
+# Set to the prebuilt micropython.wasm binary that includes the _akira module
+SDK_ROOT := $(shell dirname $(CURDIR))
+MICROPYTHON_WASM ?= $(SDK_ROOT)/python/runtime/micropython.wasm
+PY_TO_WASM := $(SDK_ROOT)/scripts/py_to_wasm.py
 
 # AOT compiler (wamrc from WAMR source)
 WAMRC ?= wamrc
@@ -46,12 +58,21 @@ CONSOLE_APPS = akira_shell compass cube3d display_test \
 # Retro games: pre-built .aot files (no wasi-sdk compile step needed)
 RETRO_GAMES = galaga megaman megaman3 persia tetris zelda
 
-# Combined list with category prefixes (for MAKE -C targets)
+# Rust apps (in wasm_apps/rust/<name>/)
+RUST_APPS = hello_world
+
+# Python apps (in AkiraSDK/python/apps/<name>/)
+PYTHON_APPS = hello_world
+
+# Combined C list with category prefixes
 SAMPLES = $(addprefix generic/,$(GENERIC_APPS)) \
           $(addprefix console_apps/,$(CONSOLE_APPS))
 
 # SD card mount point for install target
 SD_MOUNT ?= /media/$(USER)/AKIRA
+
+# Output binary directory
+BIN_DIR := bin
 
 # Colors
 GREEN = \033[0;32m
@@ -59,14 +80,16 @@ RED = \033[0;31m
 YELLOW = \033[1;33m
 NC = \033[0m
 
-.PHONY: all clean install check aot aot-xtensa aot-thumb aot-riscv32 help $(SAMPLES) $(addprefix generic/,$(GENERIC_APPS)) $(addprefix console_apps/,$(CONSOLE_APPS))
+.PHONY: all build-rust build-python clean install check aot aot-xtensa aot-thumb aot-riscv32 help info \
+        $(SAMPLES) $(addprefix generic/,$(GENERIC_APPS)) $(addprefix console_apps/,$(CONSOLE_APPS)) \
+        $(addprefix rust/,$(RUST_APPS)) $(addprefix python/,$(PYTHON_APPS))
 
-all: check $(SAMPLES)
+all: $(SAMPLES) build-rust build-python
 	@echo ""
 	@echo -e "$(GREEN)✓ All samples built successfully!$(NC)"
 	@echo ""
 	@echo "Built WASM files:"
-	@find . -name "*.wasm" -type f | while read f; do \
+	@find $(BIN_DIR) -name "*.wasm" -type f 2>/dev/null | while read f; do \
 		size=$$(ls -la "$$f" | awk '{print $$5}'); \
 		echo "  $$f ($$size bytes)"; \
 	done
@@ -75,10 +98,56 @@ $(addprefix generic/,$(GENERIC_APPS)) $(addprefix console_apps/,$(CONSOLE_APPS))
 	@echo -e "$(GREEN)Building $@...$(NC)"
 	@$(MAKE) -C $@ WASI_SDK=$(WASI_SDK) --no-print-directory
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Rust apps
+# ──────────────────────────────────────────────────────────────────────────────
+build-rust: $(addprefix rust/,$(RUST_APPS))
+	@echo -e "$(GREEN)✓ Rust apps built$(NC)"
+
+$(addprefix rust/,$(RUST_APPS)):
+	$(eval APP_NAME := $(notdir $@))
+	$(eval APP_DIR  := rust/$(APP_NAME))
+	@echo -e "$(GREEN)Building rust/$(APP_NAME)...$(NC)"
+	@mkdir -p $(BIN_DIR)
+	$(CARGO) build --manifest-path $(APP_DIR)/Cargo.toml \
+		--target wasm32-unknown-unknown --release
+	@BUILT=$$(find $(APP_DIR)/target/wasm32-unknown-unknown/release \
+		-maxdepth 1 -name '*.wasm' ! -name '*-*' 2>/dev/null | head -1); \
+	if [ -z "$$BUILT" ]; then \
+		echo -e "$(RED)✗ WASM output not found$(NC)"; exit 1; \
+	fi; \
+	cp "$$BUILT" $(BIN_DIR)/$(APP_NAME).wasm; \
+	echo -e "$(GREEN)  ✓ $(BIN_DIR)/$(APP_NAME).wasm$$(stat -c ' (%s bytes)' $(BIN_DIR)/$(APP_NAME).wasm 2>/dev/null || true)$(NC)"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Python apps (sources in AkiraSDK/python/apps/<name>/)
+# ──────────────────────────────────────────────────────────────────────────────
+build-python: $(addprefix python/,$(PYTHON_APPS))
+	@echo -e "$(GREEN)✓ Python apps built$(NC)"
+
+$(addprefix python/,$(PYTHON_APPS)):
+	$(eval APP_NAME := $(notdir $@))
+	$(eval APP_DIR  := $(SDK_ROOT)/python/apps/$(APP_NAME))
+	@echo -e "$(GREEN)Building python/$(APP_NAME)...$(NC)"
+	@if [ ! -f "$(MICROPYTHON_WASM)" ]; then \
+		echo -e "$(RED)Error: micropython.wasm not found at $(MICROPYTHON_WASM)$(NC)"; \
+		echo "  Set MICROPYTHON_WASM=/path/to/micropython.wasm"; \
+		echo "  See: $(SDK_ROOT)/python/runtime/README.md"; \
+		exit 1; \
+	fi
+	@mkdir -p $(BIN_DIR)
+	@MANIFEST_ARG=""; \
+	if [ -f "$(APP_DIR)/manifest.json" ]; then MANIFEST_ARG="--manifest $(APP_DIR)/manifest.json"; fi; \
+	python3 $(PY_TO_WASM) $(APP_DIR)/main.py -o $(BIN_DIR)/$(APP_NAME).wasm \
+		--runtime $(MICROPYTHON_WASM) --sdk-root $(SDK_ROOT) $$MANIFEST_ARG
+
 clean:
 	@echo "Cleaning all samples..."
 	@for dir in $(SAMPLES); do \
 		$(MAKE) -C $$dir clean --no-print-directory 2>/dev/null || true; \
+	done
+	@for app in $(RUST_APPS); do \
+		$(CARGO) clean --manifest-path rust/$$app/Cargo.toml 2>/dev/null || true; \
 	done
 	@rm -rf bin/
 	@echo -e "$(GREEN)✓ Clean complete$(NC)"
@@ -117,23 +186,30 @@ aot-riscv32:
 	$(MAKE) aot AOT_TARGET=riscv32
 
 check:
-	@echo "Checking WASI SDK..."
+	@echo "Checking toolchain..."
 	@if [ ! -d "$(WASI_SDK)" ]; then \
-		echo -e "$(RED)Error: WASI SDK not found at $(WASI_SDK)$(NC)"; \
-		echo ""; \
-		echo "Please install WASI SDK:"; \
-		echo "  1. Download from: https://github.com/WebAssembly/wasi-sdk/releases"; \
-		echo "  2. Extract to /opt/wasi-sdk"; \
-		echo "  3. Or set WASI_SDK=/path/to/wasi-sdk"; \
-		echo ""; \
-		exit 1; \
+		echo -e "$(YELLOW)Warning: WASI SDK not found at $(WASI_SDK) (C apps will not build)$(NC)"; \
+		echo "  Install from: https://github.com/WebAssembly/wasi-sdk/releases"; \
+	else \
+		echo -e "$(GREEN)✓ WASI SDK OK: $(WASI_SDK)$(NC)"; \
+		$(WASI_SDK)/bin/clang --version | head -1; \
 	fi
-	@if [ ! -x "$(WASI_SDK)/bin/clang" ]; then \
-		echo -e "$(RED)Error: clang not found in $(WASI_SDK)/bin$(NC)"; \
-		exit 1; \
+	@if command -v $(CARGO) >/dev/null 2>&1; then \
+		echo -e "$(GREEN)✓ Cargo OK: $$($(CARGO) --version)$(NC)"; \
+		if rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then \
+			echo -e "$(GREEN)✓ Rust target wasm32-unknown-unknown installed$(NC)"; \
+		else \
+			echo -e "$(YELLOW)Warning: wasm32-unknown-unknown not installed: run 'rustup target add wasm32-unknown-unknown'$(NC)"; \
+		fi; \
+	else \
+		echo -e "$(YELLOW)Warning: cargo not found (Rust apps will not build)$(NC)"; \
 	fi
-	@echo -e "$(GREEN)✓ WASI SDK OK: $(WASI_SDK)$(NC)"
-	@$(WASI_SDK)/bin/clang --version | head -1
+	@if [ -f "$(MICROPYTHON_WASM)" ]; then \
+		echo -e "$(GREEN)✓ micropython.wasm OK: $(MICROPYTHON_WASM)$(NC)"; \
+	else \
+		echo -e "$(YELLOW)Warning: micropython.wasm not found at $(MICROPYTHON_WASM) (Python apps will not build)$(NC)"; \
+		echo "  See: $(SDK_ROOT)/python/runtime/README.md"; \
+	fi
 
 install: all
 	@echo ""
@@ -144,16 +220,15 @@ install: all
 		exit 1; \
 	fi
 	@mkdir -p "$(SD_MOUNT)/apps"
-	@for dir in $(SAMPLES); do \
-		app=$$(basename $$dir); \
-		if [ -f "$$dir/$$app.wasm" ]; then \
-			cp "$$dir/$$app.wasm" "$(SD_MOUNT)/apps/"; \
-			echo "  Copied $$app.wasm"; \
-		fi; \
-		if [ -f "$$dir/manifest.json" ]; then \
-			cp "$$dir/manifest.json" "$(SD_MOUNT)/apps/$$app.manifest.json"; \
-			echo "  Copied $$app.manifest.json"; \
-		fi; \
+	@for f in $(BIN_DIR)/*.wasm; do \
+		[ -f "$$f" ] || continue; \
+		cp "$$f" "$(SD_MOUNT)/apps/"; \
+		echo "  Copied $$(basename $$f)"; \
+	done
+	@for f in $(BIN_DIR)/*.json; do \
+		[ -f "$$f" ] || continue; \
+		cp "$$f" "$(SD_MOUNT)/apps/"; \
+		echo "  Copied $$(basename $$f)"; \
 	done
 	@sync
 	@echo -e "$(GREEN)✓ Apps installed to $(SD_MOUNT)/apps$(NC)"
@@ -164,19 +239,27 @@ info:
 	@echo "Generic apps:  $(GENERIC_APPS)"
 	@echo "Console apps:  $(CONSOLE_APPS)"
 	@echo "Retro games:   $(RETRO_GAMES)"
+	@echo "Rust apps:     $(RUST_APPS)"
+	@echo "Python apps:   $(PYTHON_APPS)"
 	@echo ""
-	@echo "WASI SDK: $(WASI_SDK)"
-	@echo "wamrc:    $(WAMRC)"
+	@echo "WASI SDK:          $(WASI_SDK)"
+	@echo "Cargo:             $(CARGO)"
+	@echo "MICROPYTHON_WASM:  $(MICROPYTHON_WASM)"
+	@echo "wamrc:             $(WAMRC)"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make              - Build all samples (.wasm)"
-	@echo "  make <name>       - Build single sample"
-	@echo "  make clean        - Clean all"
-	@echo "  make install      - Copy to SD card"
-	@echo "  make check        - Verify toolchain"
-	@echo "  make aot          - AOT-compile all for AOT_TARGET (default: xtensa)"
-	@echo "  make aot-xtensa   - AOT for ESP32-S3"
-	@echo "  make aot-thumb    - AOT for nRF54L15 / Cortex-M33"
-	@echo "  make aot-riscv32  - AOT for ESP32-C3"
+	@echo "  make                    - Build all samples (.wasm)"
+	@echo "  make build-rust         - Build Rust apps only"
+	@echo "  make build-python       - Build Python apps only"
+	@echo "  make rust/<name>        - Build a single Rust app"
+	@echo "  make python/<name>      - Build a single Python app"
+	@echo "  make <cat>/<name>       - Build a single C app"
+	@echo "  make clean              - Clean all"
+	@echo "  make install            - Copy to SD card"
+	@echo "  make check              - Verify toolchain"
+	@echo "  make aot                - AOT-compile all for AOT_TARGET (default: xtensa)"
+	@echo "  make aot-xtensa         - AOT for ESP32-S3"
+	@echo "  make aot-thumb          - AOT for nRF54L15 / Cortex-M33"
+	@echo "  make aot-riscv32        - AOT for ESP32-C3"
 
 help: info

@@ -1074,11 +1074,11 @@ extern int rf_set_power(int8_t dbm);
 
 /**
  * @brief Get received signal strength indicator (RSSI)
- * 
- * @param rssi Pointer to store RSSI value
- * @return 0 on success, negative error code on failure
+ *
+ * Returns RSSI directly as the return value (no pointer argument).
+ * @return RSSI value on success, negative error code on failure
  */
-extern int rf_get_rssi(int16_t *rssi);
+extern int rf_get_rssi(void);
 
 /**
  * @brief Send data over RF transceiver
@@ -1732,45 +1732,6 @@ extern int power_set_low_power(int enable);
 
 /*
  * =============================================================================
- * INPUT API (AkiraConsole button events)
- * =============================================================================
- * Required capability: "input.read"
- *
- * Provides a bitmask-based snapshot of held buttons and an edge-event ring
- * buffer.  Both functions are non-blocking.  Use AKIRA_BTN_* macros from
- * akira_console.h to test individual bits.
- *
- * Typical usage:
- *   uint32_t held = (uint32_t)input_get_buttons();
- *   if (AKIRA_BTN_PRESSED(held, AKIRA_BTN_A)) { ... }
- *
- *   akira_input_event_t ev;
- *   if (input_poll_event(&ev) == 1 && ev.pressed) { ... }
- */
-
-/** Packed event filled by input_poll_event(). 8 bytes, naturally aligned. */
-typedef struct {
-    uint32_t button_id;  /**< AKIRA_BTN_ID_* — matches zephyr,code in DTS */
-    uint32_t pressed;    /**< 1 = press, 0 = release                       */
-} akira_input_event_t;
-
-/**
- * @brief Return bitmask of currently held buttons (non-blocking, ISR-safe).
- * Bit N is set when the button with zephyr,code == N is pressed.
- * Cast return value to uint32_t before applying AKIRA_BTN_* masks.
- * @return int32 bitmask (WASM has no uint32 type at the ABI boundary).
- */
-extern int input_get_buttons(void);
-
-/**
- * @brief Drain one edge event from the ring buffer (non-blocking).
- * @param evt  Pointer to an akira_input_event_t in WASM linear memory.
- * @return 1 if an event was dequeued and written, 0 if queue is empty, <0 error.
- */
-extern int input_poll_event(akira_input_event_t *evt);
-
-/*
- * =============================================================================
  * SYSTEM API (privileged — requires "app.control")
  * =============================================================================
  */
@@ -1806,23 +1767,6 @@ extern int sd_scan_wasm(char *buf, int len);
  */
 extern int app_install_from_sd(const char *name);
 
-/**
- * app_run_from_sd(name) → int
- *
- * Loads and runs a WASM app directly from the SD card without writing anything
- * to flash. The app runs transiently; it disappears from memory when it exits.
- *
- * @param name  App name (bare name without extension, e.g. "my_game")
- * @return 0 on success, negative errno on failure.
- *   -ENOENT  File not found on SD card
- *   -EEXIST  App already installed — use app_switch() instead
- *   -EBUSY   App already running from SD
- *   -ENOMEM  Not enough PSRAM to load binary
- *   -ENOSPC  No free transient app slots
- *   -EACCES  Capability not granted
- */
-extern int app_run_from_sd(const char *name);
-
 /*
  * =============================================================================
  * SETTINGS API
@@ -1852,6 +1796,195 @@ extern int settings_set(const char *key, const char *value);
  * @return 0 on success, -ENOENT if not found.
  */
 extern int settings_delete(const char *key);
+
+/*
+ * =============================================================================
+ * RTC API
+ * =============================================================================
+ * Required capability: "rtc"
+ *
+ * All times are Unix epoch (seconds since 1970-01-01 00:00:00 UTC).
+ * rtc_get_uptime_ms() uses the monotonic OS uptime counter.
+ */
+
+/** @brief Read current Unix time from the hardware RTC.
+ *  @return Unix timestamp (seconds), or negative errno on error. */
+extern int rtc_get_unix_time(void);
+
+/** @brief Read monotonic system uptime in milliseconds.
+ *  @return Uptime in ms, or negative errno on error. */
+extern int rtc_get_uptime_ms(void);
+
+/** @brief Set the RTC to a Unix timestamp.
+ *  @param unix_time  Seconds since epoch.
+ *  @return 0 on success, negative errno on failure. */
+extern int rtc_set_unix_time(int32_t unix_time);
+
+/** @brief Program a one-shot alarm.
+ *  @param unix_time  Unix timestamp at which rtc_alarm_fired() returns 1.
+ *  @return 0 on success, negative errno on failure. */
+extern int rtc_set_alarm(int32_t unix_time);
+
+/** @brief Poll whether the programmed alarm has fired (clears the flag on read).
+ *  @return 1 if alarm fired, 0 if not yet, negative errno on error. */
+extern int rtc_alarm_fired(void);
+
+/*
+ * =============================================================================
+ * FS API  (POSIX-sandbox filesystem)
+ * =============================================================================
+ * Required capability: "fs"
+ *
+ * Each app is confined to its private sandbox directory.
+ * All paths are relative. ".." traversal is rejected with -EACCES.
+ */
+
+/** Entry type for akira_dirent_t.type */
+#define FS_DIR_ENTRY_FILE  0
+#define FS_DIR_ENTRY_DIR   1
+
+/** Whence values for fs_seek() */
+#define FS_SEEK_SET  0
+#define FS_SEEK_CUR  1
+#define FS_SEEK_END  2
+
+/** Open flags for fs_open() — combinable with | */
+#define FS_O_READ    0x01
+#define FS_O_WRITE   0x02
+#define FS_O_CREAT   0x04
+#define FS_O_TRUNC   0x08
+#define FS_O_APPEND  0x10
+
+/**
+ * @brief Directory entry descriptor filled by fs_stat().
+ * Layout matches Zephyr struct fs_dirent on 32-bit targets.
+ */
+typedef struct {
+    uint8_t  type;      /**< FS_DIR_ENTRY_FILE or FS_DIR_ENTRY_DIR */
+    char     name[256]; /**< Null-terminated filename (max 255 chars) */
+    uint32_t size;      /**< File size in bytes (0 for directories) */
+} akira_dirent_t;
+
+/** @brief Open a file in the app sandbox.
+ *  @return Non-negative fd on success; negative errno on error. */
+extern int fs_open(const char *path, int flags);
+
+/** @brief Close an open file descriptor.
+ *  @return 0 on success; negative errno on error. */
+extern int fs_close(int fd);
+
+/** @brief Read bytes from an open file.
+ *  @return Bytes read (0 = EOF); negative errno on error. */
+extern int fs_read(int fd, void *buf, int len);
+
+/** @brief Write bytes to an open file.
+ *  @return Bytes written; negative errno on error. */
+extern int fs_write(int fd, const void *buf, int len);
+
+/** @brief Reposition the file offset.
+ *  @param whence  FS_SEEK_SET / FS_SEEK_CUR / FS_SEEK_END.
+ *  @return New offset from file start; negative errno on error. */
+extern int fs_seek(int fd, int offset, int whence);
+
+/** @brief Return the current file offset.
+ *  @return Byte offset; negative errno on error. */
+extern int fs_tell(int fd);
+
+/** @brief Fill @p entry with metadata for @p path.
+ *  @return 0 on success; -ENOENT if path absent. */
+extern int fs_stat(const char *path, akira_dirent_t *entry);
+
+/** @brief Delete a file from the sandbox.
+ *  @return 0 on success; -ENOENT if not found. */
+extern int fs_unlink(const char *path);
+
+/** @brief Create a directory.
+ *  @return 0 on success; -EEXIST if already present. */
+extern int fs_mkdir(const char *path);
+
+/** @brief List entries in a directory as newline-separated names (NUL-terminated).
+ *  Directories appear with a trailing '/'. @p path = "" for sandbox root.
+ *  @return Total bytes written; negative errno on error. */
+extern int fs_readdir(const char *path, char *buf, int len);
+
+/*
+ * =============================================================================
+ * CRYPTO API
+ * =============================================================================
+ * Required capability: "crypto"
+ *
+ * All functions return 0 on success, negative errno on failure.
+ * Output buffers must be pre-allocated by the caller.
+ */
+
+/** @brief Compute SHA-256 digest.
+ *  @param input    Source data.  @param in_len  Length in bytes.
+ *  @param out      32-byte output buffer.
+ *  @return 0 on success; negative errno on failure. */
+extern int crypto_sha256(const void *input, int in_len, uint8_t *out);
+
+/** @brief AES-256-CBC encrypt.
+ *  @param key      32-byte key.  @param iv   16-byte IV.
+ *  @param in_len   Plaintext length (multiple of 16).
+ *  @param in       Plaintext buffer.  @param in_size  Buffer size (>= in_len).
+ *  @param out      Ciphertext output (caller allocates >= in_len bytes).
+ *  @return 0 on success; negative errno on failure. */
+extern int crypto_aes256_encrypt(const uint8_t *key, const uint8_t *iv,
+                                  int in_len,
+                                  const void *in, int in_size,
+                                  void *out);
+
+/** @brief AES-256-CBC decrypt (inverse of crypto_aes256_encrypt). */
+extern int crypto_aes256_decrypt(const uint8_t *key, const uint8_t *iv,
+                                  int in_len,
+                                  const void *in, int in_size,
+                                  void *out);
+
+/** @brief HMAC-SHA256.
+ *  @param key/key_len  HMAC key.  @param data/data_len  Input data.
+ *  @param out          32-byte HMAC output.
+ *  @return 0 on success; negative errno on failure. */
+extern int crypto_hmac_sha256(const void *key, int key_len,
+                               const void *data, int data_len,
+                               uint8_t *out);
+
+/** @brief Fill @p buf with cryptographically secure random bytes.
+ *  @return 0 on success; negative errno on failure. */
+extern int crypto_random(void *buf, int len);
+
+/*
+ * =============================================================================
+ * OTA API
+ * =============================================================================
+ * Required capability: "ota"
+ *
+ * Firmware update operations. ota_fetch_and_apply() is asynchronous;
+ * poll ota_get_state() to track progress.
+ */
+
+/** OTA state codes */
+#define OTA_STATE_IDLE          0
+#define OTA_STATE_DOWNLOADING   1
+#define OTA_STATE_PENDING_APPLY 2
+#define OTA_STATE_APPLIED       3
+#define OTA_STATE_FAILED        4
+
+/** @brief Query a firmware server for a newer image.
+ *  @return 1 if update available, 0 if up-to-date, negative errno on error. */
+extern int ota_check(const char *url);
+
+/** @brief Download and apply a firmware image in the background.
+ *  @return 0 if started; negative errno on immediate failure. */
+extern int ota_fetch_and_apply(const char *url);
+
+/** @brief Return the current OTA state (OTA_STATE_*). */
+extern int ota_get_state(void);
+
+/** @brief Confirm the running image as valid (call after OTA_STATE_APPLIED). */
+extern int ota_confirm(void);
+
+/** @brief Roll back to the previous firmware image. */
+extern int ota_rollback(void);
 
 
 #ifdef __cplusplus

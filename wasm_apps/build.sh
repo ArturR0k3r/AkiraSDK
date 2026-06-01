@@ -69,8 +69,14 @@ build_app() {
         echo -e "${GREEN}Building ${app_name} (Makefile)...${NC}"
         if make -C "$app_dir" 2>&1; then
             local built_wasm="${app_dir}/${app_name}.wasm"
+            # Some Makefiles (e.g. test apps) write directly to bin/ — accept that too
+            if [ ! -f "$built_wasm" ] && [ -f "$output_file" ]; then
+                built_wasm="$output_file"
+            fi
             if [ -f "$built_wasm" ]; then
-                cp "$built_wasm" "$output_file"
+                if [ "$built_wasm" != "$output_file" ]; then
+                    cp "$built_wasm" "$output_file"
+                fi
                 local size
                 size=$(stat -c%s "$output_file" 2>/dev/null || stat -f%z "$output_file")
                 echo -e "${GREEN}✓ Built: ${app_name}.wasm (${size} bytes)${NC}"
@@ -291,7 +297,7 @@ build_python_app() {
 list_apps() {
     echo -e "${GREEN}Available WASM applications:${NC}"
     echo "  [C]"
-    for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
+    for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/ "${WASM_APPS_DIR}"/test/*/; do
         if [ -f "${dir}main.c" ]; then
             echo "    - $(basename "$dir")"
         fi
@@ -330,7 +336,7 @@ main() {
             echo ""
 
             local failed=0
-            for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
+            for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/ "${WASM_APPS_DIR}"/test/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
                     if ! aot_app "$name" "$aot_target"; then
@@ -358,7 +364,7 @@ main() {
             local failed=0
 
             # ── C / Makefile apps ────────────────────────────────────────────
-            for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/; do
+            for dir in "${WASM_APPS_DIR}"/generic/*/ "${WASM_APPS_DIR}"/console_apps/*/ "${WASM_APPS_DIR}"/retro_games/*/ "${WASM_APPS_DIR}"/test/*/; do
                 if [ -f "${dir}main.c" ]; then
                     name=$(basename "$dir")
                     if ! build_app "$name" "$dir"; then
@@ -433,6 +439,9 @@ main() {
                 fi
                 if [ ! -f "${app_dir}/main.c" ]; then
                     app_dir="${WASM_APPS_DIR}/retro_games/${command}"
+                fi
+                if [ ! -f "${app_dir}/main.c" ]; then
+                    app_dir="${WASM_APPS_DIR}/test/${command}"
                 fi
                 if ! build_app "$command" "$app_dir"; then
                     echo ""

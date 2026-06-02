@@ -1,49 +1,46 @@
 # micropython.wasm Runtime
 
-This directory holds the prebuilt `micropython.wasm` binary used by
-`py_to_wasm.py` to package Python apps for AkiraOS.
+This directory holds the `micropython.wasm` binary used by `py_to_wasm.py`
+to package Python apps for AkiraOS.
 
-## Obtaining micropython.wasm
+`micropython.wasm` must be **built from source** — there is no prebuilt
+binary. Run the build script once; afterwards only `py_to_wasm.py` is needed
+for each new app.
 
-### Option 1 — Download the prebuilt binary (recommended)
+## Build from source
 
-Check the AkiraOS releases page for a prebuilt `micropython.wasm` that includes
-the `_akira` native C module:
-
-```
-https://github.com/AkiraOS/AkiraOS/releases
-```
-
-Place the downloaded file here as `micropython.wasm`.
-
-### Option 2 — Build from source
-
-Requirements: `emcc` (Emscripten) or `wasi-sdk` + `cmake` + `python3`
+Requirements: `emcc` (Emscripten), `python3`, `make`, `git`
 
 ```bash
-# Clone MicroPython
-git clone https://github.com/micropython/micropython.git
-cd micropython
+# Install Emscripten (once)
+git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
+~/emsdk/emsdk install latest && ~/emsdk/emsdk activate latest
+source ~/emsdk/emsdk_env.sh
 
-# Build the mpy-cross compiler
-make -C mpy-cross
-
-# Copy the AkiraOS _akira native module
-cp <AkiraSDK>/python/native/_akira.c ports/webassembly/modules/
-
-# Build for wasm32 targeting WAMR (wasm32-unknown-unknown)
-cd ports/webassembly
-make MICROPY_WITH_AKIRA=1
-
-# Copy the output
-cp build/micropython.wasm <AkiraSDK>/python/runtime/micropython.wasm
+# Build micropython.wasm
+source ~/emsdk/emsdk_env.sh
+bash AkiraSDK/python/runtime/build.sh
 ```
 
-See [PYTHON_GUIDE.md](../../docs/PYTHON_GUIDE.md) for full instructions.
+Output: `AkiraSDK/python/runtime/micropython.wasm` (~290 KB)
+
+Build time: ~5 minutes on first run. Subsequent runs reuse the cached clone.
+
+## Internals
+
+- Built from the upstream MicroPython `webassembly` port with AkiraOS patches
+- Patches applied by `build.sh`:
+  - Injects `_akira.c` — C extension module wrapping all AkiraOS native APIs
+  - Replaces `mphalport.c` with AkiraOS HAL (stdout → `printf_native`)
+  - Sets fixed 384 KB WASM memory (`INITIAL_MEMORY=393216`, no growth)
+  - `SUPPORT_LONGJMP=none` — no invoke_* or WASM exceptions; compatible with WAMR
+  - `NO_EXIT_RUNTIME=1` — prevents exit trap after main() returns
+- Post-processed with `wasm-opt -Oz` (Binaryen)
+- Python script injected by `py_to_wasm.py` as a data segment at `0x30000`
 
 ## Notes
 
-- `micropython.wasm` targets `wasm32-unknown-unknown` (bare-metal, no WASI)
-- The `_akira` native module maps all `akira_*` WASM imports to Python callable objects
-- Memory is limited to 256 KB by default (set at build time)
-- MicroPython version: ≥1.24
+- Import the native module as `import _akira as akira` in your Python apps
+- Memory: 384 KB fixed (6 WASM pages); MicroPython heap is ~128 KB of that
+- MicroPython version: latest upstream (cloned at build time)
+- `_akira` module exports the full AkiraOS API — see `python/native/_akira.c`

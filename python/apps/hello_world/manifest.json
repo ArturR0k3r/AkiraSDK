@@ -2,7 +2,7 @@
   "name": "hello_world_python",
   "version": "1.0.0",
   "capabilities": [
-    "input.read"
+    "display.write"
   ],
   "memory_quota": 262144,
   "min_akiraos_version": "1.0.0"

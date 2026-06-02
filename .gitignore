@@ -104,5 +104,6 @@ build_nrf52/
 build_nrf53/
 .build_nrf53/
 
-# WebAssembly apps 
-*.wasm
+
+wasm_apps/rust/hello_world/target/*
+wasm_apps/bin/*

@@ -45,6 +45,11 @@ import sys
 
 SECTION_NAME = b"akira_py_script"
 
+# Address in WASM linear memory where main() reads the script.
+# Must match AKIRA_SCRIPT_ADDR in python/native/_akira.c.
+# Layout: [uint32_t length LE][utf-8 source bytes]
+AKIRA_SCRIPT_ADDR = 0x30000  # 192 KB
+
 
 # ── WASM binary helpers ───────────────────────────────────────────────────────
 
@@ -70,6 +75,26 @@ def _build_custom_section(name: bytes, data: bytes) -> bytes:
     return b"\x00" + section_size + section_content
 
 
+def _build_active_segment(offset: int, data: bytes) -> bytes:
+    """Build a single active data segment (type 0, memory 0, i32.const offset)."""
+    offset_expr = b"\x41" + _encode_uleb128(offset) + b"\x0b"
+    return b"\x00" + offset_expr + _encode_uleb128(len(data)) + data
+
+
+def _decode_uleb128(data: bytes, pos: int) -> tuple[int, int]:
+    """Decode LEB128 unsigned int at pos. Returns (value, new_pos)."""
+    result = 0
+    shift = 0
+    while True:
+        byte = data[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if not (byte & 0x80):
+            break
+        shift += 7
+    return result, pos
+
+
 def _validate_wasm(data: bytes) -> None:
     """Check that data starts with the WASM magic and version header."""
     if len(data) < 8:
@@ -80,11 +105,81 @@ def _validate_wasm(data: bytes) -> None:
         )
 
 
-def inject_custom_section(wasm_bytes: bytes, section_name: bytes, section_data: bytes) -> bytes:
-    """Append a new custom section to an existing WASM binary."""
+def _iter_sections(wasm: bytes):
+    """Yield (section_id, section_content_start, section_content_len, full_start, full_len)."""
+    pos = 8  # skip magic + version
+    while pos < len(wasm):
+        full_start = pos
+        section_id = wasm[pos]
+        pos += 1
+        size, pos = _decode_uleb128(wasm, pos)
+        content_start = pos
+        yield section_id, content_start, size, full_start, (pos + size) - full_start
+        pos += size
+
+
+def inject_script_data_section(wasm_bytes: bytes, script_bytes: bytes) -> bytes:
+    """Merge script as an active data segment into the existing data section.
+
+    WASM allows only one data section (id=11). We parse the existing one,
+    append our segment, and rebuild. Payload = [uint32 length LE][script bytes].
+    """
     _validate_wasm(wasm_bytes)
-    custom = _build_custom_section(section_name, section_data)
-    return wasm_bytes + custom
+    length_hdr = len(script_bytes).to_bytes(4, "little")
+    payload = length_hdr + script_bytes
+    new_segment = _build_active_segment(AKIRA_SCRIPT_ADDR, payload)
+
+    # Find existing data section (id=11) and datacount section (id=12)
+    data_sec_pos = None       # byte offset of full data section
+    data_sec_len = None
+    data_count_pos = None
+    data_count_len = None
+
+    for sec_id, content_start, content_size, full_start, full_len in _iter_sections(wasm_bytes):
+        if sec_id == 11:
+            data_sec_pos = full_start
+            data_sec_len = full_len
+        elif sec_id == 12:
+            data_count_pos = full_start
+            data_count_len = full_len
+
+    if data_sec_pos is None:
+        # No existing data section — build one from scratch and append before customs
+        seg_vec = _encode_uleb128(1) + new_segment
+        data_section = b"\x0b" + _encode_uleb128(len(seg_vec)) + seg_vec
+    else:
+        # Parse existing data section: read segment count then raw segment bytes
+        content_start = data_sec_pos + 1  # skip section id byte
+        _, content_start = _decode_uleb128(wasm_bytes, content_start)  # skip size
+        count, seg_bytes_start = _decode_uleb128(wasm_bytes, content_start)
+        seg_bytes_end = data_sec_pos + data_sec_len
+        existing_segs = wasm_bytes[seg_bytes_start:seg_bytes_end]
+        new_count = count + 1
+        seg_vec = _encode_uleb128(new_count) + existing_segs + new_segment
+        data_section = b"\x0b" + _encode_uleb128(len(seg_vec)) + seg_vec
+
+    # Update datacount section (id=12) to match new segment count
+    if data_count_pos is not None:
+        new_count_val = (count if data_sec_pos is not None else 0) + 1
+        new_dc_body = _encode_uleb128(new_count_val)
+        new_dc = b"\x0c" + _encode_uleb128(len(new_dc_body)) + new_dc_body
+
+    # Rebuild binary: keep all sections, replace data + datacount, inject script data section
+    result = bytearray(wasm_bytes[:8])  # magic + version
+    for sec_id, content_start, content_size, full_start, full_len in _iter_sections(wasm_bytes):
+        if sec_id == 11:
+            result += data_section
+        elif sec_id == 12 and data_count_pos is not None:
+            result += new_dc
+        else:
+            result += wasm_bytes[full_start:full_start + full_len]
+
+    # If no data section existed, append it before the final custom sections
+    if data_sec_pos is None:
+        result += data_section
+
+    # Append the akira.manifest custom section last (embed_manifest.py will add it later)
+    return bytes(result)
 
 
 # ── Tool discovery ────────────────────────────────────────────────────────────
@@ -200,9 +295,9 @@ def main() -> int:
     with open(script_path, "rb") as f:
         script_bytes = f.read()
 
-    # ── Inject custom section ─────────────────────────────────────────────
-    print(f"  Injecting Python script ({len(script_bytes)} bytes) → {SECTION_NAME.decode()} section")
-    result_bytes = inject_custom_section(wasm_bytes, SECTION_NAME, script_bytes)
+    # ── Inject script as data segment + custom section ───────────────────
+    print(f"  Injecting Python script ({len(script_bytes)} bytes) → 0x{AKIRA_SCRIPT_ADDR:x} data segment")
+    result_bytes = inject_script_data_section(wasm_bytes, script_bytes)
 
     # ── Write intermediate WASM ───────────────────────────────────────────
     with open(output_path, "wb") as f:

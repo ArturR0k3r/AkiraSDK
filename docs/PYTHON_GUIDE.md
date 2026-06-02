@@ -1,7 +1,6 @@
 # Python Apps Guide for AkiraOS
 
-This guide explains how to build WASM applications for AkiraOS using Python
-(MicroPython).
+Write Python apps for AkiraOS using MicroPython compiled to WASM.
 
 ## Architecture
 
@@ -9,58 +8,79 @@ This guide explains how to build WASM applications for AkiraOS using Python
                     build time
 Python script ──┐
                 ▼
-         py_to_wasm.py ──► micropython.wasm + akira_py_script custom section
+         py_to_wasm.py ──► hello_world.wasm
+                           (micropython.wasm + script data segment at 0x30000)
                                                │
                     runtime (WAMR)             │
                                                ▼
-                              MicroPython reads section, executes script
+                              MicroPython reads script from memory, executes it
                               Python calls _akira (native C module)
-                              _akira calls WASM imports from "env" module
-                              AkiraOS native API runs on Zephyr
+                              _akira calls env.* WASM imports
+                              WAMR links to AkiraOS native functions (Zephyr)
 ```
-
-The key components are:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| `micropython.wasm` | `AkiraSDK/python/runtime/` | Prebuilt MicroPython + `_akira` module |
-| `akira.py` | `AkiraSDK/python/akira.py` | Pure Python API wrapper |
-| `py_to_wasm.py` | `AkiraSDK/scripts/py_to_wasm.py` | Packages script into WASM |
+| `micropython.wasm` | `python/runtime/` | MicroPython + `_akira` module, built once |
+| `_akira.c` | `python/native/` | C extension — wraps all AkiraOS APIs |
+| `py_to_wasm.py` | `scripts/` | Injects Python script into `micropython.wasm` |
 
 ## Prerequisites
 
-- Python 3.8+
-- `micropython.wasm` with `_akira` native module (see [Obtaining micropython.wasm](#obtaining-micropythonwasm))
-- No C compiler needed
+1. Build `micropython.wasm` once (requires Emscripten):
 
-## Project Structure
-
-```
-my_app/
-├── main.py          # Application code (imports akira)
-└── manifest.json    # AkiraOS app manifest
+```bash
+source ~/emsdk/emsdk_env.sh
+bash python/runtime/build.sh
 ```
 
-A ready-to-use template is at `AkiraSDK/python/apps/hello_world/`.
+See [python/runtime/README.md](../python/runtime/README.md) for full build instructions.
 
-## Writing the App
+2. Python 3.8+ (for running `py_to_wasm.py` on the host)
+
+## Writing an App
 
 ```python
-import akira
+import _akira as akira
 
 def main():
-    akira.print("Hello from Python WASM!")
+    akira.printf_native("Hello from Python!")
 
-    akira.display_clear(akira.COLOR_BLACK)
-    akira.display_text(10, 10, "Hello Python!", akira.COLOR_WHITE)
+    akira.display_clear(0x0000)
+    akira.display_text(10, 10, "Hello Python!", 0xFFFF)
     akira.display_flush()
+
+    while True:
+        akira.delay(100000)  # 100 ms in microseconds
 
 main()
 ```
 
-The `akira` module provides the full AkiraOS API; import it at the top of
-every app.  The module is automatically available because `py_to_wasm.py`
-copies `akira.py` into `micropython.wasm`'s `sys.path`.
+- Import the native module as `import _akira as akira`
+- Apps that run continuously should loop with `while True` — apps are expected
+  to keep running; returning from `main()` causes a WASM trap
+- `akira.delay(us)` takes **microseconds**
+
+## Building
+
+```bash
+python3 scripts/py_to_wasm.py python/apps/my_app/main.py \
+    -o wasm_apps/bin/my_app.wasm
+```
+
+With explicit runtime:
+```bash
+MICROPYTHON_WASM=/path/to/micropython.wasm \
+    python3 scripts/py_to_wasm.py main.py -o my_app.wasm
+```
+
+## Project Structure
+
+```
+python/apps/my_app/
+├── main.py          # Application code
+└── manifest.json    # AkiraOS app manifest
+```
 
 ## manifest.json
 
@@ -68,209 +88,210 @@ copies `akira.py` into `micropython.wasm`'s `sys.path`.
 {
   "name": "my_app",
   "version": "1.0.0",
-  "capabilities": ["input.read"],
+  "capabilities": [],
   "memory_quota": 262144,
   "min_akiraos_version": "1.0.0"
 }
 ```
 
-> Python apps need **256 KB** of memory (the MicroPython heap).
-
-## Building
-
-```sh
-# Basic build
-python3 AkiraSDK/scripts/py_to_wasm.py main.py -o my_app.wasm
-
-# With explicit manifest
-python3 AkiraSDK/scripts/py_to_wasm.py main.py \
-    --manifest manifest.json -o my_app.wasm
-
-# With explicit runtime location
-MICROPYTHON_WASM=/path/to/micropython.wasm \
-    python3 AkiraSDK/scripts/py_to_wasm.py main.py -o my_app.wasm
-```
-
-Or use the AkiraSDK build script:
-```sh
-cd AkiraSDK/wasm_apps
-./build.sh python/my_app
-```
-
-Or via make:
-```sh
-cd AkiraSDK/wasm_apps
-make python/my_app
-# or all Python apps:
-make build-python
-```
-
-## Obtaining micropython.wasm
-
-### Option 1 — Prebuilt binary (recommended)
-
-Download `micropython.wasm` from the AkiraOS releases page and place it at:
-```
-AkiraSDK/python/runtime/micropython.wasm
-```
-or set the environment variable:
-```sh
-export MICROPYTHON_WASM=/path/to/micropython.wasm
-```
-
-### Option 2 — Build from source
-
-Requires Emscripten or WASI SDK:
-```sh
-git clone https://github.com/micropython/micropython.git
-cd micropython
-make -C mpy-cross
-cp <AkiraSDK>/python/native/_akira.c ports/webassembly/modules/
-cd ports/webassembly && make MICROPY_WITH_AKIRA=1
-cp build/micropython.wasm <AkiraSDK>/python/runtime/
-```
+Memory quota should be at least 262144 (256 KB) for the MicroPython heap.
 
 ## API Reference
 
-All AkiraOS functions are available via `import akira`:
+All functions are on the `_akira` module (imported as `akira` by convention).
 
-### console / timing
+### Console / Timing
+
 ```python
-akira.print("message")
-akira.printf("val=%d\n", 42)
-akira.delay_ms(500)
+akira.printf_native("message")   # print to AkiraOS log
+akira.delay(ms)                  # delay in milliseconds
+akira.sleep(ms)                  # alias for delay
 ```
 
-### display
+### Display
+
 ```python
-akira.display_clear(akira.COLOR_BLACK)
-akira.display_text(x, y, "text", akira.COLOR_WHITE)
-akira.display_text_large(x, y, "big", akira.COLOR_YELLOW)
-akira.display_number(x, y, 42, akira.COLOR_GREEN)
-akira.display_rect(x, y, w, h, akira.COLOR_RED)
-akira.display_rect_outline(x, y, w, h, akira.COLOR_BLUE)
+akira.display_clear(color)
+akira.display_text(x, y, "text", color)
+akira.display_text_large(x, y, "big", color)
+akira.display_number(x, y, 42, color)
+akira.display_rect(x, y, w, h, color)
+akira.display_rect_outline(x, y, w, h, color)
 akira.display_rounded_rect(x, y, w, h, radius, color)
 akira.display_circle(cx, cy, r, color)
 akira.display_circle_fill(cx, cy, r, color)
 akira.display_line(x0, y0, x1, y1, color)
-akira.display_progress_bar(x, y, w, h, pct, color)
+akira.display_progress_bar(x, y, w, h, value, max_val, fg, bg)
 akira.display_flush()
-w, h = akira.display_get_size()
+akira.display_get_size()         # returns (w, h) — not yet wrapped, use display_rect for bounds
 ```
 
-**Color constants:** `COLOR_BLACK`, `COLOR_WHITE`, `COLOR_RED`, `COLOR_GREEN`,
-`COLOR_BLUE`, `COLOR_YELLOW`, `COLOR_CYAN`, `COLOR_MAGENTA`, `COLOR_ORANGE`,
-`COLOR_PURPLE`
+Colors are 16-bit RGB565 integers (e.g. `0xFFFF` = white, `0x0000` = black).
 
-### gpio
+### GPIO
+
 ```python
-akira.gpio_configure(pin, akira.GPIO_OUTPUT)
-akira.gpio_write(pin, 1)
+akira.gpio_configure(pin, flags)
+akira.gpio_write(pin, value)
 v = akira.gpio_read(pin)
 ```
 
-**Flags:** `GPIO_INPUT`, `GPIO_OUTPUT`, `GPIO_PULL_UP`, `GPIO_PULL_DOWN`,
-`GPIO_ACTIVE_LOW`, `GPIO_ACTIVE_HIGH`
+### Sensor
 
-### sensor
 ```python
-raw   = akira.sensor_read(akira.SENSOR_CHAN_ACCEL_X)
-float_val = akira.sensor_read_float(akira.SENSOR_CHAN_GYRO_Z)
+raw = akira.sensor_read(channel)
 ```
 
-**Channels:** `SENSOR_CHAN_ACCEL_{X,Y,Z}`, `SENSOR_CHAN_GYRO_{X,Y,Z}`,
-`SENSOR_CHAN_AMBIENT_TEMP`, `SENSOR_CHAN_HUMIDITY`, `SENSOR_CHAN_PRESSURE`,
-`SENSOR_CHAN_ALTITUDE`, `SENSOR_CHAN_LIGHT`
+### Timer
 
-### storage
 ```python
-fd = akira.storage_open("/data/log.txt", akira.O_WRITE)
-akira.storage_write(fd, "hello\n")
-akira.storage_close(fd)
-data = akira.storage_read(fd, 256)
-akira.storage_delete("/data/old.txt")
-listing = akira.storage_list("/data/")
+t = akira.timer_create()
+akira.timer_start(t, ms)
+elapsed = akira.timer_elapsed(t)
+akira.timer_stop(t)
+akira.timer_free(t)
 ```
 
-### BLE
+### Storage (key-value)
+
 ```python
-akira.ble_init("MyDevice")
-akira.ble_char_add(0, akira.BLE_PROP_NOTIFY | akira.BLE_PROP_READ)
-akira.ble_notify(0, b"hello")
-connected = akira.ble_is_connected()
+h = akira.storage_open("mystore")
+akira.storage_write(h, buf, len)
+akira.storage_read(h, buf, len)
+akira.storage_close(h)
+akira.storage_delete("mystore")
+```
+
+### Settings (NVS)
+
+```python
+akira.settings_set("key", "value")
+akira.settings_get("key", buf, len)
+akira.settings_delete("key")
+```
+
+### Filesystem
+
+```python
+fd = akira.fs_open("path", flags)
+akira.fs_write(fd, buf, len)
+akira.fs_read(fd, buf, len)
+akira.fs_seek(fd, offset, whence)
+akira.fs_tell(fd)
+akira.fs_close(fd)
+akira.fs_unlink("path")
+akira.fs_mkdir("path")
+akira.fs_readdir("path")
 ```
 
 ### IPC (messaging)
+
 ```python
-akira.msg_subscribe("sensors")
-data = akira.msg_recv("sensors", 1000)    # timeout_ms
-akira.msg_publish("events", b"click")
+akira.msg_subscribe("topic")
+akira.msg_unsubscribe("topic")
+akira.msg_publish("topic", data, len)
+akira.msg_recv("topic", buf, len)
+akira.msg_try_recv("topic", buf, len)
+pending = akira.msg_pending()
 ```
 
-### net
+### BLE
+
 ```python
-sock = akira.net_open(akira.NET_TYPE_TCP)
-akira.net_connect(sock, "192.168.1.10", 8080)
+akira.ble_init()
+akira.ble_set_local_name("MyDevice")
+akira.ble_advertise()
+connected = akira.ble_is_connected()
+akira.ble_deinit()
 ```
 
-### app control
+### Network
+
 ```python
-status = akira.app_get_status("other_app")
-akira.app_start("other_app")
-akira.app_switch_to("other_app")
-name = akira.app_get_self_name()
+sock = akira.net_open(type)
+akira.net_connect(sock, "host", port)
+akira.net_bind(sock, port)
+akira.net_listen(sock, backlog)
+akira.net_close(sock)
 ```
 
-### power
+### Power
+
 ```python
-mode  = akira.power_get_mode()
 level = akira.power_get_battery_level()
-akira.power_pet_watchdog()
+status = akira.power_get_battery_status()
+mode = akira.power_get_mode()
+akira.power_set_low_power(enable)
+akira.wdt_pet()
 ```
 
 ### HID
+
 ```python
-akira.hid_keyboard_press(akira.HID_KEY_A)
-akira.hid_keyboard_release(akira.HID_KEY_A)
+akira.hid_init()
+akira.hid_key_press(key)
+akira.hid_key_release(key)
+akira.hid_key_release_all()
+akira.hid_type_string("hello")
 akira.hid_mouse_move(dx, dy)
-akira.hid_consumer_press(akira.HID_CONSUMER_VOLUME_UP)
+akira.hid_consumer_send(code)
 ```
 
 ### UART
+
 ```python
-h = akira.uart_open(0, 115200)
-akira.uart_write(h, b"AT\r\n")
-data = akira.uart_read(h, 64)
-akira.uart_close(h)
+akira.uart_open(port, baud)
+akira.uart_write(port, data, len)
+akira.uart_read(port, buf, len)
+akira.uart_close(port)
 ```
 
 ### I2C
+
 ```python
-akira.i2c_write_reg(bus_id=0, dev_addr=0x48, reg_addr=0x01, data=b"\x00\x00")
-data = akira.i2c_read_reg(bus_id=0, dev_addr=0x48, reg_addr=0x00, length=2)
+akira.i2c_write_reg(addr, reg, data, len)
+akira.i2c_read_reg(addr, reg, buf, len)
 ```
 
 ### PWM / ADC
+
 ```python
-akira.pwm_set(channel=0, freq_hz=1000, duty_pct=50)
-akira.pwm_disable(channel=0)
-raw_mv = akira.adc_read_mv(channel=0)
+akira.pwm_set(pin, freq, duty)
+akira.pwm_disable(pin)
+raw = akira.adc_read(channel)
+mv = akira.adc_read_mv(channel)
+```
+
+### RTC
+
+```python
+ms = akira.rtc_get_uptime_ms()
+t = akira.rtc_get_unix_time()
+akira.rtc_set_unix_time(t)
+akira.rtc_set_alarm(t)
+fired = akira.rtc_alarm_fired()
+```
+
+### Crypto
+
+```python
+akira.crypto_sha256(data, len, out)
+akira.crypto_random(buf, len)
 ```
 
 ## Memory Constraints
 
-Python apps use 256 KB memory (MicroPython heap + stack). Keep in mind:
+WASM memory is fixed at 384 KB. MicroPython heap is ~128 KB of that.
 
-- Avoid large buffers/lists in memory
-- Prefer generators over list comprehensions for big data
-- Use `akira.storage_*` for persistent data
-- MicroPython does not support all CPython modules
+- Avoid large buffers/lists
+- Prefer generators over list comprehensions for large data
+- Use `akira.storage_*` or `akira.fs_*` for persistent data
 
 ## Limitations
 
-- Modules available: `sys`, `struct`, `json`, `re`, `math`, `utime`, and
-  other MicroPython built-ins
+- Python exceptions that propagate to C level will trap (no recovery)
+  — catch exceptions in Python before they escape
+- `longjmp` is a no-op: unhandled exceptions cause a WASM unreachable trap
 - No `threading`, `asyncio`, or `subprocess`
-- No floating-point printf format (use `str(f)`)
-- Module import is limited to what is frozen into `micropython.wasm`
-- `akira.py` is always available (frozen at build time)
+- Module imports are limited to MicroPython built-ins + `_akira`
+- Available built-ins: `sys`, `struct`, `json`, `re`, `math`, `utime`, etc.

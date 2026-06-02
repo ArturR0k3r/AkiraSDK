@@ -2,6 +2,7 @@
 name = "hello_world"
 version = "1.0.0"
 edition = "2021"
+autobins = false
 
 # cdylib produces hello_world.wasm — the correct output for a WASM app
 [lib]

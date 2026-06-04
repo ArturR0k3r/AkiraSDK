@@ -1,0 +1,25 @@
+{
+  "name": "spectrum_analyzer",
+  "version": "1.0.0",
+  "description": "RF spectrum analyzer — 64-bin RSSI sweep with bar chart and waterfall display",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "rf.transceive",
+    "timer",
+    "sensor.read",
+    "input.read",
+    "storage.read",
+    "storage.write",
+    "power.read",
+    "ipc",
+    "hid",
+    "network.*",
+    "settings.*",
+    "app.switch",
+    "app.control",
+    "app.info"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
+}

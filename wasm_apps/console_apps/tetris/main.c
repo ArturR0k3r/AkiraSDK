@@ -431,41 +431,73 @@ static void auto_drop(void)
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
-static int btn_prev[4] = {0, 0, 0, 0};
-static int btn_prev_a = 0;
-static int btn_prev_b = 0;
-static int btn_prev_settings = 0;
-/* Separate repeat counters for LEFT and RIGHT — sharing one counter caused
- * a noise spike on one button to reset the other's auto-repeat timer,
- * making the piece slide spontaneously. */
+
+/* Software debounce: each button must read HIGH for DEBOUNCE_FRAMES
+ * consecutive frames before it is considered "pressed".  This filters
+ * GPIO noise that causes phantom moves without touching any button.
+ * gpio_read() bypasses the DTS debounce-interval-ms (which only applies
+ * to the Zephyr input subsystem), so we need our own debounce here.    */
+#define DEBOUNCE_FRAMES 2   /* 2 × 20ms = 40ms — removes noise spikes  */
+
+/* Stable (debounced) button states — 1 = confirmed pressed */
+static int btn[8];           /* UP DN LF RT A B SETTINGS X */
+static int btn_cnt[8];       /* consecutive HIGH frame counter          */
+
+/* Previous debounced state for edge detection */
+static int btn_was[8];
+
+/* DAS (Delayed Auto Shift) — separate counters per direction */
 static int lr_repeat_l = 0;
 static int lr_repeat_r = 0;
-#define LR_INITIAL 15  /* 15 × 20ms = 300ms before first auto-repeat */
-#define LR_HELD    6   /* 6 × 20ms = 120ms between subsequent repeats */
+#define LR_INITIAL 18   /* 18 × 20ms = 360ms before first auto-repeat  */
+#define LR_HELD     7   /* 7  × 20ms = 140ms between repeats           */
+
 static int soft_drop_active = 0;
-static int pause_requested = 0;
+static int pause_requested  = 0;
 
 /* App-switch / restart flags — set by pause menu, acted on by main() */
 static int g_exit_to_supervisor = 0;
-static int g_restart_game = 0;
+static int g_restart_game       = 0;
+
+/* Raw GPIO reads mapped to btn[] indices */
+static const int BTN_PINS[8] = {
+    BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_A, BTN_B, BTN_SETTINGS, BTN_X
+};
+/* SETTINGS is active-low; all others active-high */
+#define BTN_IDX_UP       0
+#define BTN_IDX_DN       1
+#define BTN_IDX_LF       2
+#define BTN_IDX_RT       3
+#define BTN_IDX_A        4
+#define BTN_IDX_B        5
+#define BTN_IDX_SETTINGS 6
+
+static void update_debounce(void)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        btn_was[i] = btn[i];
+        int raw = gpio_read(BTN_PINS[i]);
+        /* SETTINGS is active-low: invert */
+        if (i == BTN_IDX_SETTINGS) raw = !raw;
+        if (raw) btn_cnt[i]++;
+        else     btn_cnt[i] = 0;
+        btn[i] = (btn_cnt[i] >= DEBOUNCE_FRAMES);
+    }
+}
 
 static void handle_buttons(void)
 {
-    int up = gpio_read(BTN_UP);
-    int down = gpio_read(BTN_DOWN);
-    int left = gpio_read(BTN_LEFT);
-    int right = gpio_read(BTN_RIGHT);
-    int a = gpio_read(BTN_A);
-    int b = gpio_read(BTN_B);
-    int settings = gpio_read(BTN_SETTINGS);
+    update_debounce();
 
-    /* SETTINGS — pause on press edge */
-    if (settings && !btn_prev_settings)
+    /* SETTINGS — pause on rising edge */
+    if (btn[BTN_IDX_SETTINGS] && !btn_was[BTN_IDX_SETTINGS])
         pause_requested = 1;
-    btn_prev_settings = settings;
 
-    /* UP / A / B — rotate on press edge, with simple wall-kick */
-    if ((up && !btn_prev[0]) || (a && !btn_prev_a) || (b && !btn_prev_b))
+    /* UP / A / B — rotate on rising edge */
+    if ((btn[BTN_IDX_UP] && !btn_was[BTN_IDX_UP]) ||
+        (btn[BTN_IDX_A]  && !btn_was[BTN_IDX_A])  ||
+        (btn[BTN_IDX_B]  && !btn_was[BTN_IDX_B]))
     {
         int nr = (g.cur_rot + 1) % 4;
         if (!collides(g.cur_piece, nr, g.cur_x, g.cur_y))
@@ -486,65 +518,37 @@ static void handle_buttons(void)
             g.piece_moved = 1;
         }
     }
-    btn_prev[0] = up;
-    btn_prev_a = a;
-    btn_prev_b = b;
 
-    /* DOWN — soft drop (handled in game loop) */
-    soft_drop_active = down;
-    btn_prev[1] = down;
+    /* DOWN — soft drop */
+    soft_drop_active = btn[BTN_IDX_DN];
 
-    /* LEFT — independent repeat counter */
-    if (left)
+    /* LEFT — independent DAS counter */
+    if (btn[BTN_IDX_LF])
     {
         int move = 0;
-        if (!btn_prev[2])
-        {
-            move = 1;
-            lr_repeat_l = LR_INITIAL;
-        }
-        else if (--lr_repeat_l <= 0)
-        {
-            move = 1;
-            lr_repeat_l = LR_HELD;
-        }
+        if (!btn_was[BTN_IDX_LF])        { move = 1; lr_repeat_l = LR_INITIAL; }
+        else if (--lr_repeat_l <= 0)      { move = 1; lr_repeat_l = LR_HELD;   }
         if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x - 1, g.cur_y))
         {
             g.cur_x--;
             g.piece_moved = 1;
         }
     }
-    else
-    {
-        lr_repeat_l = 0;
-    }
-    btn_prev[2] = left;
+    else { lr_repeat_l = 0; }
 
-    /* RIGHT — independent repeat counter */
-    if (right)
+    /* RIGHT — independent DAS counter */
+    if (btn[BTN_IDX_RT])
     {
         int move = 0;
-        if (!btn_prev[3])
-        {
-            move = 1;
-            lr_repeat_r = LR_INITIAL;
-        }
-        else if (--lr_repeat_r <= 0)
-        {
-            move = 1;
-            lr_repeat_r = LR_HELD;
-        }
+        if (!btn_was[BTN_IDX_RT])         { move = 1; lr_repeat_r = LR_INITIAL; }
+        else if (--lr_repeat_r <= 0)       { move = 1; lr_repeat_r = LR_HELD;   }
         if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x + 1, g.cur_y))
         {
             g.cur_x++;
             g.piece_moved = 1;
         }
     }
-    else
-    {
-        lr_repeat_r = 0;
-    }
-    btn_prev[3] = right;
+    else { lr_repeat_r = 0; }
 }
 
 /* ── Display / game init ─────────────────────────────────────────────── */
@@ -773,18 +777,22 @@ int main(void)
     display_text(112, 170, "Press any button", COL_VALUE);
     display_flush();
 
-    /* Wait for a button press — count frames for RNG seed (human reaction
-     * time is unpredictable, giving a different seed on every run)       */
+    /* Wait for a REAL button press (debounced: must stay HIGH 3 frames).
+     * Count frames for RNG seed — human reaction time gives randomness.  */
     uint32_t seed = 1;
-    while (!gpio_read(BTN_UP) && !gpio_read(BTN_DOWN) &&
-           !gpio_read(BTN_LEFT) && !gpio_read(BTN_RIGHT) &&
-           !gpio_read(BTN_A) && !gpio_read(BTN_B))
+    int press_cnt = 0;
+    while (press_cnt < 3)
     {
+        int any = gpio_read(BTN_UP) || gpio_read(BTN_DOWN) ||
+                  gpio_read(BTN_LEFT) || gpio_read(BTN_RIGHT) ||
+                  gpio_read(BTN_A)   || gpio_read(BTN_B);
+        if (any) press_cnt++;
+        else     press_cnt = 0;   /* reset on noise */
         seed++;
         delay(20000);
     }
     rng_seed(seed);
-    delay(100000); /* debounce */
+    delay(150000); /* 150ms debounce before game starts */
 
     printf("Starting game...");
 

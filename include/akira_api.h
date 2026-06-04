@@ -1773,6 +1773,14 @@ extern int sd_scan_wasm(char *buf, int len);
  */
 extern int app_install_from_sd(const char *name);
 
+/**
+ * @brief Load and run a WASM app transiently from the SD card.
+ * @param name  App name without .wasm extension.
+ * @return 0 on success, negative errno on failure.
+ * Required capability: "app.control"
+ */
+extern int app_run_from_sd(const char *name);
+
 /*
  * =============================================================================
  * SETTINGS API

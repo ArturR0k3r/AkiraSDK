@@ -1,0 +1,15 @@
+{
+  "name": "akira_vault",
+  "version": "1.0.0",
+  "description": "Hardware crypto wallet + password manager. PIN-protected encrypted vault with TOTP authenticator and BLE/USB HID autotype.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "storage.read",
+    "storage.write",
+    "hid",
+    "settings.*"
+  ],
+  "memory_quota": 262144,
+  "min_akiraos_version": "1.5.0"
+}

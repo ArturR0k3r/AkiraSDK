@@ -20,8 +20,8 @@
 /* ── Button pins (gpio0, ACTIVE_HIGH, PULL_DOWN) ───────────────────────── */
 #define PIN_UP    4
 #define PIN_DOWN  5
-#define PIN_LEFT  6
-#define PIN_RIGHT 7
+#define PIN_LEFT  7
+#define PIN_RIGHT 6
 #define PIN_A     15
 
 /* ── Display geometry ───────────────────────────────────────────────────── */

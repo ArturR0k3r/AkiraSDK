@@ -39,8 +39,8 @@ static int32_t g_sw = 320, g_sh = 240;
 /* ── Button pins (akiraconsole, active-HIGH, pull-down) ──────────────── */
 #define BTN_UP       4
 #define BTN_DOWN     5
-#define BTN_LEFT     6
-#define BTN_RIGHT    7
+#define BTN_LEFT     7
+#define BTN_RIGHT    6
 #define BTN_A        15   /* A button — also rotates */
 #define BTN_B        16   /* B button — also rotates */
 #define BTN_SETTINGS 0    /* BTN.OK = GPIO0, active-low pull-up */

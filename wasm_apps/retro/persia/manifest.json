@@ -5,7 +5,10 @@
   "category": "retro_games",
   "capabilities": [
     "display.write",
-    "input.read"
+    "gpio.read",
+    "input.read",
+    "settings.*",
+    "app.switch"
   ],
   "memory_quota": 262144,
   "min_akiraos_version": "1.0.0"

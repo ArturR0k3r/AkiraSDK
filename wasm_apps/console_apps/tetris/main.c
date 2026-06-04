@@ -30,17 +30,17 @@ static int32_t g_sw = 320, g_sh = 240;
 #define BOARD_PX_H (BOARD_HEIGHT * BLOCK_SIZE)
 
 /* ── Game configuration ───────────────────────────────────────────────── */
-#define INITIAL_DROP_DELAY  2000000   /* 2.0 s at level 1 */
+#define INITIAL_DROP_DELAY  2500000   /* 2.5 s at level 1 — comfortable */
 #define MIN_DROP_DELAY       100000   /* 0.1 s at max level */
 #define FRAME_DELAY_US        20000   /* 20 ms per game tick (~50 fps) */
 #define MAX_LEVEL 15
-#define SOFT_DROP_DELAY 80000 /* µs per cell while DOWN held */
+#define SOFT_DROP_DELAY      80000   /* µs per cell while DOWN held */
 
 /* ── Button pins (akiraconsole, active-HIGH, pull-down) ──────────────── */
 #define BTN_UP 4
 #define BTN_DOWN 5
-#define BTN_LEFT 6
-#define BTN_RIGHT 7
+#define BTN_LEFT  7   /* GPIO7 = physical LEFT */
+#define BTN_RIGHT 6   /* GPIO6 = physical RIGHT */
 #define BTN_A 15       /* A button — also rotates */
 #define BTN_B 16       /* B button — also rotates */
 #define BTN_SETTINGS 0 /* BTN.OK = GPIO0, active-low pull-up */
@@ -435,9 +435,13 @@ static int btn_prev[4] = {0, 0, 0, 0};
 static int btn_prev_a = 0;
 static int btn_prev_b = 0;
 static int btn_prev_settings = 0;
-static int lr_repeat = 0;
-#define LR_INITIAL 12 /* 12 frames × 20ms = 240ms before auto-repeat */
-#define LR_HELD 3
+/* Separate repeat counters for LEFT and RIGHT — sharing one counter caused
+ * a noise spike on one button to reset the other's auto-repeat timer,
+ * making the piece slide spontaneously. */
+static int lr_repeat_l = 0;
+static int lr_repeat_r = 0;
+#define LR_INITIAL 15  /* 15 × 20ms = 300ms before first auto-repeat */
+#define LR_HELD    6   /* 6 × 20ms = 120ms between subsequent repeats */
 static int soft_drop_active = 0;
 static int pause_requested = 0;
 
@@ -490,19 +494,19 @@ static void handle_buttons(void)
     soft_drop_active = down;
     btn_prev[1] = down;
 
-    /* LEFT */
+    /* LEFT — independent repeat counter */
     if (left)
     {
         int move = 0;
         if (!btn_prev[2])
         {
             move = 1;
-            lr_repeat = LR_INITIAL;
+            lr_repeat_l = LR_INITIAL;
         }
-        else if (--lr_repeat <= 0)
+        else if (--lr_repeat_l <= 0)
         {
             move = 1;
-            lr_repeat = LR_HELD;
+            lr_repeat_l = LR_HELD;
         }
         if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x - 1, g.cur_y))
         {
@@ -512,23 +516,23 @@ static void handle_buttons(void)
     }
     else
     {
-        lr_repeat = 0;
+        lr_repeat_l = 0;
     }
     btn_prev[2] = left;
 
-    /* RIGHT */
+    /* RIGHT — independent repeat counter */
     if (right)
     {
         int move = 0;
         if (!btn_prev[3])
         {
             move = 1;
-            lr_repeat = LR_INITIAL;
+            lr_repeat_r = LR_INITIAL;
         }
-        else if (--lr_repeat <= 0)
+        else if (--lr_repeat_r <= 0)
         {
             move = 1;
-            lr_repeat = LR_HELD;
+            lr_repeat_r = LR_HELD;
         }
         if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x + 1, g.cur_y))
         {
@@ -538,7 +542,7 @@ static void handle_buttons(void)
     }
     else
     {
-        lr_repeat = 0;
+        lr_repeat_r = 0;
     }
     btn_prev[3] = right;
 }

@@ -1,3 +1,7 @@
 [submodule "tools/akira-cli"]
 	path = tools/akira-cli
 	url = https://github.com/PenEngineering/akira-cli.git
+
+[submodule "python/runtime/_build/micropython"]
+	path = python/runtime/_build/micropython
+	url = https://github.com/micropython/micropython.git

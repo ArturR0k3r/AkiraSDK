@@ -304,6 +304,12 @@ extern int display_flush(void);
  */
 extern int display_get_size(int32_t *w_out, int32_t *h_out);
 
+/** @brief Return display width in pixels (e.g. 400 for Sharp LS027B7DH01). */
+extern int display_get_width(void);
+
+/** @brief Return display height in pixels (e.g. 240). */
+extern int display_get_height(void);
+
 /**
  * @brief Draw a straight line between two points (Bresenham — no FPU).
  *

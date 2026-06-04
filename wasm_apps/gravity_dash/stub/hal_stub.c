@@ -23,8 +23,12 @@
 /* ── Display scale factor ───────────────────────────────────────────────── */
 #define SCALE 4
 
+/* ── Stub display dimensions (fixed for desktop harness) ───────────────── */
+#define STUB_W 240
+#define STUB_H 135
+
 /* ── Internal framebuffer (RGB888 — SDL uses 32-bit surface) ────────────── */
-static uint32_t s_framebuf[DISP_W * DISP_H];
+static uint32_t s_framebuf[STUB_W * STUB_H];
 
 /* ── SDL handles ────────────────────────────────────────────────────────── */
 static SDL_Window *s_window = NULL;
@@ -64,7 +68,7 @@ void akira_display_fill(uint16_t color)
     int i;
     uint32_t c32 = rgb565_to_rgb888(color);
 
-    for (i = 0; i < DISP_W * DISP_H; i++)
+    for (i = 0; i < STUB_W * STUB_H; i++)
     {
         s_framebuf[i] = c32;
     }
@@ -80,36 +84,46 @@ void akira_display_rect(int x, int y, int w, int h, uint16_t color)
 
     for (py = y; py < y + h; py++)
     {
-        if (py < 0 || py >= DISP_H)
+        if (py < 0 || py >= STUB_H)
         {
             continue;
         }
         for (px = x; px < x + w; px++)
         {
-            if (px < 0 || px >= DISP_W)
+            if (px < 0 || px >= STUB_W)
             {
                 continue;
             }
-            s_framebuf[py * DISP_W + px] = c32;
+            s_framebuf[py * STUB_W + px] = c32;
         }
     }
 }
 
 void akira_display_pixel(int x, int y, uint16_t color)
 {
-    if (x < 0 || x >= DISP_W || y < 0 || y >= DISP_H)
+    if (x < 0 || x >= STUB_W || y < 0 || y >= STUB_H)
     {
         return;
     }
-    s_framebuf[y * DISP_W + x] = rgb565_to_rgb888(color);
+    s_framebuf[y * STUB_W + x] = rgb565_to_rgb888(color);
 }
 
 void akira_display_flush(void)
 {
-    SDL_UpdateTexture(s_texture, NULL, s_framebuf, DISP_W * (int)sizeof(uint32_t));
+    SDL_UpdateTexture(s_texture, NULL, s_framebuf, STUB_W * (int)sizeof(uint32_t));
     SDL_RenderClear(s_renderer);
     SDL_RenderCopy(s_renderer, s_texture, NULL, NULL);
     SDL_RenderPresent(s_renderer);
+}
+
+int akira_display_get_width(void)
+{
+    return STUB_W;
+}
+
+int akira_display_get_height(void)
+{
+    return STUB_H;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -178,7 +192,7 @@ int main(int argc, char *argv[])
     s_window = SDL_CreateWindow(
         "gravity_dash — AkiraOS stub",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        DISP_W * SCALE, DISP_H * SCALE, 0);
+        STUB_W * SCALE, STUB_H * SCALE, 0);
 
     if (!s_window)
     {
@@ -196,11 +210,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    SDL_RenderSetLogicalSize(s_renderer, DISP_W, DISP_H);
+    SDL_RenderSetLogicalSize(s_renderer, STUB_W, STUB_H);
 
     s_texture = SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888,
                                   SDL_TEXTUREACCESS_STREAMING,
-                                  DISP_W, DISP_H);
+                                  STUB_W, STUB_H);
     if (!s_texture)
     {
         fprintf(stderr, "SDL_CreateTexture error: %s\n", SDL_GetError());

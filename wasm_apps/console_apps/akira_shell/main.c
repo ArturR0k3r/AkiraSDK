@@ -44,9 +44,8 @@
 #define SCR_NETWORK  4   /* WiFi / IP status                  */
 #define SCR_ABOUT    5   /* board / firmware info             */
 
-/* ── Layout (320×240) ────────────────────────────────────────────────────── */
-#define SCR_W      320
-#define SCR_H      240
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+static int32_t SCR_W = 320, SCR_H = 240;
 #define HDR_H       24   /* solid black header bar    */
 #define FTR_H       20   /* solid black footer bar    */
 #define FTR_Y      (SCR_H - FTR_H)      /* 220           */
@@ -637,6 +636,7 @@ static void show_launching(const char *name) {
 int main(void)
 {
     printf("[akira_shell] v3.0 starting\n");
+    display_get_size(&SCR_W, &SCR_H);
 
     btns_init();
     app_get_self_name((uint8_t*)g_self, NAME_LEN);

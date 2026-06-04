@@ -18,8 +18,7 @@
 #include "akira_api.h"
 
 /* ── Display ─────────────────────────────────────────────────────────── */
-#define SCR_W   320
-#define SCR_H   240
+static int32_t SCR_W = 320, SCR_H = 240;
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 #define BTN_UP       4
@@ -401,6 +400,7 @@ static int show_pause_menu(void) {
 int main(void)
 {
     printf("AkiraOS Gravity Dash v1.0");
+    display_get_size(&SCR_W, &SCR_H);
 
     gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);

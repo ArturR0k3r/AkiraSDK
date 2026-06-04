@@ -48,6 +48,10 @@ extern void renderer_draw_game_complete(int coins, int total);
 extern void levels_init(void);
 extern int levels_count_coins(int level_idx);
 
+/* ── Display dimensions (set once in app_init via host API) ──────────────── */
+int g_disp_w;
+int g_disp_h;
+
 /* ── Global game instance (single allocation in static memory) ───────────── */
 Game g;
 
@@ -66,6 +70,9 @@ static float s_fallback_angle;
 WASM_EXPORT void app_init(void)
 {
     int i;
+
+    g_disp_w = akira_display_get_width();
+    g_disp_h = akira_display_get_height();
 
     /* Zero entire game struct */
     for (i = 0; i < (int)sizeof(g); i++)

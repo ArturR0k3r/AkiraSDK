@@ -36,6 +36,12 @@ WASM_IMPORT void akira_display_pixel(int x, int y, uint16_t color);
 /* Flush the host framebuffer to the physical display */
 WASM_IMPORT void akira_display_flush(void);
 
+/* Return display width in pixels */
+WASM_IMPORT int akira_display_get_width(void);
+
+/* Return display height in pixels */
+WASM_IMPORT int akira_display_get_height(void);
+
 /* ── IMU ────────────────────────────────────────────────────────────────── */
 
 /* Return gravity angle in radians.

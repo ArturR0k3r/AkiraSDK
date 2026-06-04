@@ -28,8 +28,7 @@
 #define PIN_B     16   /* Stop selected app  */
 
 /* ── Display geometry ────────────────────────────────────────────────── */
-#define DISPLAY_W    320
-#define DISPLAY_H    240
+static int32_t DISPLAY_W = 320, DISPLAY_H = 240;
 #define TITLE_H       28
 #define ROW_H         28
 #define MAX_APPS      10
@@ -209,6 +208,7 @@ static void draw_launcher(int sel) {
 int main(void)
 {
     printf("[supervisor] starting\n");
+    display_get_size(&DISPLAY_W, &DISPLAY_H);
 
     buttons_init();
     app_get_self_name((uint8_t *)g_self, NAME_LEN);

@@ -39,11 +39,12 @@ char *itoa(int value, char *str, int base);
 #endif /* _AKIRA_API_INCLUDED */
 
 /* ─── Display ─────────────────────────────────────────────────────────────── */
-#define SCREEN_W      320
-#define SCREEN_H      240
+extern int32_t g_screen_w, g_screen_h;
+#define SCREEN_W      g_screen_w
+#define SCREEN_H      g_screen_h
 #define TILE_SIZE     8
-#define TILES_X       (SCREEN_W / TILE_SIZE)   /* 40 */
-#define TILES_Y       (SCREEN_H / TILE_SIZE)   /* 30 */
+#define TILES_X       40                         /* SCREEN_W / TILE_SIZE */
+#define TILES_Y       30                         /* SCREEN_H / TILE_SIZE */
 #define TILE_PIXELS   (TILE_SIZE * TILE_SIZE)   /* 64 */
 #define TILE_BYTES    (TILE_PIXELS * 2)         /* 128 bytes (RGB565) */
 

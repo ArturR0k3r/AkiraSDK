@@ -25,8 +25,7 @@
 #define PIN_A     15
 
 /* ── Display geometry ───────────────────────────────────────────────────── */
-#define DISPLAY_W  320
-#define DISPLAY_H  240
+static int32_t DISPLAY_W = 320, DISPLAY_H = 240;
 #define TITLE_H     26
 #define ROW_H       40
 
@@ -134,6 +133,7 @@ static void fire_macro(int idx)
 int main(void)
 {
     printf("[macro_pad] starting\n");
+    display_get_size(&DISPLAY_W, &DISPLAY_H);
     buttons_init();
 
     /* ── Self-initialize HID over BLE ──────────────────────────────────── */

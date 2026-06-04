@@ -15,6 +15,8 @@
 
 #include "akira_api.h"
 
+static int32_t g_sw = 320, g_sh = 240;
+
 
 
 /**
@@ -81,10 +83,10 @@ static void test_rectangles(void)
     display_rect(50, 160, 20, 20, COLOR_BLUE);
     
     // Draw border frame
-    display_rect(0, 0, 320, 5, COLOR_WHITE);     // Top
-    display_rect(0, 235, 320, 5, COLOR_WHITE);   // Bottom
-    display_rect(0, 0, 5, 240, COLOR_WHITE);     // Left
-    display_rect(315, 0, 5, 240, COLOR_WHITE);   // Right
+    display_rect(0, 0, (int)g_sw, 5, COLOR_WHITE);           // Top
+    display_rect(0, (int)g_sh - 5, (int)g_sw, 5, COLOR_WHITE); // Bottom
+    display_rect(0, 0, 5, (int)g_sh, COLOR_WHITE);           // Left
+    display_rect((int)g_sw - 5, 0, 5, (int)g_sh, COLOR_WHITE); // Right
 
     display_flush();
     delay(1000000);
@@ -197,7 +199,8 @@ int main(void)
     printf( "  AkiraOS Display Test Application  ");
     printf( "=====================================");
 
-    
+    display_get_size(&g_sw, &g_sh);
+
     // Run all tests
     test_clear_screen();
     test_rectangles();

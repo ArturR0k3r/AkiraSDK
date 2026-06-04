@@ -107,3 +107,6 @@ build_nrf53/
 
 wasm_apps/rust/hello_world/target/*
 wasm_apps/bin/*
+
+
+python/runtime/_build/

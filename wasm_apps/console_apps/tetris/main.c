@@ -11,6 +11,8 @@
 
 #include "akira_api.h"
 
+static int32_t g_sw = 320, g_sh = 240;
+
 /* ── Display layout ────────────────────────────────────────────────────────
  * Landscape 320×240.
  *   y:0-18   Header bar (title + level)
@@ -227,7 +229,7 @@ static void draw_stats(int force) {
 
 /* ── Header bar ──────────────────────────────────────────────────────── */
 static void draw_header(void) {
-    display_rect(0, 0, 320, 18, COL_HEADER_BG);
+    display_rect(0, 0, (int)g_sw, 18, COL_HEADER_BG);
     display_text_large(6, 1, "TETRIS", COL_TITLE);
     display_text(275, 3, "LV:", COL_LABEL);
     char buf[3];
@@ -601,6 +603,7 @@ static void game_loop(void) {
 int main(void)
 {
     printf("AkiraOS Tetris v2.0");
+    display_get_size(&g_sw, &g_sh);
 
     gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);

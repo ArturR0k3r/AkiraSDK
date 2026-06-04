@@ -1,6 +1,11 @@
 {
   "name": "cube3d",
   "version": "1.0.0",
-  "capabilities": ["display.write", "sensor.read", "timer"],
-  "memory_quota": 32768
+  "capabilities": [
+    "display.write",
+    "sensor.read",
+    "timer"
+  ],
+  "memory_quota": 32768,
+  "min_akiraos_version": "1.0.0"
 }

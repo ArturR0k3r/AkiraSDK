@@ -12,8 +12,10 @@
 #include <stdint.h>
 
 /* ── Display geometry ───────────────────────────────────────────────────── */
-#define DISP_W 240
-#define DISP_H 135
+extern int g_disp_w;
+extern int g_disp_h;
+#define DISP_W g_disp_w
+#define DISP_H g_disp_h
 
 /* ── Tile grid ──────────────────────────────────────────────────────────── */
 #define TILE_SIZE 16

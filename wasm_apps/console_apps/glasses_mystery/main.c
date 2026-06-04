@@ -8,6 +8,9 @@
 #include "world.h"
 #include "dialogue.h"
 
+/* ─── Display dimensions ──────────────────────────────────────────────────── */
+int32_t g_screen_w = 320, g_screen_h = 240;
+
 /* ─── Game state ──────────────────────────────────────────────────────────── */
 static game_state_t state = STATE_TITLE;
 static input_t      inp;
@@ -139,6 +142,8 @@ static void render_ground_items(void) {
  *  MAIN ENTRY
  * ═══════════════════════════════════════════════════════════════════════════ */
 int main(void) {
+    display_get_size(&g_screen_w, &g_screen_h);
+
     /* Timer for frame pacing */
     int timer = timer_create();
 

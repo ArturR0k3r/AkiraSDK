@@ -37,8 +37,7 @@ static const uint32_t CH_PIN[CH_COUNT] = { 42, 21, 20, 19 };
  *   x:0-47   Label column  (channel name, level, pin)
  *   x:48-319 Waveform area (272px = 272 samples wide)
  * ─────────────────────────────────────────────────────────────────────── */
-#define SCR_W    320
-#define SCR_H    240
+static int32_t SCR_W = 320, SCR_H = 240;
 #define HDR_H     18
 #define FTR_H     22
 #define LBL_W     48
@@ -255,6 +254,7 @@ static void init_screen(void) {
 /* ── Entry point ─────────────────────────────────────────────────────── */
 int main(void) {
     printf("AkiraOS Logic Analyzer v2.0");
+    display_get_size(&SCR_W, &SCR_H);
 
     init_gpio();
     init_screen();

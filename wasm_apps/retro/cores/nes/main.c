@@ -81,7 +81,7 @@ static const char *PM_LABELS[PM_COUNT] = {
 #define SM_COUNT      3
 
 /* ── Runtime settings ────────────────────────────────────────────────── */
-static int g_frameskip = 0;   /* 0 = every frame (max fps) */
+static int g_frameskip = 1;   /* 1 = every other frame = 30 fps (better default for ESP32-S3) */
 static int g_overscan  = 1;   /* 1 = crop 8 top/bottom lines            */
 
 /* ── Tiny helpers ─────────────────────────────────────────────────────── */

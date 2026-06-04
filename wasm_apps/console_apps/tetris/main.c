@@ -376,7 +376,7 @@ static int btn_prev_a       = 0;
 static int btn_prev_b       = 0;
 static int btn_prev_settings = 0;
 static int lr_repeat        = 0;
-#define LR_INITIAL 8
+#define LR_INITIAL 12   /* 12 frames × 20ms = 240ms before auto-repeat */
 #define LR_HELD    3
 static int soft_drop_active = 0;
 static int pause_requested  = 0;

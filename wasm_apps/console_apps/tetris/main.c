@@ -30,7 +30,7 @@ static int32_t g_sw = 320, g_sh = 240;
 #define BOARD_PX_H     (BOARD_HEIGHT * BLOCK_SIZE)
 
 /* ── Game configuration ───────────────────────────────────────────────── */
-#define INITIAL_DROP_DELAY 1500000   /* 1.5 s at level 1 */
+#define INITIAL_DROP_DELAY 3000000   /* 3.0 s at level 1 — beginner-friendly */
 #define MIN_DROP_DELAY      100000   /* 0.1 s at max level (level 15) */
 #define FRAME_DELAY_US       20000   /* 20 ms per game tick */
 #define MAX_LEVEL               15

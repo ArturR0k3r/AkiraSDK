@@ -294,6 +294,9 @@ static uint32_t totp_code(const uint8_t *secret, int slen,
     return code % mod;
 }
 
+/* Timer handle — declared here so PRNG can use it; created in main() */
+static int g_uptimer = -1;
+
 /* ═══════════════════════════════════════════════════════════════════════
  * PRNG (ChaCha20-based, seeded from uptime)
  * ═══════════════════════════════════════════════════════════════════════ */
@@ -303,7 +306,8 @@ static uint32_t g_rng_buf[16];
 static int g_rng_pos = 64;
 
 static void rng_init(void) {
-    uint64_t t = (uint64_t)(uint32_t)rtc_get_uptime_ms();
+    /* g_uptimer must be created before this call; timer_elapsed gives entropy */
+    uint64_t t = (g_uptimer >= 0) ? (uint64_t)(uint32_t)timer_elapsed(g_uptimer) : 0ULL;
     g_rng_st[0]=0x61707865; g_rng_st[1]=0x3320646e;
     g_rng_st[2]=0x79622d32; g_rng_st[3]=0x6b206574;
     g_rng_st[4]=(uint32_t)t; g_rng_st[5]=(uint32_t)(t>>32);
@@ -330,7 +334,7 @@ static void rng_fill(uint8_t *buf, int len) {
 /* Mix more entropy into the RNG state (called on button presses) */
 static void rng_stir(uint32_t v) {
     g_rng_st[5] ^= v;
-    g_rng_st[6] ^= (uint32_t)(uint64_t)(uint32_t)rtc_get_uptime_ms();
+    g_rng_st[6] ^= (g_uptimer >= 0) ? (uint32_t)timer_elapsed(g_uptimer) : v;
     g_rng_pos = 64;
 }
 
@@ -486,8 +490,7 @@ static int g_last_repeat_frames;
 static int g_last_activity_frames;
 static int g_frame; /* monotonic frame counter (16 ms each) */
 
-/* Timer handle for monotonic ms — timer API always available on prod */
-static int g_uptimer = -1;
+/* g_uptimer declared near PRNG section above */
 
 #define HOLD_DELAY_FRAMES   22  /* 22 × 16 ms ≈ 350 ms */
 #define REPEAT_FRAMES        8  /* 8 × 16 ms ≈ 130 ms */

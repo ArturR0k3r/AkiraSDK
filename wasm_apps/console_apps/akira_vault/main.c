@@ -22,8 +22,7 @@
 #include "../include/akira_api.h"
 #include <stdint.h>
 
-/* get_time_ms is exported by WAMR but not declared in the WASM SDK header */
-extern uint64_t get_time_ms(void);
+/* get_time_ms / rtc_get_unix_time are in akira_api.h (RTC API) */
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -296,7 +295,7 @@ static uint32_t g_rng_buf[16];
 static int g_rng_pos = 64;
 
 static void rng_init(void) {
-    uint64_t t = get_time_ms();
+    uint64_t t = (uint64_t)(uint32_t)rtc_get_uptime_ms();
     g_rng_st[0]=0x61707865; g_rng_st[1]=0x3320646e;
     g_rng_st[2]=0x79622d32; g_rng_st[3]=0x6b206574;
     g_rng_st[4]=(uint32_t)t; g_rng_st[5]=(uint32_t)(t>>32);
@@ -323,7 +322,7 @@ static void rng_fill(uint8_t *buf, int len) {
 /* Mix more entropy into the RNG state (called on button presses) */
 static void rng_stir(uint32_t v) {
     g_rng_st[5] ^= v;
-    g_rng_st[6] ^= (uint32_t)get_time_ms();
+    g_rng_st[6] ^= (uint32_t)(uint64_t)(uint32_t)rtc_get_uptime_ms();
     g_rng_pos = 64;
 }
 
@@ -424,7 +423,7 @@ static int  g_pin_err;            /* 1=wrong PIN, 2=mismatch */
 
 /* Time */
 static uint64_t g_unix_base;      /* Unix timestamp at g_ms_base */
-static uint64_t g_ms_base;        /* get_time_ms() when time was set */
+static uint64_t g_ms_base;        /* (uint64_t)(uint32_t)rtc_get_uptime_ms() when time was set */
 static int      g_time_set;
 static int      g_tset_field;     /* 0=year 1=mon 2=day 3=hour 4=min */
 static int      g_tset_vals[5];   /* year, mon, day, hour, min */
@@ -486,8 +485,14 @@ static uint64_t g_last_activity;
  * ═══════════════════════════════════════════════════════════════════════ */
 
 static uint64_t get_unix(void) {
+    int t = rtc_get_unix_time();
+    if (t > 0) {
+        g_time_set = 1;
+        return (uint64_t)t;
+    }
+    /* Fallback: manual offset set via Settings > Set Time */
     if (!g_time_set) return 0;
-    return g_unix_base + (get_time_ms() - g_ms_base) / 1000;
+    return g_unix_base + (uint64_t)(rtc_get_uptime_ms() - (int)g_ms_base) / 1000;
 }
 
 /* Days in month (non-leap) */
@@ -516,7 +521,7 @@ static void save_time_to_settings(void) {
     /* Encode as decimal string - only lower 32 bits needed for TOTP until 2106 */
     int_to_str((int)(now & 0xFFFFFFFF), buf);
     settings_set("vault/tunix", buf);
-    int_to_str((int)(get_time_ms() & 0xFFFFFFFF), buf);
+    int_to_str((int)((uint64_t)(uint32_t)rtc_get_uptime_ms() & 0xFFFFFFFF), buf);
     settings_set("vault/tms", buf);
 }
 
@@ -530,10 +535,10 @@ static void load_time_from_settings(void) {
             stored_unix = stored_unix * 10 + (b1[i] - '0');
         for (int i = 0; b2[i] >= '0' && b2[i] <= '9'; i++)
             stored_ms = stored_ms * 10 + (b2[i] - '0');
-        uint32_t now_ms = (uint32_t)(get_time_ms() & 0xFFFFFFFF);
+        uint32_t now_ms = (uint32_t)((uint64_t)(uint32_t)rtc_get_uptime_ms() & 0xFFFFFFFF);
         uint32_t elapsed = now_ms - stored_ms;
         g_unix_base = stored_unix + elapsed / 1000;
-        g_ms_base = get_time_ms();
+        g_ms_base = (uint64_t)(uint32_t)rtc_get_uptime_ms();
         g_time_set = 1;
     }
 }
@@ -607,7 +612,7 @@ static void vault_lock(void) {
 
 static uint32_t poll_btns(void) {
     uint32_t cur = (uint32_t)input_get_buttons();
-    uint64_t now = get_time_ms();
+    uint64_t now = (uint64_t)(uint32_t)rtc_get_uptime_ms();
     uint32_t edges = cur & ~g_prev_btns;
     g_prev_btns = cur;
     if (edges) {
@@ -638,33 +643,40 @@ static const char CS_ALPHA[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
  * UI HELPERS
  * ═══════════════════════════════════════════════════════════════════════ */
 
-#define W    CONSOLE_WIDTH
-#define H    CONSOLE_HEIGHT
+/* Runtime screen dimensions — set by display_get_size() in main() */
+static int32_t g_sw = CONSOLE_WIDTH;
+static int32_t g_sh = CONSOLE_HEIGHT;
+static int g_mono = 0; /* 1 = monochrome display (Sharp LS027B7DH01) */
+
+#define W    g_sw
+#define H    g_sh
 #define HH   CONSOLE_HEADER_H
-#define FY   CONSOLE_FOOTER_Y
+#define FY   (g_sh - CONSOLE_FOOTER_H)
 #define FH   CONSOLE_FOOTER_H
 #define CY   CONSOLE_CONTENT_Y
-#define CTNH CONSOLE_CONTENT_H
+#define CTNH (FY - CY)
 #define RH   CONSOLE_ROW_H
 
-/* Alias console colors */
-#define CB  CONSOLE_COLOR_BG
-#define CHD CONSOLE_COLOR_HEADER
-#define CS  CONSOLE_COLOR_SEP
-#define CA  CONSOLE_COLOR_ACCENT
-#define CT  CONSOLE_COLOR_TEXT
-#define CD  CONSOLE_COLOR_DIM
-#define CSL CONSOLE_COLOR_SEL_BG
-#define COK CONSOLE_COLOR_OK
-#define CER CONSOLE_COLOR_ERR
-#define CWN CONSOLE_COLOR_WARN
+/* Color aliases — monochrome-safe: non-black = white on Sharp */
+#define CB  0x0000U                /* background   black  */
+#define CHD 0x0000U                /* header/footer black (pure black works on both) */
+#define CS  0xFFFFU                /* separator    white  */
+#define CA  (g_mono ? 0xFFFFU : CONSOLE_COLOR_ACCENT) /* cyan / white */
+#define CT  0xFFFFU                /* primary text white  */
+#define CD  (g_mono ? 0xC618U : CONSOLE_COLOR_DIM)    /* dim text     */
+#define CSL (g_mono ? 0xFFFFU : CONSOLE_COLOR_SEL_BG) /* selection bg */
+#define COK (g_mono ? 0xFFFFU : CONSOLE_COLOR_OK)
+#define CER (g_mono ? 0xFFFFU : CONSOLE_COLOR_ERR)
+#define CWN (g_mono ? 0xFFFFU : CONSOLE_COLOR_WARN)
 
 /* Visible rows in content area */
-#define VROWS  (CTNH / RH)  /* 8 */
+#define VROWS  (CTNH / RH)
+
+/* Text color for selected row — inverted on monochrome */
+#define CT_SEL  (g_mono ? 0x0000U : 0xFFFFU)
 
 static void ui_header(const char *title) {
-    display_rect(0, 0, W, HH, CHD);
-    /* Shield icon */
+    display_rect(0, 0, W, HH, CB);
     display_triangle_fill(6, 5, 14, 1, 22, 5, CA);
     display_rect(8, 5, 8, 11, CA);
     display_text(28, 5, title, CT);
@@ -672,23 +684,28 @@ static void ui_header(const char *title) {
 }
 
 static void ui_footer(const char *left, const char *right) {
-    display_rect(0, FY, W, FH, CHD);
+    display_rect(0, FY, W, FH, CB);
     display_hline(0, FY, W, CS);
-    if (left)  display_text(4,            FY + 5, left,  CD);
-    if (right) display_text(W - 4 - strlen(right)*7, FY + 5, right, CD);
+    if (left)  display_text(4,                          FY + 5, left,  CD);
+    if (right) display_text(W - 4 - strlen(right)*7,    FY + 5, right, CD);
 }
 
 static void ui_row(int vi, const char *label, const char *sub, int sel, uint16_t badge) {
     int y = CY + vi * RH;
-    display_rect(0, y, W, RH, sel ? CSL : CB);
-    display_hline(0, y + RH - 1, W, 0x2104);
+    uint16_t row_bg  = sel ? CSL : CB;
+    uint16_t row_txt = sel ? CT_SEL : CT;
+    uint16_t row_sub = sel ? CT_SEL : CD;
+    display_rect(0, y, W, RH, row_bg);
+    display_hline(0, y + RH - 1, W, CS);
     if (badge) {
-        display_rect(4, y + 9, 7, 7, badge);
-        display_text(15, y + 6, label, CT);
-        if (sub) display_text(15, y + 15, sub, CD);
+        /* On monochrome, skip colored badge dot to avoid confusion */
+        uint16_t bdg = g_mono ? row_txt : badge;
+        display_rect(4, y + 9, 7, 7, bdg);
+        display_text(15, y + 6,  label, row_txt);
+        if (sub) display_text(15, y + 15, sub, row_sub);
     } else {
-        display_text(8, y + 6, label, CT);
-        if (sub) display_text(8, y + 15, sub, CD);
+        display_text(8, y + 6,  label, row_txt);
+        if (sub) display_text(8, y + 15, sub, row_sub);
     }
 }
 
@@ -1120,7 +1137,7 @@ static void draw_totp_list(void) {
             /* Progress dot */
             if (g_time_set) {
                 int pct = (int)(now % e->period);
-                int dotx = 160 + (pct * 15) / e->period;
+                int dotx = W/2 - 40 + (pct * 30) / e->period;
                 display_rect(dotx, y + 14, 3, 3, (pct > e->period*3/4) ? CER : COK);
             }
         }
@@ -1561,7 +1578,7 @@ static void handle_time_setup(uint32_t btns) {
     if ((btns & AKIRA_BTN_A) || (btns & AKIRA_BTN_Y)) {
         g_unix_base = ymd_hm_to_unix(g_tset_vals[0], g_tset_vals[1], g_tset_vals[2],
                                       g_tset_vals[3], g_tset_vals[4]);
-        g_ms_base   = get_time_ms();
+        g_ms_base   = (uint64_t)(uint32_t)rtc_get_uptime_ms();
         g_time_set  = 1;
         save_time_to_settings();
         g_screen = SCR_SETTINGS; g_cursor = 1; g_dirty = 1;
@@ -1775,6 +1792,13 @@ static void handle_confirm(uint32_t btns) {
  * ═══════════════════════════════════════════════════════════════════════ */
 
 int main(void) {
+    /* Detect actual display — Sharp LS027B7DH01 is 400×240 monochrome */
+    display_get_size(&g_sw, &g_sh);
+    if (g_sw <= 0) g_sw = CONSOLE_WIDTH;
+    if (g_sh <= 0) g_sh = CONSOLE_HEIGHT;
+    /* 400px wide = Sharp Memory LCD; use monochrome-safe rendering */
+    g_mono = (g_sw >= 400);
+
     rng_init();
     load_time_from_settings();
 
@@ -1792,7 +1816,7 @@ int main(void) {
 
     g_screen = SCR_BOOT;
     g_dirty  = 1;
-    g_last_activity = get_time_ms();
+    g_last_activity = (uint64_t)(uint32_t)rtc_get_uptime_ms();
 
     /* Boot screen — brief display then route based on vault state */
     draw_boot();
@@ -1809,7 +1833,7 @@ int main(void) {
     /* Main loop */
     while (1) {
         uint32_t btns = poll_btns();
-        uint64_t now  = get_time_ms();
+        uint64_t now  = (uint64_t)(uint32_t)rtc_get_uptime_ms();
 
         /* Auto-lock after inactivity */
         if (g_screen != SCR_LOCK && g_screen != SCR_NEW_VAULT &&

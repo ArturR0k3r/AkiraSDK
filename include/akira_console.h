@@ -89,4 +89,29 @@
 /** Test whether a button is set in a bitmask from input_get_buttons(). */
 #define AKIRA_BTN_PRESSED(mask, btn) (((mask) & (btn)) != 0U)
 
+/* ─── AkiraConsole input API ──────────────────────────────────────────────── */
+/*
+ * Required capability: "input.read"
+ *
+ * input_get_buttons() returns a bitmask of currently held buttons (non-blocking).
+ * Bit N is set when the button with zephyr,code == N is pressed.
+ * Use AKIRA_BTN_* masks to test individual bits.
+ *
+ * input_poll_event() drains one edge event (press or release) from the ring
+ * buffer. Returns 1 if an event was written, 0 if the queue is empty.
+ */
+
+/** Packed button edge event returned by input_poll_event(). */
+typedef struct {
+    uint32_t button_id; /**< AKIRA_BTN_ID_* value — matches zephyr,code */
+    uint32_t pressed;   /**< 1 = press, 0 = release                      */
+} akira_input_event_t;
+
+/** @brief Return bitmask of currently held buttons (non-blocking). */
+extern int input_get_buttons(void);
+
+/** @brief Drain one edge event from the ring buffer (non-blocking).
+ *  @return 1 if event written, 0 if empty, negative on error. */
+extern int input_poll_event(akira_input_event_t *evt);
+
 #endif /* AKIRA_CONSOLE_H */

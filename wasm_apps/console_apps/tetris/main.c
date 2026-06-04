@@ -30,8 +30,8 @@ static int32_t g_sw = 320, g_sh = 240;
 #define BOARD_PX_H     (BOARD_HEIGHT * BLOCK_SIZE)
 
 /* ── Game configuration ───────────────────────────────────────────────── */
-#define INITIAL_DROP_DELAY  300000   /* 0.3 s at level 1 — noticeably brisker */
-#define MIN_DROP_DELAY       50000
+#define INITIAL_DROP_DELAY  800000   /* 0.8 s at level 1 — comfortable starting speed */
+#define MIN_DROP_DELAY       80000   /* 0.08 s at max level */
 #define MAX_LEVEL               15
 #define SOFT_DROP_DELAY       8000   /* µs per cell while DOWN held */
 

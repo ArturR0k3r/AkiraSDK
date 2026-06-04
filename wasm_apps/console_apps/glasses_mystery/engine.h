@@ -34,6 +34,8 @@ extern int storage_read(int32_t handle, void *buf, int32_t size);
 extern int storage_write(int32_t handle, const void *buf, int32_t size);
 extern int storage_close(int32_t handle);
 extern int app_switch(const char *name);
+extern int display_get_size(int32_t *w_out, int32_t *h_out);
+extern uint64_t get_time_ms(void);
 void printf(const char *fmt, ...);
 char *itoa(int value, char *str, int base);
 #endif /* _AKIRA_API_INCLUDED */

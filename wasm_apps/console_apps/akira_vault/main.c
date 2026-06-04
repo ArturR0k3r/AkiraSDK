@@ -25,8 +25,8 @@
 /* GPIO button pins (prod board, ACTIVE_HIGH, PULL_DOWN) */
 #define VPIN_UP    4
 #define VPIN_DOWN  5
-#define VPIN_LEFT  7
-#define VPIN_RIGHT 6
+#define VPIN_LEFT  6
+#define VPIN_RIGHT 7
 #define VPIN_A     15
 #define VPIN_B     16
 #define VPIN_X     17

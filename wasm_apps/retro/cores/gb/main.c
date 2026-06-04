@@ -46,8 +46,8 @@ static int g_frameskip = 1;                  /* default: 30 fps (every other fra
 /* ── GPIO pin assignments ────────────────────────────────────────────── */
 #define PIN_UP        4
 #define PIN_DOWN      5
-#define PIN_LEFT      7
-#define PIN_RIGHT     6
+#define PIN_LEFT      6
+#define PIN_RIGHT     7
 #define PIN_A        15
 #define PIN_B        16
 #define PIN_X        17

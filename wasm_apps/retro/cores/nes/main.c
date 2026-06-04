@@ -44,8 +44,8 @@ static int g_nes_draw_w;  /* Pixels written per row                        */
 /* ── GPIO pins (akiraconsole) ─────────────────────────────────────────── */
 #define PIN_UP        4
 #define PIN_DOWN      5
-#define PIN_LEFT      7
-#define PIN_RIGHT     6
+#define PIN_LEFT      6
+#define PIN_RIGHT     7
 #define PIN_A        15
 #define PIN_B        16
 #define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */

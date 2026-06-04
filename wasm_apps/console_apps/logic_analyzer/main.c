@@ -5,11 +5,10 @@
 
 /**
  * @file logic_analyzer.c
- * @brief 7-channel GPIO logic analyzer — real-time scrolling waveform
+ * @brief 3-channel GPIO logic analyzer — real-time scrolling waveform
  *
  * Probe channels (external signal input — connect to test points):
  *   CH1 → GPIO45   CH2 → GPIO39   CH3 → GPIO40
- *   CH4 → GPIO42   CH5 → GPIO21   CH6 → GPIO20   CH7 → GPIO19
  *
  * Controls (akiraconsole buttons, active-HIGH, pull-down):
  *   UP (4)                  increase sample rate
@@ -21,8 +20,8 @@
 #include "akira_api.h"
 
 /* ── Probe pins ──────────────────────────────────────────────────────── */
-#define CH_COUNT  7
-static const uint32_t CH_PIN[CH_COUNT] = { 45, 39, 40, 42, 21, 20, 19 };
+#define CH_COUNT  3
+static const uint32_t CH_PIN[CH_COUNT] = { 45, 39, 40 };
 
 /* ── Button pins (akiraconsole, active-HIGH, pull-down) ──────────────── */
 #define BTN_UP       4
@@ -68,13 +67,9 @@ static int32_t SCR_W = 320, SCR_H = 240;
 #define COL_HINT    0x4208   /* footer hint text       */
 
 static const uint16_t CH_COLOR[CH_COUNT] = {
-    0x07E0,  /* CH1 G45 — green   */
-    0x07FF,  /* CH2 G39 — cyan    */
-    0xFFE0,  /* CH3 G40 — yellow  */
-    0xF81F,  /* CH4 G42 — magenta */
-    0xF800,  /* CH5 G21 — red     */
-    0xFD20,  /* CH6 G20 — orange  */
-    0x801F,  /* CH7 G19 — purple  */
+    0x07E0,  /* CH1 G45 — green  */
+    0x07FF,  /* CH2 G39 — cyan   */
+    0xFFE0,  /* CH3 G40 — yellow */
 };
 
 /* ── Sample ring buffer ──────────────────────────────────────────────── *
@@ -145,8 +140,8 @@ static void draw_grid(void) {
 }
 
 /* ── Channel label ───────────────────────────────────────────────────── */
-static const char *ch_name[CH_COUNT] = { "CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7" };
-static const char *ch_pin [CH_COUNT] = { "G45", "G39", "G40", "G42", "G21", "G20", "G19" };
+static const char *ch_name[CH_COUNT] = { "CH1", "CH2", "CH3" };
+static const char *ch_pin [CH_COUNT] = { "G45", "G39", "G40" };
 
 static void draw_label(int ch, int level) {
     int y = ch_y(ch);

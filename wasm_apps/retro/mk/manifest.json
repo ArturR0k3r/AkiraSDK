@@ -1,0 +1,14 @@
+{
+  "name": "mk",
+  "display_name": "Mortal Kombat",
+  "version": "1.0.0",
+  "category": "retro_games",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "settings.*"
+  ],
+  "memory_quota": 786432,
+  "min_akiraos_version": "1.0.0"
+}

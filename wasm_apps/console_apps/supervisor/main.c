@@ -38,13 +38,17 @@ static int32_t DISPLAY_W = 320, DISPLAY_H = 240;
 #define FOOTER_Y      (DISPLAY_H - FOOTER_H)
 
 /* ── Palette ─────────────────────────────────────────────────────────── */
-#define C_HEADER   0x2945
-#define C_SEL_BG   COLOR_BLUE
+#define C_HEADER   0x0000U   /* pure black — works on both color and Sharp */
 #define C_RUN      COLOR_GREEN
 #define C_STOP     COLOR_ORANGE
 #define C_ERR      COLOR_RED
 #define C_DIM      COLOR_GRAY
 #define C_READY    COLOR_DARK_GRAY
+
+/* Sharp-safe selection: detected at runtime */
+static int g_mono = 0;
+#define C_SEL_BG   (g_mono ? COLOR_WHITE : COLOR_BLUE)
+#define C_SEL_TXT  (g_mono ? 0x0000U    : COLOR_WHITE)
 
 /* ── App state constants (match APP_STATE_* in akira_api.h) ──────────── */
 #define STATE_NEW       0
@@ -184,9 +188,11 @@ static void draw_launcher(int sel) {
     for (int i = 0; i < g_count; i++) {
         if (seq(g_names[i], g_self)) continue; /* never show self */
         int y  = TITLE_H + 4 + i * ROW_H;
-        uint32_t bg = (i == sel) ? C_SEL_BG : COLOR_BLACK;
+        int is_sel = (i == sel);
+        uint32_t bg  = is_sel ? C_SEL_BG : COLOR_BLACK;
+        uint32_t fg  = is_sel ? C_SEL_TXT : COLOR_WHITE;
         display_rect(0, y, DISPLAY_W, ROW_H - 2, bg);
-        display_text(8, y + 7, g_names[i], COLOR_WHITE);
+        display_text(8, y + 7, g_names[i], fg);
 
         const char *badge;
         uint32_t    bc;
@@ -209,6 +215,7 @@ int main(void)
 {
     printf("[supervisor] starting\n");
     display_get_size(&DISPLAY_W, &DISPLAY_H);
+    g_mono = (DISPLAY_W >= 400); /* Sharp LS027B7DH01 is 400×240 */
 
     buttons_init();
     app_get_self_name((uint8_t *)g_self, NAME_LEN);

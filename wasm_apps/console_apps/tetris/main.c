@@ -30,8 +30,9 @@ static int32_t g_sw = 320, g_sh = 240;
 #define BOARD_PX_H     (BOARD_HEIGHT * BLOCK_SIZE)
 
 /* ── Game configuration ───────────────────────────────────────────────── */
-#define INITIAL_DROP_DELAY  800000   /* 0.8 s at level 1 — comfortable starting speed */
-#define MIN_DROP_DELAY       80000   /* 0.08 s at max level */
+#define INITIAL_DROP_DELAY 1500000   /* 1.5 s at level 1 */
+#define MIN_DROP_DELAY      100000   /* 0.1 s at max level (level 15) */
+#define FRAME_DELAY_US       20000   /* 20 ms per game tick */
 #define MAX_LEVEL               15
 #define SOFT_DROP_DELAY       8000   /* µs per cell while DOWN held */
 
@@ -587,14 +588,14 @@ static void game_loop(void) {
             display_flush();
             delay(SOFT_DROP_DELAY);
         } else {
-            drop_acc += 20000;
+            drop_acc += FRAME_DELAY_US;
             if (drop_acc >= g.drop_delay) {
                 auto_drop();
                 drop_acc = 0;
             }
             update_display();
             display_flush();
-            delay(20000);
+            delay(FRAME_DELAY_US);
         }
     }
 }

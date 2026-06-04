@@ -292,7 +292,7 @@ jobs:
           set -euo pipefail
           mkdir -p ${{ env.DIST_DIR }}
 
-          for game_dir in ${{ env.WASM_APPS_DIR }}/retro_games/*/; do
+          for game_dir in ${{ env.WASM_APPS_DIR }}/retro/*/; do
             game=$(basename "$game_dir")
             aot="${game_dir}${game}.aot"
             manifest="${game_dir}manifest.json"
@@ -313,7 +313,7 @@ jobs:
                 "${game_dir}icon.png" "$manifest" "$manifest"
             fi
 
-            slug="retro_games-${game}"
+            slug="retro-${game}"
             pkg="${{ env.DIST_DIR }}/${slug}.akpkg"
             # Pack .aot as the wasm payload (akira-cli pack accepts any binary)
             ./akira-cli pack "$aot" "$manifest" -o "$pkg"

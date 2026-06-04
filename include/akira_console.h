@@ -89,6 +89,28 @@
 /** Test whether a button is set in a bitmask from input_get_buttons(). */
 #define AKIRA_BTN_PRESSED(mask, btn) (((mask) & (btn)) != 0U)
 
+/* ─── Display type detection ──────────────────────────────────────────────── */
+/*
+ * Sharp LS027B7DH01 is 400×240 monochrome.  Call akira_display_is_mono() once
+ * at app startup and cache the result.  On monochrome, use inverted selection
+ * (white bg + black text) so selected rows are visually distinct.
+ *
+ * Color-safe selection palette helper:
+ *   sel_bg  = akira_sel_bg(is_mono)   → 0x001F (blue) or 0xFFFF (white)
+ *   sel_txt = akira_sel_txt(is_mono)  → 0xFFFF (white) or 0x0000 (black)
+ */
+extern int display_get_size(int32_t *w_out, int32_t *h_out);
+
+static inline int akira_display_is_mono(void) {
+    int32_t w = 0, h = 0;
+    display_get_size(&w, &h);
+    return (w >= 400);
+}
+
+#define AKIRA_SEL_BG(mono)  ((mono) ? 0xFFFFU : CONSOLE_COLOR_SEL_BG)
+#define AKIRA_SEL_TXT(mono) ((mono) ? 0x0000U : CONSOLE_COLOR_TEXT)
+#define AKIRA_HDR_BG(mono)  (0x0000U)  /* always black — works on both */
+
 /* ─── AkiraConsole input API ──────────────────────────────────────────────── */
 /*
  * Required capability: "input.read"

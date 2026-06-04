@@ -22,7 +22,15 @@
 #include "../include/akira_api.h"
 #include <stdint.h>
 
-/* get_time_ms / rtc_get_unix_time are in akira_api.h (RTC API) */
+/* GPIO button pins (prod board, ACTIVE_HIGH, PULL_DOWN) */
+#define VPIN_UP    4
+#define VPIN_DOWN  5
+#define VPIN_LEFT  6
+#define VPIN_RIGHT 7
+#define VPIN_A     15
+#define VPIN_B     16
+#define VPIN_X     17
+#define VPIN_Y     41
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -422,8 +430,8 @@ static int  g_pin_step;           /* 0=enter, 1=confirm */
 static int  g_pin_err;            /* 1=wrong PIN, 2=mismatch */
 
 /* Time */
-static uint64_t g_unix_base;      /* Unix timestamp at g_ms_base */
-static uint64_t g_ms_base;        /* (uint64_t)(uint32_t)rtc_get_uptime_ms() when time was set */
+static uint64_t g_unix_base;  /* Unix timestamp when time was manually set */
+static uint64_t g_ms_base;   /* g_frame value when time was set */
 static int      g_time_set;
 static int      g_tset_field;     /* 0=year 1=mon 2=day 3=hour 4=min */
 static int      g_tset_vals[5];   /* year, mon, day, hour, min */
@@ -471,28 +479,32 @@ static char g_wlt_hex[65]; /* hex of entropy for display */
 static int g_hid_transport; /* HID_TRANSPORT_BLE or HID_TRANSPORT_USB */
 static int g_hid_on;
 
-/* Input */
-static uint32_t g_prev_btns;
-static uint64_t g_hold_start;
-static uint64_t g_last_repeat;
-static uint64_t g_last_activity;
+/* Input — GPIO-based, ACTIVE_HIGH PULL_DOWN */
+static uint32_t g_prev_btns_gpio;
+static int g_hold_frames;
+static int g_last_repeat_frames;
+static int g_last_activity_frames;
+static int g_frame; /* monotonic frame counter (16 ms each) */
 
-#define HOLD_DELAY_MS  350ULL
-#define REPEAT_MS       120ULL
+/* Timer handle for monotonic ms — timer API always available on prod */
+static int g_uptimer = -1;
+
+#define HOLD_DELAY_FRAMES   22  /* 22 × 16 ms ≈ 350 ms */
+#define REPEAT_FRAMES        8  /* 8 × 16 ms ≈ 130 ms */
+#define AUTO_LOCK_FRAMES  7500  /* 7500 × 16 ms = 120 s */
+#define FRAME_MS            16  /* ms per main-loop iteration */
 
 /* ═══════════════════════════════════════════════════════════════════════
- * UNIX TIME HELPERS
+ * UNIX TIME HELPERS  (purely manual — no RTC API required)
  * ═══════════════════════════════════════════════════════════════════════ */
 
 static uint64_t get_unix(void) {
-    int t = rtc_get_unix_time();
-    if (t > 0) {
-        g_time_set = 1;
-        return (uint64_t)t;
-    }
-    /* Fallback: manual offset set via Settings > Set Time */
     if (!g_time_set) return 0;
-    return g_unix_base + (uint64_t)(rtc_get_uptime_ms() - (int)g_ms_base) / 1000;
+    /* g_ms_base = frame count when time was set;
+       g_unix_base = unix timestamp at that frame */
+    int elapsed_frames = g_frame - (int)(g_ms_base & 0x7FFFFFFF);
+    if (elapsed_frames < 0) elapsed_frames = 0;
+    return g_unix_base + (uint64_t)elapsed_frames * FRAME_MS / 1000;
 }
 
 /* Days in month (non-leap) */
@@ -516,30 +528,23 @@ static uint64_t ymd_hm_to_unix(int y, int mo, int d, int hr, int mn) {
 
 static void save_time_to_settings(void) {
     char buf[24];
-    /* Store current unix time so we survive power cycles */
+    /* Store current unix time so TOTP survives power cycles */
     uint64_t now = get_unix();
-    /* Encode as decimal string - only lower 32 bits needed for TOTP until 2106 */
-    int_to_str((int)(now & 0xFFFFFFFF), buf);
+    int_to_str((int)(now & 0x7FFFFFFF), buf);
     settings_set("vault/tunix", buf);
-    int_to_str((int)((uint64_t)(uint32_t)rtc_get_uptime_ms() & 0xFFFFFFFF), buf);
-    settings_set("vault/tms", buf);
 }
 
 static void load_time_from_settings(void) {
-    char b1[24], b2[24];
-    if (settings_get("vault/tunix", b1, sizeof(b1)) == 0 &&
-        settings_get("vault/tms",   b2, sizeof(b2)) == 0) {
-        /* Parse stored values */
-        uint32_t stored_unix = 0, stored_ms = 0;
+    char b1[24];
+    if (settings_get("vault/tunix", b1, sizeof(b1)) == 0) {
+        uint32_t stored_unix = 0;
         for (int i = 0; b1[i] >= '0' && b1[i] <= '9'; i++)
             stored_unix = stored_unix * 10 + (b1[i] - '0');
-        for (int i = 0; b2[i] >= '0' && b2[i] <= '9'; i++)
-            stored_ms = stored_ms * 10 + (b2[i] - '0');
-        uint32_t now_ms = (uint32_t)((uint64_t)(uint32_t)rtc_get_uptime_ms() & 0xFFFFFFFF);
-        uint32_t elapsed = now_ms - stored_ms;
-        g_unix_base = stored_unix + elapsed / 1000;
-        g_ms_base = (uint64_t)(uint32_t)rtc_get_uptime_ms();
-        g_time_set = 1;
+        if (stored_unix > 1700000000U) { /* sanity: after 2023 */
+            g_unix_base = stored_unix;
+            g_ms_base   = 0; /* relative to frame 0 at startup */
+            g_time_set  = 1;
+        }
     }
 }
 
@@ -601,31 +606,54 @@ static int vault_load(const char *pin) {
 
 static void vault_lock(void) {
     if (g_vault_dirty) vault_save();
-    save_time_to_settings();
+    if (g_time_set) save_time_to_settings();
     mem_set(&g_vault, 0, sizeof(g_vault));
     mem_set(g_vkey,   0, sizeof(g_vkey));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * INPUT — EDGE + REPEAT
+ * INPUT — GPIO edge + repeat (no input_get_buttons needed)
  * ═══════════════════════════════════════════════════════════════════════ */
 
+static void vault_btns_init(void) {
+    uint32_t f = GPIO_INPUT | GPIO_PULL_DOWN;
+    gpio_configure(VPIN_UP,    f); gpio_configure(VPIN_DOWN,  f);
+    gpio_configure(VPIN_LEFT,  f); gpio_configure(VPIN_RIGHT, f);
+    gpio_configure(VPIN_A,     f); gpio_configure(VPIN_B,     f);
+    gpio_configure(VPIN_X,     f); gpio_configure(VPIN_Y,     f);
+}
+
+static const int VPINS[8] = {
+    VPIN_UP, VPIN_DOWN, VPIN_LEFT, VPIN_RIGHT, VPIN_A, VPIN_B, VPIN_X, VPIN_Y
+};
+static const uint32_t VMASKS[8] = {
+    AKIRA_BTN_UP, AKIRA_BTN_DOWN, AKIRA_BTN_LEFT, AKIRA_BTN_RIGHT,
+    AKIRA_BTN_A,  AKIRA_BTN_B,   AKIRA_BTN_X,    AKIRA_BTN_Y
+};
+
 static uint32_t poll_btns(void) {
-    uint32_t cur = (uint32_t)input_get_buttons();
-    uint64_t now = (uint64_t)(uint32_t)rtc_get_uptime_ms();
-    uint32_t edges = cur & ~g_prev_btns;
-    g_prev_btns = cur;
+    /* Build current bitmask from GPIO */
+    uint32_t cur = 0;
+    for (int i = 0; i < 8; i++)
+        if (gpio_read(VPINS[i]) == 1) cur |= VMASKS[i];
+
+    uint32_t edges = cur & ~g_prev_btns_gpio;
+    g_prev_btns_gpio = cur;
+
     if (edges) {
-        g_hold_start = now; g_last_repeat = now;
-        g_last_activity = now;
-        rng_stir(cur ^ (uint32_t)now);
+        g_hold_frames       = g_frame;
+        g_last_repeat_frames = g_frame;
+        g_last_activity_frames = g_frame;
+        rng_stir(cur ^ (uint32_t)g_frame);
         return edges;
     }
-    /* Held-key repeat for nav buttons */
+    /* Held nav-key repeat */
     uint32_t nav = AKIRA_BTN_UP|AKIRA_BTN_DOWN|AKIRA_BTN_LEFT|AKIRA_BTN_RIGHT;
-    if ((cur & nav) && (now - g_hold_start) >= HOLD_DELAY_MS &&
-        (now - g_last_repeat) >= REPEAT_MS) {
-        g_last_repeat = now; g_last_activity = now;
+    if ((cur & nav) &&
+        (g_frame - g_hold_frames) >= HOLD_DELAY_FRAMES &&
+        (g_frame - g_last_repeat_frames) >= REPEAT_FRAMES) {
+        g_last_repeat_frames = g_frame;
+        g_last_activity_frames = g_frame;
         return cur & nav;
     }
     return 0;
@@ -1578,7 +1606,7 @@ static void handle_time_setup(uint32_t btns) {
     if ((btns & AKIRA_BTN_A) || (btns & AKIRA_BTN_Y)) {
         g_unix_base = ymd_hm_to_unix(g_tset_vals[0], g_tset_vals[1], g_tset_vals[2],
                                       g_tset_vals[3], g_tset_vals[4]);
-        g_ms_base   = (uint64_t)(uint32_t)rtc_get_uptime_ms();
+        g_ms_base   = (uint64_t)(uint32_t)g_frame; /* frame count at time-set */
         g_time_set  = 1;
         save_time_to_settings();
         g_screen = SCR_SETTINGS; g_cursor = 1; g_dirty = 1;
@@ -1796,8 +1824,14 @@ int main(void) {
     display_get_size(&g_sw, &g_sh);
     if (g_sw <= 0) g_sw = CONSOLE_WIDTH;
     if (g_sh <= 0) g_sh = CONSOLE_HEIGHT;
-    /* 400px wide = Sharp Memory LCD; use monochrome-safe rendering */
-    g_mono = (g_sw >= 400);
+    g_mono = (g_sw >= 400); /* Sharp Memory LCD = 400 px wide */
+
+    /* Init GPIO buttons */
+    vault_btns_init();
+
+    /* Monotonic uptime timer */
+    g_uptimer = timer_create();
+    if (g_uptimer >= 0) timer_start(g_uptimer);
 
     rng_init();
     load_time_from_settings();
@@ -1814,13 +1848,14 @@ int main(void) {
         g_hid_on = 0;
     }
 
-    g_screen = SCR_BOOT;
-    g_dirty  = 1;
-    g_last_activity = (uint64_t)(uint32_t)rtc_get_uptime_ms();
+    g_screen  = SCR_BOOT;
+    g_dirty   = 1;
+    g_frame   = 0;
+    g_last_activity_frames = 0;
 
     /* Boot screen — brief display then route based on vault state */
     draw_boot();
-    delay(800000); /* 800ms */
+    delay(800000); /* 800 ms */
 
     if (vault_exists()) {
         g_screen = SCR_LOCK;
@@ -1832,13 +1867,14 @@ int main(void) {
 
     /* Main loop */
     while (1) {
+        g_frame++;
+
         uint32_t btns = poll_btns();
-        uint64_t now  = (uint64_t)(uint32_t)rtc_get_uptime_ms();
 
         /* Auto-lock after inactivity */
         if (g_screen != SCR_LOCK && g_screen != SCR_NEW_VAULT &&
             g_screen != SCR_BOOT  &&
-            (now - g_last_activity) > AUTO_LOCK_MS) {
+            (g_frame - g_last_activity_frames) > AUTO_LOCK_FRAMES) {
             vault_lock();
             g_screen = SCR_LOCK;
             g_pin_len = 0; g_pin_step = 0; g_pin_err = 0; g_pin_digit = 0;
@@ -1869,9 +1905,10 @@ int main(void) {
 
         /* TOTP view refreshes every second even without button input */
         if (g_screen == SCR_TOTP_LIST || g_screen == SCR_TOTP_VIEW) {
-            static uint64_t last_totp_refresh = 0;
-            if (now - last_totp_refresh >= 1000) {
-                last_totp_refresh = now; g_dirty = 1;
+            /* refresh ~every second (62 frames × 16 ms ≈ 992 ms) */
+            static int last_totp_frame = 0;
+            if (g_frame - last_totp_frame >= 62) {
+                last_totp_frame = g_frame; g_dirty = 1;
             }
         }
 

@@ -1,0 +1,14 @@
+{
+  "name": "sonic2",
+  "display_name": "Sonic the Hedgehog 2",
+  "version": "1.0.0",
+  "category": "retro_games",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "settings.*"
+  ],
+  "memory_quota": 786432,
+  "min_akiraos_version": "1.0.0"
+}

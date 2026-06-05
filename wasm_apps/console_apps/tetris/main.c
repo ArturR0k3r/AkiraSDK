@@ -212,7 +212,7 @@ restart:
     uint32_t drop_us=600000u, drop_acc=0;
 
     /* button state — same style as space_invaders */
-    int pup=0,pdn=0,plft=0,prgt=0,pa=0,pb=0,ps=1; /* ps=1: SETTINGS idle=HIGH */
+    int pup=0,pdn=0,plft=0,prgt=0,pa=0,pb=0,ps=0;
 
     /* DAS */
     int das=0, das_dir=0;
@@ -227,10 +227,10 @@ restart:
         int rgt =gpio_read(PIN_RIGHT);
         int a   =gpio_read(PIN_A);
         int b   =gpio_read(PIN_B);
-        int s   =gpio_read(PIN_SETTINGS); /* 1=idle(not pressed), 0=pressed */
+        int s   =gpio_read(PIN_SETTINGS); /* logical: 1=pressed, 0=idle */
 
-        /* SETTINGS: falling edge = pressed */
-        if(!s && ps) paused=!paused;
+        /* SETTINGS: rising edge (same as all other buttons) */
+        if(s && !ps) paused=!paused;
         ps=s;
 
         if(paused){ pup=up;pdn=dn;plft=lft;prgt=rgt;pa=a;pb=b;

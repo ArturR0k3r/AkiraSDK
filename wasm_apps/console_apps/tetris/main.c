@@ -430,16 +430,37 @@ static void auto_drop(void)
     spawn_piece();
 }
 
-/* ── Buttons — same pattern as space_invaders ────────────────────────── */
-static int prev_up, prev_a, prev_b, prev_s;
-static int lr_rep_l, lr_rep_r;
-#define LR_INITIAL 14  /* frames before DAS kicks in (~280ms) */
-#define LR_HELD     5  /* frames between DAS repeats  (~100ms) */
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+/* Exactly like space_invaders: gpio_read + prev_* edge detection.
+ * L/R use DAS (Delayed Auto Shift): move on first press,
+ * then again after DAS_DELAY frames, then every DAS_REPEAT frames. */
 
-static int soft_drop_active = 0;
-static int pause_requested  = 0;
+#define DAS_DELAY  13   /* ~260ms before auto-repeat starts */
+#define DAS_REPEAT  5   /* ~100ms between auto-repeats      */
+
+static int prev_left = 0, prev_right = 0;
+static int prev_up = 0, prev_a = 0, prev_b = 0, prev_s = 0;
+static int das_timer = 0;   /* counts up while L or R held */
+static int das_dir   = 0;   /* -1=left  +1=right  0=none  */
+
+static int soft_drop_active  = 0;
+static int pause_requested   = 0;
 static int g_exit_to_supervisor = 0;
-static int g_restart_game = 0;
+static int g_restart_game    = 0;
+
+static void try_move(int dx)
+{
+    if (!collides(g.cur_piece, g.cur_rot, g.cur_x + dx, g.cur_y))
+    { g.cur_x += dx; g.piece_moved = 1; }
+}
+
+static void try_rotate(void)
+{
+    int nr = (g.cur_rot + 1) % 4;
+    if      (!collides(g.cur_piece, nr, g.cur_x,     g.cur_y)) { g.cur_rot = nr;            g.piece_moved = 1; }
+    else if (!collides(g.cur_piece, nr, g.cur_x - 1, g.cur_y)) { g.cur_rot = nr; g.cur_x--; g.piece_moved = 1; }
+    else if (!collides(g.cur_piece, nr, g.cur_x + 1, g.cur_y)) { g.cur_rot = nr; g.cur_x++; g.piece_moved = 1; }
+}
 
 static void handle_buttons(void)
 {
@@ -451,44 +472,42 @@ static void handle_buttons(void)
     int b     = gpio_read(BTN_B);
     int s     = gpio_read(BTN_SETTINGS);
 
-    /* SETTINGS — pause on rising edge */
+    /* SETTINGS — pause on rising edge (same as space_invaders) */
     if (s && !prev_s) pause_requested = 1;
     prev_s = s;
 
-    /* UP / A / B — rotate on rising edge + wall-kick */
-    if ((up && !prev_up) || (a && !prev_a) || (b && !prev_b))
-    {
-        int nr = (g.cur_rot + 1) % 4;
-        if      (!collides(g.cur_piece, nr, g.cur_x,     g.cur_y)) { g.cur_rot = nr;            g.piece_moved = 1; }
-        else if (!collides(g.cur_piece, nr, g.cur_x - 1, g.cur_y)) { g.cur_rot = nr; g.cur_x--; g.piece_moved = 1; }
-        else if (!collides(g.cur_piece, nr, g.cur_x + 1, g.cur_y)) { g.cur_rot = nr; g.cur_x++; g.piece_moved = 1; }
-    }
-    prev_up = up;
-    prev_a  = a;
-    prev_b  = b;
+    /* UP / A / B — rotate once per press */
+    if ((up && !prev_up) || (a && !prev_a) || (b && !prev_b)) try_rotate();
+    prev_up = up;  prev_a = a;  prev_b = b;
 
-    /* DOWN — soft drop */
+    /* DOWN — soft drop while held */
     soft_drop_active = down;
 
-    /* LEFT — move on first press, then DAS repeat */
-    if (left)
+    /* LEFT / RIGHT — DAS */
+    if (left && !right)
     {
-        int move = 0;
-        if (!--lr_rep_l) { move = 1; lr_rep_l = LR_HELD; }
-        if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x - 1, g.cur_y))
-        { g.cur_x--; g.piece_moved = 1; }
+        if (!prev_left) { try_move(-1); das_dir = -1; das_timer = 0; }   /* first press */
+        else if (das_dir == -1) {
+            das_timer++;
+            if (das_timer == DAS_DELAY) { try_move(-1); }                 /* DAS kicks in */
+            else if (das_timer > DAS_DELAY &&
+                     (das_timer - DAS_DELAY) % DAS_REPEAT == 0) try_move(-1); /* repeat */
+        }
     }
-    else { lr_rep_l = 1; }   /* reset: next press fires immediately */
+    else if (right && !left)
+    {
+        if (!prev_right) { try_move(+1); das_dir = +1; das_timer = 0; }
+        else if (das_dir == +1) {
+            das_timer++;
+            if (das_timer == DAS_DELAY) { try_move(+1); }
+            else if (das_timer > DAS_DELAY &&
+                     (das_timer - DAS_DELAY) % DAS_REPEAT == 0) try_move(+1);
+        }
+    }
+    else { das_dir = 0; das_timer = 0; }   /* neither or both — reset */
 
-    /* RIGHT — move on first press, then DAS repeat */
-    if (right)
-    {
-        int move = 0;
-        if (!--lr_rep_r) { move = 1; lr_rep_r = LR_HELD; }
-        if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x + 1, g.cur_y))
-        { g.cur_x++; g.piece_moved = 1; }
-    }
-    else { lr_rep_r = 1; }   /* reset: next press fires immediately */
+    prev_left  = left;
+    prev_right = right;
 }
 
 /* ── Display / game init ─────────────────────────────────────────────── */

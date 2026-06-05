@@ -31,10 +31,15 @@ static int32_t DISPLAY_W = 320, DISPLAY_H = 240;
 
 /* ── Colours ────────────────────────────────────────────────────────────── */
 #define C_HEADER  0x2945
-#define C_IDLE    0x4228
-#define C_HIT     COLOR_GREEN
 #define C_LABEL   COLOR_WHITE
-#define C_DIM     COLOR_GRAY
+static int g_mono = 0;   /* 1 = Sharp monochrome display */
+/* Colour helpers — Sharp-safe */
+#define C_IDLE      (g_mono ? 0x0000u : 0x4228u)
+#define C_HIT       (g_mono ? 0xFFFFu : (uint32_t)COLOR_GREEN)
+#define C_DIM       (g_mono ? 0xFFFFu : (uint32_t)COLOR_GRAY)
+#define C_KEY_IDLE  (g_mono ? 0x0000u : 0x18C3u)
+#define C_KEY_HIT   (g_mono ? 0xFFFFu : (uint32_t)COLOR_ORANGE)
+#define C_TXT_HIT   (g_mono ? 0x0000u : 0xFFFFu)  /* text on active row */
 
 /* ── Macro rows ─────────────────────────────────────────────────────────── */
 #define PAD_ROWS  5
@@ -82,9 +87,9 @@ static void draw_row(int row, const char *label, const char *hint, int active)
 {
     int y = TITLE_H + row * ROW_H;
     display_rect(0, y, DISPLAY_W, ROW_H - 2, active ? C_HIT : C_IDLE);
-    display_rect(0, y, 48, ROW_H - 2, active ? COLOR_ORANGE : 0x18C3);
-    display_text_large(6, y + 10, label, C_LABEL);
-    display_text(54, y + 4, hint, active ? COLOR_WHITE : C_DIM);
+    display_rect(0, y, 48, ROW_H - 2, active ? C_KEY_HIT : C_KEY_IDLE);
+    display_text_large(6, y + 10, label, active ? C_TXT_HIT : C_LABEL);
+    display_text(54, y + 4,  hint, active ? C_TXT_HIT : C_DIM);
 }
 
 static void draw_all(int active_mask)
@@ -134,6 +139,7 @@ int main(void)
 {
     printf("[macro_pad] starting\n");
     display_get_size(&DISPLAY_W, &DISPLAY_H);
+    g_mono = (DISPLAY_W >= 400);   /* Sharp LS027B7DH01 = 400px wide */
     buttons_init();
 
     /* ── Self-initialize HID over BLE ──────────────────────────────────── */

@@ -241,17 +241,11 @@ restart:
         }
         pup=up; pa=a; pb=b;
 
-        /* LEFT / RIGHT — like space_invaders ship movement:
-         * rising edge → move once, held → move every 5 frames after 12 */
-        if(lft && !rgt){
-            if(!plft){ if(!hit(cp,cr,cx-1,cy)) cx--; lr_timer=0; }
-            else { lr_timer++;
-                   if(lr_timer>12 && lr_timer%5==0 && !hit(cp,cr,cx-1,cy)) cx--; }
-        } else if(rgt && !lft){
-            if(!prgt){ if(!hit(cp,cr,cx+1,cy)) cx++; lr_timer=0; }
-            else { lr_timer++;
-                   if(lr_timer>12 && lr_timer%5==0 && !hit(cp,cr,cx+1,cy)) cx++; }
-        } else { lr_timer=0; }
+        /* LEFT / RIGHT — exactly like space_invaders:
+         * independent reads, cooldown prevents too-fast repeat */
+        if(lr_timer > 0) lr_timer--;
+        if(lft && lr_timer==0){ if(!hit(cp,cr,cx-1,cy)){ cx--; lr_timer=6; } }
+        if(rgt && lr_timer==0){ if(!hit(cp,cr,cx+1,cy)){ cx++; lr_timer=6; } }
         plft=lft; prgt=rgt;
 
         /* Drop */

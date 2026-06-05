@@ -430,125 +430,65 @@ static void auto_drop(void)
     spawn_piece();
 }
 
-/* ── Buttons ─────────────────────────────────────────────────────────── */
-
-/* Software debounce: each button must read HIGH for DEBOUNCE_FRAMES
- * consecutive frames before it is considered "pressed".  This filters
- * GPIO noise that causes phantom moves without touching any button.
- * gpio_read() bypasses the DTS debounce-interval-ms (which only applies
- * to the Zephyr input subsystem), so we need our own debounce here.    */
-#define DEBOUNCE_FRAMES 2   /* 2 × 20ms = 40ms — removes noise spikes  */
-
-/* Stable (debounced) button states — 1 = confirmed pressed */
-static int btn[8];           /* UP DN LF RT A B SETTINGS X */
-static int btn_cnt[8];       /* consecutive HIGH frame counter          */
-
-/* Previous debounced state for edge detection */
-static int btn_was[8];
-
-/* DAS (Delayed Auto Shift) — separate counters per direction */
-static int lr_repeat_l = 0;
-static int lr_repeat_r = 0;
-#define LR_INITIAL 18   /* 18 × 20ms = 360ms before first auto-repeat  */
-#define LR_HELD     7   /* 7  × 20ms = 140ms between repeats           */
+/* ── Buttons — same pattern as space_invaders ────────────────────────── */
+static int prev_up, prev_a, prev_b, prev_s;
+static int lr_rep_l, lr_rep_r;
+#define LR_INITIAL 14  /* frames before DAS kicks in (~280ms) */
+#define LR_HELD     5  /* frames between DAS repeats  (~100ms) */
 
 static int soft_drop_active = 0;
 static int pause_requested  = 0;
-
-/* App-switch / restart flags — set by pause menu, acted on by main() */
 static int g_exit_to_supervisor = 0;
-static int g_restart_game       = 0;
-
-/* Raw GPIO reads mapped to btn[] indices */
-static const int BTN_PINS[8] = {
-    BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_A, BTN_B, BTN_SETTINGS, BTN_X
-};
-/* SETTINGS is active-low; all others active-high */
-#define BTN_IDX_UP       0
-#define BTN_IDX_DN       1
-#define BTN_IDX_LF       2
-#define BTN_IDX_RT       3
-#define BTN_IDX_A        4
-#define BTN_IDX_B        5
-#define BTN_IDX_SETTINGS 6
-
-static void update_debounce(void)
-{
-    for (int i = 0; i < 8; i++)
-    {
-        btn_was[i] = btn[i];
-        int raw = gpio_read(BTN_PINS[i]);
-        /* SETTINGS is active-low: invert */
-        if (i == BTN_IDX_SETTINGS) raw = !raw;
-        if (raw) btn_cnt[i]++;
-        else     btn_cnt[i] = 0;
-        btn[i] = (btn_cnt[i] >= DEBOUNCE_FRAMES);
-    }
-}
+static int g_restart_game = 0;
 
 static void handle_buttons(void)
 {
-    update_debounce();
+    int up    = gpio_read(BTN_UP);
+    int down  = gpio_read(BTN_DOWN);
+    int left  = gpio_read(BTN_LEFT);
+    int right = gpio_read(BTN_RIGHT);
+    int a     = gpio_read(BTN_A);
+    int b     = gpio_read(BTN_B);
+    int s     = gpio_read(BTN_SETTINGS);
 
     /* SETTINGS — pause on rising edge */
-    if (btn[BTN_IDX_SETTINGS] && !btn_was[BTN_IDX_SETTINGS])
-        pause_requested = 1;
+    if (s && !prev_s) pause_requested = 1;
+    prev_s = s;
 
-    /* UP / A / B — rotate on rising edge */
-    if ((btn[BTN_IDX_UP] && !btn_was[BTN_IDX_UP]) ||
-        (btn[BTN_IDX_A]  && !btn_was[BTN_IDX_A])  ||
-        (btn[BTN_IDX_B]  && !btn_was[BTN_IDX_B]))
+    /* UP / A / B — rotate on rising edge + wall-kick */
+    if ((up && !prev_up) || (a && !prev_a) || (b && !prev_b))
     {
         int nr = (g.cur_rot + 1) % 4;
-        if (!collides(g.cur_piece, nr, g.cur_x, g.cur_y))
-        {
-            g.cur_rot = nr;
-            g.piece_moved = 1;
-        }
-        else if (!collides(g.cur_piece, nr, g.cur_x - 1, g.cur_y))
-        {
-            g.cur_rot = nr;
-            g.cur_x--;
-            g.piece_moved = 1;
-        }
-        else if (!collides(g.cur_piece, nr, g.cur_x + 1, g.cur_y))
-        {
-            g.cur_rot = nr;
-            g.cur_x++;
-            g.piece_moved = 1;
-        }
+        if      (!collides(g.cur_piece, nr, g.cur_x,     g.cur_y)) { g.cur_rot = nr;            g.piece_moved = 1; }
+        else if (!collides(g.cur_piece, nr, g.cur_x - 1, g.cur_y)) { g.cur_rot = nr; g.cur_x--; g.piece_moved = 1; }
+        else if (!collides(g.cur_piece, nr, g.cur_x + 1, g.cur_y)) { g.cur_rot = nr; g.cur_x++; g.piece_moved = 1; }
     }
+    prev_up = up;
+    prev_a  = a;
+    prev_b  = b;
 
     /* DOWN — soft drop */
-    soft_drop_active = btn[BTN_IDX_DN];
+    soft_drop_active = down;
 
-    /* LEFT — independent DAS counter */
-    if (btn[BTN_IDX_LF])
+    /* LEFT — move on first press, then DAS repeat */
+    if (left)
     {
         int move = 0;
-        if (!btn_was[BTN_IDX_LF])        { move = 1; lr_repeat_l = LR_INITIAL; }
-        else if (--lr_repeat_l <= 0)      { move = 1; lr_repeat_l = LR_HELD;   }
+        if (!--lr_rep_l) { move = 1; lr_rep_l = LR_HELD; }
         if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x - 1, g.cur_y))
-        {
-            g.cur_x--;
-            g.piece_moved = 1;
-        }
+        { g.cur_x--; g.piece_moved = 1; }
     }
-    else { lr_repeat_l = 0; }
+    else { lr_rep_l = 1; }   /* reset: next press fires immediately */
 
-    /* RIGHT — independent DAS counter */
-    if (btn[BTN_IDX_RT])
+    /* RIGHT — move on first press, then DAS repeat */
+    if (right)
     {
         int move = 0;
-        if (!btn_was[BTN_IDX_RT])         { move = 1; lr_repeat_r = LR_INITIAL; }
-        else if (--lr_repeat_r <= 0)       { move = 1; lr_repeat_r = LR_HELD;   }
+        if (!--lr_rep_r) { move = 1; lr_rep_r = LR_HELD; }
         if (move && !collides(g.cur_piece, g.cur_rot, g.cur_x + 1, g.cur_y))
-        {
-            g.cur_x++;
-            g.piece_moved = 1;
-        }
+        { g.cur_x++; g.piece_moved = 1; }
     }
-    else { lr_repeat_r = 0; }
+    else { lr_rep_r = 1; }   /* reset: next press fires immediately */
 }
 
 /* ── Display / game init ─────────────────────────────────────────────── */
@@ -777,22 +717,17 @@ int main(void)
     display_text(112, 170, "Press any button", COL_VALUE);
     display_flush();
 
-    /* Wait for a REAL button press (debounced: must stay HIGH 3 frames).
-     * Count frames for RNG seed — human reaction time gives randomness.  */
+    /* Wait for any button — same as space_invaders */
     uint32_t seed = 1;
-    int press_cnt = 0;
-    while (press_cnt < 3)
+    while (!gpio_read(BTN_A) && !gpio_read(BTN_B) &&
+           !gpio_read(BTN_UP) && !gpio_read(BTN_DOWN) &&
+           !gpio_read(BTN_LEFT) && !gpio_read(BTN_RIGHT))
     {
-        int any = gpio_read(BTN_UP) || gpio_read(BTN_DOWN) ||
-                  gpio_read(BTN_LEFT) || gpio_read(BTN_RIGHT) ||
-                  gpio_read(BTN_A)   || gpio_read(BTN_B);
-        if (any) press_cnt++;
-        else     press_cnt = 0;   /* reset on noise */
         seed++;
         delay(20000);
     }
     rng_seed(seed);
-    delay(150000); /* 150ms debounce before game starts */
+    delay(100000);
 
     printf("Starting game...");
 

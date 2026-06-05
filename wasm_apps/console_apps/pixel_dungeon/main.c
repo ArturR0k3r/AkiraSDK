@@ -25,8 +25,8 @@ static int32_t SCR_W = 320, SCR_H = 240;
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 #define BTN_UP       4
 #define BTN_DOWN     5
-#define BTN_LEFT     6
-#define BTN_RIGHT    7
+#define BTN_LEFT     7
+#define BTN_RIGHT    6
 #define BTN_A        15
 #define BTN_B        16
 #define BTN_SETTINGS 0    /* BTN.OK = GPIO0, active-low pull-up */

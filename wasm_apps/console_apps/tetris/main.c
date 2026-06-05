@@ -211,14 +211,10 @@ restart:
 
     uint32_t drop_us=600000u, drop_acc=0;
 
-    /* button state — same style as space_invaders */
+    /* button state */
     int pup=0,pdn=0,plft=0,prgt=0,pa=0,pb=0,ps=0;
-
-    /* DAS */
-    int das=0, das_dir=0;
-#define DAS_DELAY 12
-#define DAS_RPT    4
     int paused=0;
+    int lr_timer=0; /* DAS: frames held in current direction */
 
     while(!game_over){
         int up  =gpio_read(PIN_UP);
@@ -245,26 +241,18 @@ restart:
         }
         pup=up; pa=a; pb=b;
 
-        /* Left / Right — DAS */
-        int dx=0;
-        if(lft&&!rgt){
-            if(!plft){dx=-1;das=0;das_dir=-1;}
-            else if(das_dir==-1){
-                das++;
-                if(das==DAS_DELAY) dx=-1;
-                else if(das>DAS_DELAY&&(das-DAS_DELAY)%DAS_RPT==0) dx=-1;
-            }
-        } else if(rgt&&!lft){
-            if(!prgt){dx=+1;das=0;das_dir=+1;}
-            else if(das_dir==+1){
-                das++;
-                if(das==DAS_DELAY) dx=+1;
-                else if(das>DAS_DELAY&&(das-DAS_DELAY)%DAS_RPT==0) dx=+1;
-            }
-        } else { das=0; das_dir=0; }
+        /* LEFT / RIGHT — like space_invaders ship movement:
+         * rising edge → move once, held → move every 5 frames after 12 */
+        if(lft && !rgt){
+            if(!plft){ if(!hit(cp,cr,cx-1,cy)) cx--; lr_timer=0; }
+            else { lr_timer++;
+                   if(lr_timer>12 && lr_timer%5==0 && !hit(cp,cr,cx-1,cy)) cx--; }
+        } else if(rgt && !lft){
+            if(!prgt){ if(!hit(cp,cr,cx+1,cy)) cx++; lr_timer=0; }
+            else { lr_timer++;
+                   if(lr_timer>12 && lr_timer%5==0 && !hit(cp,cr,cx+1,cy)) cx++; }
+        } else { lr_timer=0; }
         plft=lft; prgt=rgt;
-
-        if(dx&&!hit(cp,cr,cx+dx,cy)) cx+=dx;
 
         /* Drop */
         uint32_t eff=dn ? 80000u : drop_us;

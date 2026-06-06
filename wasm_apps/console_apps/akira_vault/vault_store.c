@@ -93,7 +93,7 @@ int vault_exists(void) {
 int vault_create(const char *pin6) {
     rng_init();
     /* Init header */
-    mem_cpy(g_hdr.magic, "AKF2", 4);
+    mem_cpy(g_hdr.magic, "AKF3", 4);
     rng_fill(g_hdr.salt, 32);
     rng_fill(g_hdr.nonce, 12);
     pin_make_hash(pin6, g_hdr.salt, g_hdr.pin_hash);
@@ -101,9 +101,8 @@ int vault_create(const char *pin6) {
     g_hdr.wrong_attempts = 0;
     /* Init body */
     mem_zero(&g_vault, sizeof(g_vault));
-    mem_cpy(g_vault.magic, "AKV2", 4);
+    mem_cpy(g_vault.magic, "AKV3", 4);
     g_vault.autolock_s = 60;
-    g_vault.ble_enabled = 1;
     /* Generate master entropy */
     rng_fill(g_vault.entropy, ENTROPY_BYTES_24);
     g_vault.entropy_len = ENTROPY_BYTES_24;
@@ -121,7 +120,7 @@ int vault_load(const char *pin6) {
     int fd = storage_open(VAULT_FILE, STORAGE_O_READ);
     if(fd<0) return -1;
     int r = storage_read(fd, &g_hdr, sizeof(g_hdr));
-    if(r!=(int)sizeof(g_hdr)||!mem_eq(g_hdr.magic,"AKF2",4)){
+    if(r!=(int)sizeof(g_hdr)||!mem_eq(g_hdr.magic,"AKF3",4)){
         storage_close(fd); return -2;
     }
     /* Quick PIN reject */
@@ -144,7 +143,7 @@ int vault_load(const char *pin6) {
     mem_cpy(&g_vault, enc, sizeof(vault_body_t));
     chacha20_xor(g_key, g_hdr.nonce, 0, (uint8_t*)&g_vault, sizeof(vault_body_t));
     /* Verify body magic */
-    if(!mem_eq(g_vault.magic,"AKV2",4)){
+    if(!mem_eq(g_vault.magic,"AKV3",4)){
         mem_zero(&g_vault,sizeof(g_vault));
         mem_zero(g_key,32);
         return -5; /* corrupt / wrong key */

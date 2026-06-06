@@ -1,4 +1,4 @@
-APP_NAME  = akira_vault2
+APP_NAME  = akira_vault
 WASI_SDK ?= /opt/wasi-sdk
 CC        = $(WASI_SDK)/bin/clang
 

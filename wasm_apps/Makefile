@@ -50,10 +50,14 @@ AOT_FLAGS_x86_64   := --target=x86_64
 # App directories by category
 GENERIC_APPS = ble_led gpio hello_world net_echo net_server storage_test
 
-CONSOLE_APPS = akira_field akira_shell compass cube3d display_test \
-               glasses_mystery gravity_dash imu_3d imu_timer_test inclinometer \
+CONSOLE_APPS = akira_field akira_focus akira_key akira_vault \
+               compass glasses_mystery gravity_dash \
                logic_analyzer macro_pad pixel_dungeon pixel_farmer \
-               space_invaders supervisor tetris
+               space_invaders spectrum_analyzer tetris
+
+# Test / diagnostic apps (in wasm_apps/test/)
+TEST_APPS = akira_shell api_test cube3d display_test imu_3d imu_timer_test \
+            inclinometer settings_api supervisor
 
 # Retro games: pre-built .aot files (no wasi-sdk compile step needed)
 RETRO_GAMES = galaga megaman megaman3 persia tetris zelda

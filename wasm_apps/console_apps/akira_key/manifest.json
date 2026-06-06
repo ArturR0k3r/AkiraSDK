@@ -1,13 +1,14 @@
 {
-  "name": "akira_vault",
-  "display_name": "AkiraVault",
-  "version": "3.0.0",
-  "description": "Cold wallet: BIP39 seed phrase, BIP44 HD accounts, offline signing. No network access.",
+  "name": "akira_key",
+  "display_name": "AkiraKey",
+  "version": "1.0.0",
+  "description": "Electronic security key: TOTP/HOTP 2FA, FIDO2/WebAuthn, SSH agent, BLE HID keyboard.",
   "capabilities": [
     "display.write",
     "gpio.read",
     "storage.read",
     "storage.write",
+    "hid",
     "settings.*",
     "timer",
     "crypto"

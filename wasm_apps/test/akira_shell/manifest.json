@@ -1,0 +1,19 @@
+{
+  "name": "akira_shell",
+  "version": "3.0.0",
+  "description": "AkiraConsole graphical system shell \u2014 Playdate-inspired launcher with SD browser, settings, and network status.",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "app.control",
+    "app.info",
+    "app.switch",
+    "ipc",
+    "storage.read",
+    "power.read",
+    "network.*",
+    "settings.*"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
+}

@@ -19,7 +19,7 @@
     "pwm",
     "adc",
     "wdt",
-    "network.*",
+    "network",
     "power.read",
     "power.control",
     "app.control",
@@ -30,7 +30,7 @@
     "crypto",
     "ota",
     "system",
-    "rf.transceive",
+    "rf.transceive"
   ],
   "memory_quota": 131072,
   "min_akiraos_version": "1.0.0"

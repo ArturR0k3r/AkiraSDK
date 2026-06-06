@@ -9,5 +9,6 @@
     "storage.write",
     "app.switch"
   ],
-  "memory_quota": 131072
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
 }

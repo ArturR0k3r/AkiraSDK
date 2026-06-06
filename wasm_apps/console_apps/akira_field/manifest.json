@@ -1,0 +1,18 @@
+{
+  "name": "akira_field",
+  "display_name": "AkiraField",
+  "version": "1.0.0",
+  "description": "Dual-radio field diagnostic tool. CC1121 sub-GHz FSK + LR1121 LoRa/GFSK. Monitor, link test, spectrum scan, TX bench.",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "gpio.write",
+    "spi",
+    "settings.*",
+    "storage.read",
+    "storage.write",
+    "timer"
+  ],
+  "memory_quota": 524288,
+  "min_akiraos_version": "1.5.0"
+}

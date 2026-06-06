@@ -1,8 +1,9 @@
 {
-  "name": "hello_world",
+  "name": "hello_world_python",
   "version": "1.0.0",
   "capabilities": [
     "display.write"
   ],
-  "memory_quota": 262144
+  "memory_quota": 262144,
+  "min_akiraos_version": "1.0.0"
 }

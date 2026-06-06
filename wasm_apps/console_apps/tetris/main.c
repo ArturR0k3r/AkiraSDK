@@ -2,6 +2,15 @@
  * Copyright (c) 2026 PenEngineering S.R.L
  * SPDX-License-Identifier: Apache-2.0
  * Tetris for AkiraConsole — UP/A/B=rotate  LEFT/RIGHT=move  DOWN=drop
+ *
+ * v1.1 — button debounce + per-axis DAS
+ * v1.2 — three rendering/input fixes
+ *   · DB_TICKS 3→4 (80 ms): rejects longer GPIO noise; fixes spurious soft-drop
+ *   · DAS_INIT 8→12, DAS_RPT 3→4: quick taps no longer trigger auto-repeat
+ *   · dn_held guard: soft-drop requires DOWN confirmed held ≥4 ticks (80 ms)
+ *     after debounce settles, so noise spikes can't hijack gravity speed
+ *   · Dirty check on update_piece(): skips erase+redraw when piece hasn't moved,
+ *     eliminating the LCD flicker that caused visible piece trembling
  */
 
 #include "akira_api.h"
@@ -53,15 +62,71 @@ static int sbit(int p,int r,int row,int col){
     return (SHAPES[p][r]>>(15-row*4-col))&1;
 }
 
-/* ── State ───────────────────────────────────────────────────────────── */
+/* ── Button debounce ─────────────────────────────────────────────────── */
+/*
+ * Each GPIO is polled once per 20 ms tick.  A transition is accepted only
+ * after DB_TICKS consecutive reads of the new level.  This rejects contact
+ * bounce spikes shorter than DB_TICKS × 20 ms = 60 ms.
+ *
+ *  btn_poll(&b, level)  — call every tick; level = logical 1 when pressed
+ *  BTN_ROSE(b)          — true for exactly one tick on button press
+ *  BTN_HELD(b)          — true every tick while button is held down
+ *  BTN_FELL(b)          — true for exactly one tick on button release
+ */
+#define DB_TICKS 4u          /* 4 × 20 ms = 80 ms settle window           */
+
+typedef struct {
+    uint8_t raw;             /* last raw GPIO level seen (0 or 1)          */
+    uint8_t cnt;             /* consecutive ticks raw has been stable      */
+    uint8_t state;           /* confirmed debounced level                  */
+    uint8_t prev;            /* confirmed level on the previous tick       */
+} Btn;
+
+static void btn_poll(Btn *b, int level) {
+    uint8_t r = level ? 1u : 0u;
+    b->prev = b->state;                   /* snapshot before any update    */
+    if (r != b->raw) {
+        b->raw = r;
+        b->cnt = 0u;                      /* different level — reset timer */
+    } else if (b->cnt < DB_TICKS) {
+        if (++b->cnt >= DB_TICKS)
+            b->state = b->raw;            /* stable long enough → confirm  */
+    }
+}
+
+#define BTN_ROSE(b)  (!(b).prev &&  (b).state)  /* rising  edge            */
+#define BTN_HELD(b)  (              (b).state)  /* held down               */
+#define BTN_FELL(b)  ( (b).prev  && !(b).state) /* falling edge            */
+
+static Btn btn_up, btn_dn, btn_l, btn_r, btn_a, btn_b, btn_s;
+
+/* ── DAS (Delayed Auto-Shift) ────────────────────────────────────────── */
+/*
+ * Standard Tetris DAS: on the rising edge the piece moves immediately;
+ * after DAS_INIT held ticks auto-repeat fires every DAS_RPT ticks.
+ * LEFT and RIGHT each have their own counter so neither blocks the other.
+ *
+ *   DAS_INIT 12 × 20 ms = 240 ms  initial delay — requires deliberate hold
+ *   DAS_RPT   4 × 20 ms =  80 ms  auto-repeat period
+ *
+ * Was DAS_INIT=8 / DAS_RPT=3: a 220 ms tap could accidentally trigger
+ * auto-repeat.  At 240 ms only intentional holds reach the repeat phase.
+ */
+#define DAS_INIT  12
+#define DAS_RPT    4
+
+static int l_das, r_das;
+static int dn_held;        /* consecutive HELD ticks of DOWN after debounce */
+
+/* ── Game state ──────────────────────────────────────────────────────── */
 static uint8_t board[ROWS][COLS];
-static int cp,cr,cx,cy;   /* current piece, rot, x, y */
-static int np;             /* next piece               */
+static int cp,cr,cx,cy;   /* current piece, rotation, position */
+static int np;             /* next piece                        */
 static int score,lines,level;
 static int game_over;
 static uint32_t rng;
 
-/* previous-drawn piece (to erase correctly) */
+/* previous-drawn piece (for partial erase) */
 static int pp,pr,px,py,piece_drawn;
 
 static int rng7(void){
@@ -93,19 +158,16 @@ static void dcell(int col,int row,uint16_t color){
     }
 }
 
-/* Erase piece at given pos, draw at current pos */
+/* Erase old piece position, draw at current position */
 static void update_piece(void){
-    /* erase previous */
     if(piece_drawn){
         for(int row=0;row<4;row++) for(int col=0;col<4;col++){
             if(!sbit(pp,pr,row,col)) continue;
             int by2=py+row; if(by2<0||by2>=ROWS) continue;
             int bx2=px+col;
-            /* only erase if board is empty there (board cells stay) */
             if(!board[by2][bx2]) dcell(bx2,by2,0);
         }
     }
-    /* draw current */
     for(int row=0;row<4;row++) for(int col=0;col<4;col++){
         if(!sbit(cp,cr,row,col)) continue;
         int by2=cy+row; if(by2<0||by2>=ROWS) continue;
@@ -130,7 +192,6 @@ static void draw_sidebar(void){
     display_text(x, BY+80, "SCORE",C_DIM);
     display_text(x, BY+108,"LINES",C_DIM);
     display_text(x, BY+136,"LEVEL",C_DIM);
-    /* next piece preview */
     display_rect(x,BY+14,44,44,C_BG);
     for(int row=0;row<4;row++) for(int col=0;col<4;col++){
         if(!sbit(np,0,row,col)) continue;
@@ -200,7 +261,14 @@ restart:
     score=0; lines=0; level=1; game_over=0; piece_drawn=0;
     np=rng7(); spawn();
 
-    /* draw static frame */
+    /* Reset button state and DAS counters between games so stale edge
+     * flags from the "press A to restart" sequence don't leak in.       */
+    btn_up=(Btn){0}; btn_dn=(Btn){0};
+    btn_l =(Btn){0}; btn_r =(Btn){0};
+    btn_a =(Btn){0}; btn_b =(Btn){0};
+    btn_s =(Btn){0};
+    l_das=0; r_das=0; dn_held=0;
+
     display_clear(C_BG);
     display_rect(BX-2, BY-2, 2, ROWS*CELL+4, C_BDR);
     display_rect(BX+COLS*CELL, BY-2, 2, ROWS*CELL+4, C_BDR);
@@ -210,81 +278,106 @@ restart:
     display_flush();
 
     uint32_t drop_us=600000u, drop_acc=0;
-
-    /* button state */
-    int pup=0,pdn=0,plft=0,prgt=0,pa=0,pb=0,ps=0;
     int paused=0;
-    int lr_timer=0; /* DAS: frames held in current direction */
 
     while(!game_over){
-        int up  =gpio_read(PIN_UP);
-        int dn  =gpio_read(PIN_DOWN);
-        int lft =gpio_read(PIN_LEFT);
-        int rgt =gpio_read(PIN_RIGHT);
-        int a   =gpio_read(PIN_A);
-        int b   =gpio_read(PIN_B);
-        int s   =gpio_read(PIN_SETTINGS); /* logical: 1=pressed, 0=idle */
 
-        /* SETTINGS: rising edge (same as all other buttons) */
-        if(s && !ps) paused=!paused;
-        ps=s;
+        /* ── Poll all buttons ───────────────────────────────────────── */
+        btn_poll(&btn_up, gpio_read(PIN_UP));
+        btn_poll(&btn_dn, gpio_read(PIN_DOWN));
+        btn_poll(&btn_l,  gpio_read(PIN_LEFT));
+        btn_poll(&btn_r,  gpio_read(PIN_RIGHT));
+        btn_poll(&btn_a,  gpio_read(PIN_A));
+        btn_poll(&btn_b,  gpio_read(PIN_B));
+        /* SETTINGS is active-LOW: invert so logical 1 = pressed        */
+        btn_poll(&btn_s, !gpio_read(PIN_SETTINGS));
 
-        if(paused){ pup=up;pdn=dn;plft=lft;prgt=rgt;pa=a;pb=b;
-            delay(20000); continue; }
+        /* SETTINGS toggle works even while paused                       */
+        if (BTN_ROSE(btn_s)) paused = !paused;
+        if (paused) { delay(20000); continue; }
 
-        /* Rotate — rising edge only */
-        if((up&&!pup)||(a&&!pa)||(b&&!pb)){
-            int nr=(cr+1)%4;
-            if     (!hit(cp,nr,cx,  cy)) cr=nr;
-            else if(!hit(cp,nr,cx-1,cy)){cr=nr;cx--;}
-            else if(!hit(cp,nr,cx+1,cy)){cr=nr;cx++;}
+        /* ── Rotate — single rising edge (UP or A or B) ─────────────── */
+        if (BTN_ROSE(btn_up) || BTN_ROSE(btn_a) || BTN_ROSE(btn_b)) {
+            int nr = (cr + 1) % 4;
+            if      (!hit(cp, nr, cx,   cy)) cr = nr;
+            else if (!hit(cp, nr, cx-1, cy)) { cr = nr; cx--; } /* wall-kick L */
+            else if (!hit(cp, nr, cx+1, cy)) { cr = nr; cx++; } /* wall-kick R */
         }
-        pup=up; pa=a; pb=b;
 
-        /* LEFT / RIGHT — exactly like space_invaders:
-         * independent reads, cooldown prevents too-fast repeat */
-        if(lr_timer > 0) lr_timer--;
-        if(lft && lr_timer==0){ if(!hit(cp,cr,cx-1,cy)){ cx--; lr_timer=6; } }
-        if(rgt && lr_timer==0){ if(!hit(cp,cr,cx+1,cy)){ cx++; lr_timer=6; } }
-        plft=lft; prgt=rgt;
+        /* ── LEFT — immediate move on press, then DAS auto-repeat ───── */
+        if (BTN_ROSE(btn_l)) {
+            if (!hit(cp, cr, cx-1, cy)) cx--;
+            l_das = 0;
+        } else if (BTN_HELD(btn_l)) {
+            l_das++;
+            if (l_das >= DAS_INIT && (l_das - DAS_INIT) % DAS_RPT == 0)
+                if (!hit(cp, cr, cx-1, cy)) cx--;
+        } else {
+            l_das = 0;
+        }
 
-        /* Drop */
-        uint32_t eff=dn ? 80000u : drop_us;
-        pdn=dn;
-        drop_acc+=20000u;
-        if(drop_acc>=eff){
-            drop_acc=0;
-            if(!hit(cp,cr,cx,cy+1)){
+        /* ── RIGHT — same pattern, independent counter ───────────────── */
+        if (BTN_ROSE(btn_r)) {
+            if (!hit(cp, cr, cx+1, cy)) cx++;
+            r_das = 0;
+        } else if (BTN_HELD(btn_r)) {
+            r_das++;
+            if (r_das >= DAS_INIT && (r_das - DAS_INIT) % DAS_RPT == 0)
+                if (!hit(cp, cr, cx+1, cy)) cx++;
+        } else {
+            r_das = 0;
+        }
+
+        /* ── Gravity + soft-drop ────────────────────────────────────── */
+        /* dn_held counts consecutive confirmed-HELD ticks of DOWN.
+         * Soft-drop only activates after 4 such ticks (80 ms of genuine hold
+         * after debounce settles).  A noise spike that just barely clears the
+         * 80 ms debounce window resets dn_held before it reaches the threshold
+         * and never accelerates the piece.                               */
+        if (BTN_HELD(btn_dn)) { if (dn_held < 4) dn_held++; }
+        else                    dn_held = 0;
+
+        uint32_t eff = (dn_held >= 4) ? 80000u : drop_us;
+        drop_acc += 20000u;
+        if (drop_acc >= eff) {
+            drop_acc = 0;
+            if (!hit(cp, cr, cx, cy+1)) {
                 cy++;
-                if(dn) score++;
+                if (dn_held >= 4) score++;
             } else {
-                /* lock */
-                update_piece(); /* draw at final pos before locking */
+                update_piece();
                 lock_piece();
-                if(clear_lines()){
-                    drop_us=600000u/(uint32_t)level;
-                    if(drop_us<80000u) drop_us=80000u;
+                if (clear_lines()) {
+                    drop_us = 600000u / (uint32_t)level;
+                    if (drop_us < 80000u) drop_us = 80000u;
                     redraw_board();
                 }
                 draw_sidebar();
                 spawn();
-                if(game_over) break;
+                if (game_over) break;
             }
         }
 
-        update_piece();  /* erase old, draw current — ONE call per frame */
+        /* Only redraw the piece when it actually moved, rotated, or spawned.
+         * Calling update_piece() unconditionally erased+redrew every 20 ms
+         * even on a static piece, causing visible LCD flicker (the "trembling"
+         * effect).  The comparison covers all change sources: gravity (cy),
+         * DAS (cx), rotation (cr), new piece (cp), and post-redraw_board
+         * where piece_drawn is reset to 0.                               */
+        if (!piece_drawn || cp != pp || cr != pr || cx != px || cy != py)
+            update_piece();
         display_flush();
         delay(20000);
     }
 
-    /* Game over */
+    /* ── Game over ──────────────────────────────────────────────────── */
     display_rect(BX+5, BY+90, COLS*CELL-10, 38, C_BG);
     display_text(BX+10, BY+95,  "GAME OVER", 0xF800u);
     display_text(BX+10, BY+113, n2s(score),  C_WHT);
     display_flush();
     delay(2500000u);
-    while(gpio_read(PIN_A)||gpio_read(PIN_B)) delay(20000);
-    while(!gpio_read(PIN_A)&&!gpio_read(PIN_B)) delay(20000);
+    while( gpio_read(PIN_A) || gpio_read(PIN_B)) delay(20000);
+    while(!gpio_read(PIN_A) && !gpio_read(PIN_B)) delay(20000);
     delay(100000u);
     goto restart;
     return 0;

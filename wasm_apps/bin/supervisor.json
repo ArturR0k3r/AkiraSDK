@@ -1,7 +1,7 @@
 {
   "name": "supervisor",
   "version": "2.0.0",
-  "description": "AkiraOS Supervisor — foreground launcher with background lifecycle monitoring via IPC.",
+  "description": "AkiraOS Supervisor \u2014 foreground launcher with background lifecycle monitoring via IPC.",
   "capabilities": [
     "display.write",
     "gpio.read",
@@ -9,5 +9,6 @@
     "ipc",
     "timer"
   ],
-  "memory_quota": 65536
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.0.0"
 }

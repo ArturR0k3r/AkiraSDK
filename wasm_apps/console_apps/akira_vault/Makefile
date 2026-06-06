@@ -1,18 +1,18 @@
-# akira_vault — Hardware Crypto Wallet + Password Manager
-
-APP_NAME  = akira_vault
+APP_NAME  = akira_vault2
 WASI_SDK ?= /opt/wasi-sdk
 CC        = $(WASI_SDK)/bin/clang
 
 TARGET = $(APP_NAME).wasm
-SRCS   = main.c
+SRCS   = main.c vault_crypto.c vault_store.c vault_ui.c
 
 CFLAGS  = -O2 -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
+CFLAGS += -Wno-implicit-function-declaration
+CFLAGS += -Wno-incompatible-library-redeclaration
+CFLAGS += -DAKIRA_NO_PRINTF_INLINE
 CFLAGS += -I../../../include
 
-# 16 KB stack (crypto call depth: PBKDF2 → HMAC → SHA-256)
-# 256 KB heap (vault body ~2.4 KB, crypto buffers, display)
+# 256 KB — PIN KDF uses iterative stack; UI state machine fits easily
 LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main
 LDFLAGS += -Wl,--allow-undefined

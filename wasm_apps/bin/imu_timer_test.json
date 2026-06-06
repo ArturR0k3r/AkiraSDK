@@ -6,5 +6,6 @@
     "sensor.read",
     "timer"
   ],
-  "memory_quota": 32768
+  "memory_quota": 32768,
+  "min_akiraos_version": "1.0.0"
 }

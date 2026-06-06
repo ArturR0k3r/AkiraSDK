@@ -204,10 +204,12 @@ extern int timer_elapsed(int32_t h);
 extern int delay(uint32_t us);
 extern int crypto_random(void *buf,int len);
 /* GPIO flags */
+#ifndef GPIO_INPUT
 #define GPIO_INPUT            (1U<<0)
 #define GPIO_PULL_UP          (1U<<4)
 #define GPIO_PULL_DOWN        (1U<<5)
 #define GPIO_ACTIVE_LOW       (1U<<6)
+#endif
 /* Storage flags */
 #define STORAGE_O_READ  0
 #define STORAGE_O_WRITE 1

@@ -35,7 +35,7 @@ static void btns_init(void){
 }
 static void btns_poll(void){
     for(int i=0;i<7;i++){
-        int raw=gpio_read(PINS[i]); if(i==6) raw=!raw;
+        int raw=gpio_read(PINS[i]); /* GPIO_ACTIVE_LOW on SETTINGS returns logical level already */
         prev[i]=st[i];
         if(raw) cnt[i]++; else cnt[i]=0;
         st[i]=(cnt[i]>=DB)?1:0;

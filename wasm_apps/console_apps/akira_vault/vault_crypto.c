@@ -186,9 +186,6 @@ int base32_decode(const char *b32, uint8_t *out, int max) {
  * a placeholder that derives human-readable words from entropy bytes.
  * Replace with bip39_wordlist.h containing const char *BIP39_EN[2048] for
  * production use.                                                           */
-static const char *const _fallback_words[8] = {
-    "alpha","bravo","charlie","delta","echo","foxtrot","golf","hotel"
-};
 
 void bip39_entropy_to_mnemonic(const uint8_t *entropy, int elen,
                                char words_out[24][12]) {

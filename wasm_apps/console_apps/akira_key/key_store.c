@@ -27,7 +27,11 @@ static int mem_eq(const void *a,const void *b,int n){
 static uint32_t rng_st[16], rng_buf[16];
 static int rng_pos=64;
 static void rng_init(void){
-    uint8_t seed[64]; crypto_random(seed,64);
+    /* No crypto_random in this firmware build — seed from timer + fixed constants */
+    int32_t t = timer_elapsed(timer_create());
+    uint8_t seed[64];
+    uint32_t x = (uint32_t)t ^ 0xDEADBEEFu;
+    for(int i=0;i<64;i++){ x^=x<<13; x^=x>>17; x^=x<<5; seed[i]=(uint8_t)x; }
     rng_st[0]=0x61707865u;rng_st[1]=0x3320646eu;
     rng_st[2]=0x79622d32u;rng_st[3]=0x6b206574u;
     for(int i=0;i<8;i++)

@@ -23,7 +23,7 @@ static int autolock_expired(void) {
 
 /* ── Button GPIO polling ──────────────────────────────────────────────── */
 static int prev_up=0,prev_dn=0,prev_lft=0,prev_rgt=0,prev_cen=0,prev_set=0;
-static int center_hold_ms = 0, center_hold_start = 0;
+static int center_hold_start = 0;
 #define LONG_PRESS_MS 800
 
 static int read_key(int *out_long) {
@@ -32,7 +32,7 @@ static int read_key(int *out_long) {
     int lft = gpio_read(PIN_LEFT);
     int rgt = gpio_read(PIN_RIGHT);
     int cen = gpio_read(PIN_CENTER);
-    int set = !gpio_read(PIN_SETTINGS); /* active-low: invert → 1=pressed */
+    int set = gpio_read(PIN_SETTINGS); /* GPIO_ACTIVE_LOW: gpio_read returns logical 1=pressed */
 
     int key = KEY_NONE;
     *out_long = 0;

@@ -188,7 +188,7 @@ static int handle_input(void) {
     int a = gpio_read(BTN_A);
     int b = gpio_read(BTN_B);
     int u = gpio_read(BTN_UP);
-    int s = !gpio_read(BTN_SETTINGS);
+    int s = gpio_read(BTN_SETTINGS);
 
     /* Flip gravity on press */
     if ((a && !prev_a) || (b && !prev_b) || (u && !prev_u)) {
@@ -384,7 +384,7 @@ static int show_pause_menu(void) {
         int d = gpio_read(BTN_DOWN);
         int a = gpio_read(BTN_A);
         int b = gpio_read(BTN_B);
-        int s = !gpio_read(BTN_SETTINGS);
+        int s = gpio_read(BTN_SETTINGS);
 
         if (s && !ps) return MENU_RESUME;
         if (u && !pu) cur = (cur > 0) ? cur - 1 : MENU_ITEMS - 1;
@@ -483,7 +483,7 @@ int main(void)
         while (1) {
             int a = gpio_read(BTN_A);
             int b = gpio_read(BTN_B);
-            int s = !gpio_read(BTN_SETTINGS);
+            int s = gpio_read(BTN_SETTINGS);
             if ((a && !pa2) || (b && !pa2)) { restart_game = 1; break; }
             if (s && !ps2) { exit_to_supervisor = 1; break; }
             pa2 = a; ps2 = s;

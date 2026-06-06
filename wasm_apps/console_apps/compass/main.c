@@ -157,12 +157,15 @@ int main(void)
         if (ay == AKIRA_SENSOR_ERROR) ay = 0;
         if (az == AKIRA_SENSOR_ERROR) az = 9812;
 
-        int32_t alt  = sensor_read(SENSOR_CHAN_ALTITUDE);
         int32_t pres = sensor_read(SENSOR_CHAN_PRESS);
         int32_t temp = sensor_read(SENSOR_CHAN_AMBIENT_TEMP);
+        /* Altitude computed from pressure (BME280 has no ALTITUDE channel).
+         * Approximation: alt_m ≈ (101325 - P_Pa) / 12  (valid ±2000 m ASL) */
+        int32_t alt = (pres != AKIRA_SENSOR_ERROR) ? (101325 - pres) / 12
+                                                   : AKIRA_SENSOR_ERROR;
 
         /* ── Exit ── */
-        int s = !gpio_read(PIN_SET);
+        int s = gpio_read(PIN_SET);
         if (s && !prev_set) break;
         prev_set = s;
 

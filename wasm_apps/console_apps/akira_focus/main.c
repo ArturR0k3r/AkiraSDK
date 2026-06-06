@@ -72,7 +72,7 @@ static void btns_poll(void) {
     btn_poll(&brt, gpio_read(PIN_RIGHT));
     btn_poll(&ba,  gpio_read(PIN_A));
     btn_poll(&bb,  gpio_read(PIN_B));
-    btn_poll(&bs,  !gpio_read(PIN_SET));
+    btn_poll(&bs,   gpio_read(PIN_SET));
 }
 #define ROSE(b)  ((b).st&&!(b).prev)
 #define LONG(b)  ((b).hold==75)  /* 75*20ms = 1.5s */

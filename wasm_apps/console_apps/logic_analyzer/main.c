@@ -196,7 +196,7 @@ static void handle_buttons(void) {
     int dn  = gpio_read(BTN_DOWN);
     int a   = gpio_read(BTN_A);
     int b   = gpio_read(BTN_B);
-    int cfg = !gpio_read(BTN_SETTINGS);
+    int cfg = gpio_read(BTN_SETTINGS);
 
     if (up && !pup && rate_idx > 0) {
         rate_idx--;

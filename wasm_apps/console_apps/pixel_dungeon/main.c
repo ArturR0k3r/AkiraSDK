@@ -460,7 +460,7 @@ static int show_pause_menu(void) {
         int d = gpio_read(BTN_DOWN);
         int a = gpio_read(BTN_A);
         int b = gpio_read(BTN_B);
-        int s = !gpio_read(BTN_SETTINGS);
+        int s = gpio_read(BTN_SETTINGS);
 
         if (s && !ps) return MENU_RESUME;
         if (u && !pu) cur = (cur > 0) ? cur - 1 : MENU_ITEMS - 1;
@@ -483,7 +483,7 @@ static int handle_input(void) {
     int r = gpio_read(BTN_RIGHT);
     int a = gpio_read(BTN_A);
     int b = gpio_read(BTN_B);
-    int s = !gpio_read(BTN_SETTINGS);
+    int s = gpio_read(BTN_SETTINGS);
 
     turn_taken = 0;
     int nx = px, ny = py;

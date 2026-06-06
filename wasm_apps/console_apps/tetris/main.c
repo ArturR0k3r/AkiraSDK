@@ -40,7 +40,6 @@ static int g_mono=0;
 #define C_WHT   0xFFFFu
 #define C_DIM   0x8410u
 #define C_CYAN  0x07FFu
-#define C_GHOST 0x4228u   /* dark gray — outline-only on mono */
 
 /* Piece colours (LCD) — map to white on mono (> luma threshold) */
 static const uint16_t PC[7] = {
@@ -86,8 +85,8 @@ static void btn_poll(Btn *b, int level) {
 static Btn btn_up, btn_dn, btn_l, btn_r, btn_a, btn_b, btn_s;
 
 /* ── DAS ─────────────────────────────────────────────────────────────── */
-#define DAS_INIT 12
-#define DAS_RPT   4
+#define DAS_INIT 20   /* 400ms before auto-repeat starts */
+#define DAS_RPT   6   /* 120ms repeat interval */
 static int l_das, r_das, dn_held;
 
 /* ── Game state ──────────────────────────────────────────────────────── */
@@ -112,45 +111,17 @@ static int hit(int p,int r,int x,int y){
     return 0;
 }
 
-/* ── Ghost piece: drop simulation ────────────────────────────────────── */
-static int ghost_y(void){
-    int gy=cy;
-    while(!hit(cp,cr,cx,gy+1)) gy++;
-    return gy;
-}
-
 /* ── Cell rendering ──────────────────────────────────────────────────── */
-static void dcell(int col, int row, uint16_t color, int ghost) {
+static void dcell(int col, int row, uint16_t color, int dummy) {
     int px2=BX+col*CELL, py2=BY+row*CELL;
-    if(color && !ghost) {
-        /* Filled piece cell with highlight edge */
+    (void)dummy;
+    if(color) {
         display_rect(px2,   py2,   CELL-1, CELL-1, color);
-        display_rect(px2,   py2,   CELL-2, 1,       C_WHT);  /* top highlight */
-        display_rect(px2,   py2,   1,       CELL-2, C_WHT);  /* left highlight */
-    } else if(ghost) {
-        /* Ghost: outline only */
-        display_rect(px2, py2, CELL-1, CELL-1, C_BG);        /* clear */
-        display_rect(px2, py2, CELL-1, 1,      C_WHT);       /* top */
-        display_rect(px2, py2+CELL-2, CELL-1, 1, C_WHT);     /* bottom */
-        display_rect(px2, py2, 1,      CELL-1, C_WHT);       /* left */
-        display_rect(px2+CELL-2, py2, 1, CELL-1, C_WHT);     /* right */
+        display_rect(px2,   py2,   CELL-2, 1,       C_WHT);
+        display_rect(px2,   py2,   1,       CELL-2, C_WHT);
     } else {
-        /* Empty: background + subtle grid tick marks on corners */
         display_rect(px2, py2, CELL-1, CELL-1, C_BG);
-        /* 1×1 corner dots for grid visibility (works on mono too) */
         display_rect(px2, py2, 1, 1, C_DIM);
-    }
-}
-
-static void draw_ghost(void) {
-    int gy=ghost_y();
-    if(gy==cy) return; /* ghost at same pos = no useful indicator */
-    for(int row=0;row<4;row++) for(int col=0;col<4;col++){
-        if(!sbit(cp,cr,row,col)) continue;
-        int by2=gy+row; if(by2<0||by2>=GROWS) continue;
-        /* Don't draw ghost over live piece */
-        if(by2==cy+row) continue;
-        dcell(cx+col, by2, PC[cp], 1);
     }
 }
 
@@ -162,11 +133,7 @@ static void update_piece(void){
             int bx2=px+col;
             if(!board[by2][bx2]) dcell(bx2,by2,0,0);
         }
-        /* Re-clear ghost area of previous position */
-        int old_gy=ghost_y(); /* approximate — just clear near old pos */
-        (void)old_gy;
     }
-    draw_ghost();
     for(int row=0;row<4;row++) for(int col=0;col<4;col++){
         if(!sbit(cp,cr,row,col)) continue;
         int by2=cy+row; if(by2<0||by2>=GROWS) continue;
@@ -357,7 +324,7 @@ restart:
         btn_poll(&btn_r,  gpio_read(PIN_RIGHT));
         btn_poll(&btn_a,  gpio_read(PIN_A));
         btn_poll(&btn_b,  gpio_read(PIN_B));
-        btn_poll(&btn_s, !gpio_read(PIN_SETTINGS));
+        btn_poll(&btn_s,  gpio_read(PIN_SETTINGS));
 
         if(BTN_ROSE(btn_s)){
             paused=!paused;

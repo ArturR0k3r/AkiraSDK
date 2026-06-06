@@ -175,7 +175,6 @@ extern int timer_create(void);
 extern int timer_start(int32_t h);
 extern int timer_elapsed(int32_t h);
 extern int delay(uint32_t us);
-extern int crypto_random(void *buf,int len);
 
 #ifndef GPIO_INPUT
 #define GPIO_INPUT            (1U<<0)

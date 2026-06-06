@@ -16,12 +16,12 @@ uint32_t g_rng_seed = 42;
 /* ─── Input ───────────────────────────────────────────────────────────────── */
 void input_init(input_t *inp) {
     /* Configure GPIO pins as inputs with pull-down */
-    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     for (int i = 0; i < INPUT_COUNT; i++) {

@@ -60,11 +60,11 @@ static int read_key(int *out_long) {
 int main(void) {
     display_get_size(&GW, &GH);
 
-    gpio_configure(PIN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_RIGHT,    GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_CENTER,   GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(PIN_UP,       GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_DOWN,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_LEFT,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_RIGHT,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_CENTER,   GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     g_timer = timer_create();

@@ -138,8 +138,8 @@ int main(void)
 
     gpio_configure(PIN_SET, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
-    /* Geometry — smaller radius on tall/narrow displays */
-    int R  = (SCR_W >= 380) ? 68 : 78;
+    /* Geometry — larger radius on wider Sharp display */
+    int R  = (SCR_W >= 380) ? 82 : 78;
     int cx = SCR_W / 2;
     int cy = R + 18;          /* leave room for header + top margin */
     int hud_y = cy + R + 10;  /* HUD panel starts below circle     */
@@ -222,7 +222,7 @@ int main(void)
                 int ry = hud_y + 3;
                 display_text(6, ry, "ALT", C_FG);
                 if (alt != AKIRA_SENSOR_ERROR) {
-                    int pp = buf_int(buf, 0, alt / 1000);
+                    int pp = buf_int(buf, 0, alt);
                     buf_str(buf, pp, " m");
                 } else {
                     buf_str(buf, 0, "-- m");

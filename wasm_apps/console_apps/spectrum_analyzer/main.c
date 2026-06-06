@@ -29,8 +29,8 @@
 /* Button pins */
 #define BTN_UP     4
 #define BTN_DOWN   5
-#define BTN_LEFT   7
-#define BTN_RIGHT  6
+#define BTN_LEFT   6
+#define BTN_RIGHT  7
 #define BTN_A      15
 #define BTN_B      16
 
@@ -353,12 +353,12 @@ int main(void)
     display_clear(COLOR_BLACK);
     display_flush();
 
-    gpio_configure(BTN_UP,    GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_DOWN,  GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_LEFT,  GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_RIGHT, GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_A,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_B,     GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_UP,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_DOWN,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_LEFT,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_RIGHT, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_A,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_B,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     for (i = 0; i < BINS; i++)
         g_rssi[i] = (int8_t)RSSI_MIN;

@@ -50,13 +50,13 @@ static int g_overscan  = 0;                  /* default: off    */
 /* ── GPIO pin assignments ────────────────────────────────────────────── */
 #define PIN_UP        4
 #define PIN_DOWN      5
-#define PIN_LEFT      7
-#define PIN_RIGHT     6
+#define PIN_LEFT      6
+#define PIN_RIGHT     7
 #define PIN_A        15
 #define PIN_B        16
-#define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
 #define PIN_X        17
-#define PIN_Y        41
+#define PIN_Y        40
+#define PIN_SETTINGS  0
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BLACK   0x0000u
@@ -247,15 +247,16 @@ static int show_pause_menu(void)
 /* ── GPIO setup ──────────────────────────────────────────────────────── */
 static void init_gpio(void)
 {
-    int flags = GPIO_INPUT | GPIO_PULL_DOWN;
+    int flags = GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW;
     gpio_configure(PIN_UP,       flags);
     gpio_configure(PIN_DOWN,     flags);
     gpio_configure(PIN_LEFT,     flags);
     gpio_configure(PIN_RIGHT,    flags);
     gpio_configure(PIN_A,        flags);
     gpio_configure(PIN_B,        flags);
-    gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    /* PIN_X (17) and PIN_Y (41) not present on AkiraConsole — omitted */
+    gpio_configure(PIN_X,        flags);
+    gpio_configure(PIN_Y,        flags);
+    gpio_configure(PIN_SETTINGS, flags);
 }
 
 /* ── SMS machine (static: avoids stack overflow) ─────────────────────── */
@@ -287,22 +288,15 @@ int main(void)
     draw_border();
     display_flush();
 
-    int settings_hold_fr = 0;
-    int frame_count      = 0;
-#define SETTINGS_LONG_FR 48
+    int prev_settings = 0;
+    int frame_count   = 0;
 
     printf("[SMS] Init OK — entering main loop\n");
 
     while (1) {
-        /* ── SETTINGS short/long press tracking ──────────────────── */
         int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now) {
-            if (settings_hold_fr <= SETTINGS_LONG_FR) settings_hold_fr++;
-        } else {
-            settings_hold_fr = 0;
-        }
 
-        /* ── Read input ─────────────────────────────────────────────── */
+        /* ── Read input: Y=START/NMI ─────────────────────────────────── */
         uint8_t btns = 0;
         if (gpio_read(PIN_UP))    btns |= SMS_BTN_UP;
         if (gpio_read(PIN_DOWN))  btns |= SMS_BTN_DOWN;
@@ -310,14 +304,12 @@ int main(void)
         if (gpio_read(PIN_RIGHT)) btns |= SMS_BTN_RIGHT;
         if (gpio_read(PIN_A))     btns |= SMS_BTN_1;
         if (gpio_read(PIN_B))     btns |= SMS_BTN_2;
-        /* SETTINGS held (short) → SMS START/Pause NMI */
-        if (settings_now && settings_hold_fr < SETTINGS_LONG_FR)
-            btns |= SMS_BTN_START;
+        if (gpio_read(PIN_Y))     btns |= SMS_BTN_START;
 
         sms_set_buttons(&sms, 0, btns);
 
-        /* ── Long-press threshold → emulator pause ──────────────────── */
-        if (settings_hold_fr == SETTINGS_LONG_FR) {
+        /* ── SETTINGS rising edge → emulator pause ───────────────────── */
+        if (settings_now && !prev_settings) {
             int choice = show_pause_menu();
             if (choice == MENU_EXIT) {
                 app_switch("supervisor");
@@ -330,9 +322,8 @@ int main(void)
                 frame_count = 0;
                 printf("[SMS] Restarted\n");
             }
-            settings_hold_fr = 0;
-            continue;
         }
+        prev_settings = settings_now;
 
         /* ── Run one SMS frame + optional render skip ────────────────── */
         int mod  = FS_MOD[g_frameskip];

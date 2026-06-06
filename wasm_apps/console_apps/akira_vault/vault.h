@@ -26,8 +26,8 @@ extern int32_t GW, GH;
 /* ── GPIO pins ───────────────────────────────────────────────────────────── */
 #define PIN_UP       4
 #define PIN_DOWN     5
-#define PIN_LEFT     7
-#define PIN_RIGHT    6
+#define PIN_LEFT     6
+#define PIN_RIGHT    7
 #define PIN_CENTER   15
 #define PIN_SETTINGS 0   /* active-low */
 

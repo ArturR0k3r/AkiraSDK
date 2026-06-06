@@ -220,12 +220,12 @@ static void handle_buttons(void) {
 /* ── Init ────────────────────────────────────────────────────────────── */
 static void init_gpio(void) {
     for (int ch = 0; ch < CH_COUNT; ch++)
-        gpio_configure(CH_PIN[ch], GPIO_INPUT | GPIO_PULL_DOWN);
+        gpio_configure(CH_PIN[ch], GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
-    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 }
 

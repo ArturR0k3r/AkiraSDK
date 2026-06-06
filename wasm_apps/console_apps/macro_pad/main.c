@@ -20,8 +20,8 @@
 /* ── Button pins ─────────────────────────────────────────────────────────── */
 #define PIN_UP    4
 #define PIN_DOWN  5
-#define PIN_LEFT  7
-#define PIN_RIGHT 6
+#define PIN_LEFT  6
+#define PIN_RIGHT 7
 #define PIN_A     15
 
 /* ── Display geometry ───────────────────────────────────────────────────── */
@@ -65,11 +65,11 @@ static int prev[PAD_ROWS];
 
 static void buttons_init(void)
 {
-    gpio_configure(PIN_UP,    GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_DOWN,  GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_LEFT,  GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_RIGHT, GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(PIN_A,     GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(PIN_UP,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_DOWN,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_LEFT,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_RIGHT, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_A,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 }
 
 static int buttons_edge(void)

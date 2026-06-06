@@ -236,8 +236,7 @@ static void init_gpio(void)
     gpio_configure(PIN_RIGHT,    flags);
     gpio_configure(PIN_A,        flags);
     gpio_configure(PIN_B,        flags);
-    gpio_configure(PIN_X,        flags);
-    gpio_configure(PIN_Y,        flags);
+    /* PIN_X (17) and PIN_Y (41) not present on AkiraConsole — omitted */
     gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 }
 
@@ -272,28 +271,41 @@ int main(void)
 
     draw_border();
 
-    int settings_held = 0;
-    int frame_count   = 0;
+    int settings_hold_fr = 0;
+    int frame_count      = 0;
+#define SETTINGS_LONG_FR 48
 
     printf("[GB] Init OK — entering main loop\n");
 
     while (1) {
+        /* ── SETTINGS short/long press tracking ──────────────────── */
+        int settings_now = gpio_read(PIN_SETTINGS);
+        if (settings_now) {
+            if (settings_hold_fr <= SETTINGS_LONG_FR) settings_hold_fr++;
+        } else {
+            settings_hold_fr = 0;
+        }
+
         /* ── Read input ─────────────────────────────────────────────── */
         uint8_t btns = 0;
         if (gpio_read(PIN_UP))    btns |= GB_BTN_UP;
         if (gpio_read(PIN_DOWN))  btns |= GB_BTN_DOWN;
         if (gpio_read(PIN_LEFT))  btns |= GB_BTN_LEFT;
         if (gpio_read(PIN_RIGHT)) btns |= GB_BTN_RIGHT;
-        if (gpio_read(PIN_A))     btns |= GB_BTN_A;
-        if (gpio_read(PIN_B))     btns |= GB_BTN_B;
-        if (gpio_read(PIN_X))     btns |= GB_BTN_SELECT;
-        if (gpio_read(PIN_Y))     btns |= GB_BTN_START;
+        /* A+B simultaneously → SELECT; each alone → A or B */
+        {
+            int ba = gpio_read(PIN_A), bb = gpio_read(PIN_B);
+            if (ba && bb) { btns |= GB_BTN_SELECT; }
+            else { if (ba) btns |= GB_BTN_A; if (bb) btns |= GB_BTN_B; }
+        }
+        /* SETTINGS held (short) → GB START */
+        if (settings_now && settings_hold_fr < SETTINGS_LONG_FR)
+            btns |= GB_BTN_START;
 
         gb_set_buttons(&gb, btns);
 
-        /* ── Pause menu ─────────────────────────────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
+        /* ── Long-press threshold → emulator pause ──────────────────── */
+        if (settings_hold_fr == SETTINGS_LONG_FR) {
             int choice = show_pause_menu();
             if (choice == MENU_EXIT) {
                 app_switch("supervisor");
@@ -305,10 +317,9 @@ int main(void)
                 frame_count = 0;
                 printf("[GB] Restarted\n");
             }
-            settings_held = 0;
+            settings_hold_fr = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Run one GB frame + optional render skip ────────────────── */
         int mod  = FS_MOD[g_frameskip];

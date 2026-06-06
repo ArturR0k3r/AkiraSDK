@@ -255,8 +255,7 @@ static void init_gpio(void)
     gpio_configure(PIN_A,        flags);
     gpio_configure(PIN_B,        flags);
     gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_X,        flags);
-    gpio_configure(PIN_Y,        flags);
+    /* PIN_X (17) and PIN_Y (41) not present on AkiraConsole — omitted */
 }
 
 /* ── SMS machine (static: avoids stack overflow) ─────────────────────── */
@@ -288,14 +287,21 @@ int main(void)
     draw_border();
     display_flush();
 
-    int settings_held = 0;
-    int frame_count = 0;
+    int settings_hold_fr = 0;
+    int frame_count      = 0;
+#define SETTINGS_LONG_FR 48
 
     printf("[SMS] Init OK — entering main loop\n");
 
-
-
     while (1) {
+        /* ── SETTINGS short/long press tracking ──────────────────── */
+        int settings_now = gpio_read(PIN_SETTINGS);
+        if (settings_now) {
+            if (settings_hold_fr <= SETTINGS_LONG_FR) settings_hold_fr++;
+        } else {
+            settings_hold_fr = 0;
+        }
+
         /* ── Read input ─────────────────────────────────────────────── */
         uint8_t btns = 0;
         if (gpio_read(PIN_UP))    btns |= SMS_BTN_UP;
@@ -304,13 +310,14 @@ int main(void)
         if (gpio_read(PIN_RIGHT)) btns |= SMS_BTN_RIGHT;
         if (gpio_read(PIN_A))     btns |= SMS_BTN_1;
         if (gpio_read(PIN_B))     btns |= SMS_BTN_2;
-        if (gpio_read(PIN_Y))     btns |= SMS_BTN_START;  /* Pause/NMI */
+        /* SETTINGS held (short) → SMS START/Pause NMI */
+        if (settings_now && settings_hold_fr < SETTINGS_LONG_FR)
+            btns |= SMS_BTN_START;
 
         sms_set_buttons(&sms, 0, btns);
 
-        /* ── Pause menu ─────────────────────────────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
+        /* ── Long-press threshold → emulator pause ──────────────────── */
+        if (settings_hold_fr == SETTINGS_LONG_FR) {
             int choice = show_pause_menu();
             if (choice == MENU_EXIT) {
                 app_switch("supervisor");
@@ -323,10 +330,9 @@ int main(void)
                 frame_count = 0;
                 printf("[SMS] Restarted\n");
             }
-            settings_held = 0;
+            settings_hold_fr = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Run one SMS frame + optional render skip ────────────────── */
         int mod  = FS_MOD[g_frameskip];

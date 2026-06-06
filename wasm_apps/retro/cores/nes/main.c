@@ -130,8 +130,7 @@ static void init_gpio(void)
     gpio_configure(PIN_A,        f);
     gpio_configure(PIN_B,        f);
     gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_X,        f);
-    gpio_configure(PIN_Y,        f);
+    /* PIN_X (17) and PIN_Y (41) not present on AkiraConsole — omitted */
 }
 
 /* ── Display geometry init ────────────────────────────────────────────── */
@@ -444,30 +443,41 @@ int main(void)
         display_rect(0, 0, g_disp_w, g_nes_dst_y, C_BLACK);
     display_flush();
 
-    int settings_held = 0;
-    int frame_count   = 0;
+    /* settings_hold_fr: consecutive frames SETTINGS has been held.
+     * < SETTINGS_LONG_FR: short press — forwards NES START each frame.
+     * == SETTINGS_LONG_FR: threshold crossed — open emulator pause menu. */
+    int settings_hold_fr = 0;
+    int frame_count      = 0;
+#define SETTINGS_LONG_FR 48   /* ~800 ms at 60 fps */
 
     while (1) {
+        /* ── SETTINGS short/long press tracking ──────────────────── */
+        int settings_now = gpio_read(PIN_SETTINGS);
+        if (settings_now) {
+            if (settings_hold_fr <= SETTINGS_LONG_FR) settings_hold_fr++;
+        } else {
+            settings_hold_fr = 0;
+        }
+
         /* ── Buttons ──────────────────────────────────────────────── */
         uint8_t btns = 0;
         if (gpio_read(PIN_RIGHT))  btns |= NES_BTN_RIGHT;
         if (gpio_read(PIN_LEFT))   btns |= NES_BTN_LEFT;
         if (gpio_read(PIN_DOWN))   btns |= NES_BTN_DOWN;
         if (gpio_read(PIN_UP))     btns |= NES_BTN_UP;
-        if (gpio_read(PIN_A))      btns |= NES_BTN_A;
-        if (gpio_read(PIN_B))      btns |= NES_BTN_B;
-        if (gpio_read(PIN_X))      btns |= NES_BTN_SELECT;
-        if (gpio_read(PIN_Y))      btns |= NES_BTN_START;
+        /* A+B simultaneously → SELECT; each alone → A or B */
+        {
+            int ba = gpio_read(PIN_A), bb = gpio_read(PIN_B);
+            if (ba && bb) { btns |= NES_BTN_SELECT; }
+            else { if (ba) btns |= NES_BTN_A; if (bb) btns |= NES_BTN_B; }
+        }
+        /* SETTINGS held (short) → NES START; long press opens emulator menu */
+        if (settings_now && settings_hold_fr < SETTINGS_LONG_FR)
+            btns |= NES_BTN_START;
         nes_set_controller(&g_nes, 0, btns);
 
-        /* ── Settings button (rising edge) ───────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
-            /* Snapshot the current NES frame into the OS framebuffer so the
-             * pause overlay has a correct freeze-frame background.         */
-            /* Re-use render_nes_frame so the snapshot respects display geometry
-             * (letterbox centering, crop, scale2, and vertical clip on small
-             * displays) instead of blitting the full NES framebuffer blindly. */
+        /* ── Long-press threshold → emulator pause ────────────────── */
+        if (settings_hold_fr == SETTINGS_LONG_FR) {
             if (g_overscan)
                 render_nes_frame((const uint16_t *)g_nes.fb, NES_OVERSCAN, NES_CROP_H);
             else
@@ -475,7 +485,6 @@ int main(void)
             display_flush();
             int choice = show_pause_menu();
             if (choice == PM_EXIT) {
-                /* Fade to black */
                 for (int i = 0; i < 4; i++) { display_clear(C_BLACK); display_flush(); delay(25000); }
                 app_switch("akira_shell");
                 return 0;
@@ -497,10 +506,9 @@ int main(void)
                 display_flush();
                 frame_count = 0;
             }
-            settings_held = 0;
+            settings_hold_fr = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Emulate one NES frame ────────────────────────────────── */
         int mod  = FS_MOD[g_frameskip];

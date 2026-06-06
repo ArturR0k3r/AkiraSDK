@@ -108,7 +108,8 @@ static int hit(int p,int r,int x,int y){
         int bx=x+col, by=y+row;
         if(bx<0||bx>=GCOLS||by>=GROWS) return 1;
         if(by>=0&&board[by][bx]) return 1;
-    } return 0;
+    }
+    return 0;
 }
 
 /* ── Ghost piece: drop simulation ────────────────────────────────────── */

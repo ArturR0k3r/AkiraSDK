@@ -74,9 +74,7 @@ void hmac_sha256(const uint8_t *k,int kl,const uint8_t *m,int ml,uint8_t *out){
     for(i=kl;i<64;i++)ki[i]=0;
     for(i=0;i<64;i++){ko[i]=ki[i]^0x5cu;ki[i]^=0x36u;}
     uint8_t inner[32];
-    /* inner = sha256(ki || m) — using a temp buffer for ki||m */
-    uint8_t *buf=(uint8_t*)out; /* borrow out as temp — NOT overlapping */
-    /* Simple implementation: process ki block then m */
+    /* Process ki block then m */
     uint32_t h[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
     sha256_block(h,ki); /* ki is already 64 bytes */

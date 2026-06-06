@@ -59,7 +59,6 @@ static int     pin_cur, pin_digit_val, pin_wrong;
 static int     list_sel, list_scroll;
 static uint32_t totp_code;
 static int     totp_remain;
-static int     ble_ready = 0;
 static int     hold_frames = 0;
 
 /* ── BOOT ────────────────────────────────────────────────────────────────── */

@@ -9,6 +9,7 @@ CFLAGS  = -O2 -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes
 CFLAGS += -Wno-implicit-function-declaration
 CFLAGS += -Wno-incompatible-library-redeclaration
+CFLAGS += -Wno-macro-redefined
 CFLAGS += -DAKIRA_NO_PRINTF_INLINE
 CFLAGS += -I../../../include
 

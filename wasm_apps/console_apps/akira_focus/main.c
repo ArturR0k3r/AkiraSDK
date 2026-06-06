@@ -171,7 +171,6 @@ static void draw(void) {
 
     /* Running indicator */
     if(g_running && !g_done) {
-        const char *ind = (g_elapsed_s & 1) ? "  [  RUN  ]  " : "  [ PAUSE? ] ";
         display_text(SCR_W/2-48, ty+58, "Running...", fg);
     } else if(!g_running && !g_done) {
         display_text(SCR_W/2-24, ty+58, g_elapsed_s>0 ? "Paused" : "Ready", fg);

@@ -1,7 +1,7 @@
 {
   "name": "akira_shell",
   "version": "3.0.0",
-  "description": "AkiraConsole graphical system shell  Playdate-inspired launcher with SD browser, settings, and network status.",
+  "description": "AkiraConsole graphical system shell \u2014 Playdate-inspired launcher with SD browser, settings, and network status.",
   "capabilities": [
     "display.write",
     "gpio.read",

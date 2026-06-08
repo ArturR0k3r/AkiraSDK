@@ -49,7 +49,7 @@ static int g_nes_draw_w;  /* Pixels written per row                        */
 #define PIN_A        15
 #define PIN_B        16
 #define PIN_X        17
-#define PIN_Y        40
+#define PIN_Y        41
 #define PIN_SETTINGS  0
 
 /* ── Colours (RGB565, byte-swapped for ST7789V SPI) ──────────────────── */

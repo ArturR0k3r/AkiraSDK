@@ -55,7 +55,7 @@ static int g_overscan  = 0;                  /* default: off    */
 #define PIN_A        15
 #define PIN_B        16
 #define PIN_X        17
-#define PIN_Y        40
+#define PIN_Y        41
 #define PIN_SETTINGS  0
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */

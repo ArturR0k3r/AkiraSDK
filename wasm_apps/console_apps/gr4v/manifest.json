@@ -1,0 +1,12 @@
+{
+  "name": "gr4v",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "sensor.read",
+    "pwm"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.0.0"
+}

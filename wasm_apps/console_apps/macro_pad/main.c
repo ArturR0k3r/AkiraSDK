@@ -13,7 +13,7 @@
  *   A    (pin 15) — Keypress 'A'
  *   B    (pin 16) — Keypress 'B'
  *   X    (pin 17) — Keypress 'X'
- *   Y    (pin 9) — Keypress 'Y'
+ *   Y    (pin 41) — Keypress 'Y'
  *
  * Capabilities: display.write, gpio.read, hid
  */
@@ -32,7 +32,7 @@
 #define PIN_A 15
 #define PIN_B 16
 #define PIN_X 17
-#define PIN_Y 9
+#define PIN_Y 41
 
 /* ── Display geometry ───────────────────────────────────────────────────── */
 static int32_t DISPLAY_W = 320, DISPLAY_H = 240;

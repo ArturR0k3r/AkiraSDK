@@ -276,12 +276,12 @@ int main(void){
     if(BX < 4) BX = 4;
     SX = BX + GCOLS*CELL + 8;
 
-    gpio_configure(PIN_UP,       GPIO_INPUT|GPIO_PULL_DOWN);
-    gpio_configure(PIN_DOWN,     GPIO_INPUT|GPIO_PULL_DOWN);
-    gpio_configure(PIN_LEFT,     GPIO_INPUT|GPIO_PULL_DOWN);
-    gpio_configure(PIN_RIGHT,    GPIO_INPUT|GPIO_PULL_DOWN);
-    gpio_configure(PIN_A,        GPIO_INPUT|GPIO_PULL_DOWN);
-    gpio_configure(PIN_B,        GPIO_INPUT|GPIO_PULL_DOWN);
+    gpio_configure(PIN_UP,       GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_DOWN,     GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_LEFT,     GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_RIGHT,    GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_A,        GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_B,        GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
     gpio_configure(PIN_SETTINGS, GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
 
     /* ── Title screen ── */

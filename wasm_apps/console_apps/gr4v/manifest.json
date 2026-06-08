@@ -4,7 +4,8 @@
   "capabilities": [
     "display.write",
     "input.read",
-    "sensor.read"
+    "sensor.read",
+    "gpio.read"
   ],
   "memory_quota": 65536,
   "min_akiraos_version": "1.0.0"

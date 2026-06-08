@@ -190,16 +190,32 @@ int display_get_size(int32_t *w, int32_t *h) { *w = SCR_W; *h = SCR_H; return 0;
 int display_get_width(void)  { return SCR_W; }
 int display_get_height(void) { return SCR_H; }
 
+/* ─── GPIO API stubs ─────────────────────────────────────────────────── */
+static int sim_gpio15 = 0;  /* A button state (1 = pressed) */
+
+int gpio_configure(int32_t pin, uint32_t flags)
+{
+    (void)pin; (void)flags;
+    return 0;
+}
+
+int gpio_read(int32_t pin)
+{
+    if (pin == 15) return sim_gpio15;
+    return 0;
+}
+
 /* ─── Input API stubs ────────────────────────────────────────────────── */
 int input_get_buttons(void)
 {
     SDL_Event ev;
     sim_buttons = 0;
+    sim_gpio15 = 0;
     while (SDL_PollEvent(&ev)) {
         if (ev.type == SDL_QUIT) exit(0);
         if (ev.type == SDL_KEYDOWN) {
             switch (ev.key.keysym.sym) {
-            case SDLK_z: sim_buttons |= AKIRA_BTN_A; break;
+            case SDLK_z: sim_buttons |= AKIRA_BTN_A; sim_gpio15 = 1; break;
             case SDLK_x: sim_buttons |= AKIRA_BTN_B; break;
             case SDLK_LEFT:  sim_tilt_x = -2900; break;
             case SDLK_RIGHT: sim_tilt_x =  2900; break;

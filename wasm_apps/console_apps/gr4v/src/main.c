@@ -147,8 +147,6 @@ void update_title(void)
 {
     audio_update();
     g.title_frame++;
-    /* Check BTN_A or tilt > 0.3 rad (~angle_idx change ≥ 3 steps) */
-    uint32_t btns = (uint32_t)input_get_buttons();
     int32_t ax = sensor_read(0);  /* ACCEL_X */
     int32_t ay = sensor_read(1);  /* ACCEL_Y */
     if (ax == -2147483647 - 1) ax = 0;
@@ -156,7 +154,7 @@ void update_title(void)
     /* Tilt > 0.3 rad → sin(0.3) ≈ 0.296 → ax ≈ 0.296 × 9800 ≈ 2900 */
     int32_t tilt = ax < 0 ? -ax : ax;
     int started = 0;
-    if (btns & AKIRA_BTN_A) started = 1;
+    if (gpio_read(15) == 1) started = 1;  /* A button (GPIO15, active-low) */
     if (tilt > 2500) started = 1;
     if (started) {
         load_level(0);
@@ -168,8 +166,7 @@ void update_title(void)
 void update_game_complete(void)
 {
     audio_update();
-    uint32_t btns = (uint32_t)input_get_buttons();
-    if (btns & AKIRA_BTN_A) {
+    if (gpio_read(15) == 1) {  /* A button (GPIO15, active-low) */
         g.shards_collected = 0;
         load_level(0);
         g.state = STATE_PLAYING;
@@ -181,6 +178,7 @@ void update_game_complete(void)
 int main(void)
 {
     /* Static zero-init covers most of Game */
+    gpio_configure(15, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);  /* A button */
     audio_init();
     renderer_init();
     display_clear(C_BG);

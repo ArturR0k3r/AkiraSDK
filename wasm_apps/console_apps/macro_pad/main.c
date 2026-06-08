@@ -8,76 +8,98 @@
  * Button → action mapping (akiraconsole):
  *   UP   (pin 4)  — type: akira_run_script\n
  *   DOWN (pin 5)  — Win + PrtScn (screenshot)
- *   LEFT (pin 7)  — Play / Pause  (consumer key)
- *   RIGHT(pin 6)  — Mouse move +40, +40
+ *   LEFT (pin 6)  — Play / Pause  (consumer key)
+ *   RIGHT(pin 7)  — Mouse move +40, +40
  *   A    (pin 15) — Keypress 'A'
+ *   B    (pin 16) — Keypress 'B'
+ *   X    (pin 17) — Keypress 'X'
+ *   Y    (pin 9) — Keypress 'Y'
  *
  * Capabilities: display.write, gpio.read, hid
  */
 
 #include "../include/akira_api.h"
 
+/* USB HID usage IDs not yet defined in the SDK */
+#define HID_KEY_X 0x1B
+#define HID_KEY_Y 0x1C
+
 /* ── Button pins ─────────────────────────────────────────────────────────── */
-#define PIN_UP    4
-#define PIN_DOWN  5
-#define PIN_LEFT  6
+#define PIN_UP 4
+#define PIN_DOWN 5
+#define PIN_LEFT 6
 #define PIN_RIGHT 7
-#define PIN_A     15
+#define PIN_A 15
+#define PIN_B 16
+#define PIN_X 17
+#define PIN_Y 9
 
 /* ── Display geometry ───────────────────────────────────────────────────── */
 static int32_t DISPLAY_W = 320, DISPLAY_H = 240;
-static int g_mono = 0;   /* 1 = Sharp monochrome 400×240 */
+static int g_mono = 0; /* 1 = Sharp monochrome 400×240 */
 
 /* Sharp-safe colour palette (all render correctly under INVERT_COLORS=y) */
-#define C_BG        0x0000u   /* black → displays WHITE on Sharp */
-#define C_FG        0xFFFFu   /* white → displays BLACK on Sharp */
-#define C_ACCENT    0xFFFFu   /* same on mono */
-#define C_DIM       0xFFFFu
-#define C_INV_BG    0xFFFFu   /* inverted-row bg */
-#define C_INV_FG    0x0000u   /* inverted-row text */
+#define C_BG 0x0000u     /* black → displays WHITE on Sharp */
+#define C_FG 0xFFFFu     /* white → displays BLACK on Sharp */
+#define C_ACCENT 0xFFFFu /* same on mono */
+#define C_DIM 0xFFFFu
+#define C_INV_BG 0xFFFFu /* inverted-row bg */
+#define C_INV_FG 0x0000u /* inverted-row text */
 
 /* Colour/mono-aware helpers */
-#define ROW_BG(active)   ((active) ? C_INV_BG : C_BG)
-#define ROW_FG(active)   ((active) ? C_INV_FG : C_FG)
-#define KEY_BG(active)   ((active) ? C_INV_BG : C_FG)   /* key box always inverted vs row */
-#define KEY_FG(active)   ((active) ? C_INV_FG : C_BG)
+#define ROW_BG(active) ((active) ? C_INV_BG : C_BG)
+#define ROW_FG(active) ((active) ? C_INV_FG : C_FG)
+#define KEY_BG(active) ((active) ? C_INV_BG : C_FG) /* key box always inverted vs row */
+#define KEY_FG(active) ((active) ? C_INV_FG : C_BG)
 
 /* Layout */
-#define HEADER_H   26
-#define ROW_H      38   /* 5 rows × 38 = 190 + header 26 = 216 ≤ 240 */
-#define KEY_W      52   /* width of left key-label box */
-#define PAD_ROWS   5
+#define HEADER_H 24
+#define ROW_H 24 /* 5 rows × 38 = 190 + header 26 = 216 ≤ 240 */
+#define KEY_W 42 /* width of left key-label box */
+#define PAD_ROWS 8
 
 /* ── Macro definitions ──────────────────────────────────────────────────── */
-typedef struct { const char *label; const char *hint; } pad_def_t;
+typedef struct
+{
+    const char *label;
+    const char *hint;
+} pad_def_t;
 
 static const pad_def_t k_pads[PAD_ROWS] = {
-    { "UP",    "Type: akira_run_script" },
-    { "DOWN",  "Win+PrtScn screenshot"  },
-    { "LEFT",  "Play / Pause"           },
-    { "RIGHT", "Mouse move +40,+40"     },
-    { "A",     "Keypress: A"            },
+    {"UP", "Type: akira_run_script"},
+    {"DOWN", "Win+PrtScn screenshot"},
+    {"LEFT", "Play / Pause"},
+    {"RIGHT", "Mouse move +40,+40"},
+    {"A", "Keypress: A"},
+    {"B", "Keypress: B"},
+    {"X", "Keypress: X"},
+    {"Y", "Keypress: Y"},
 };
 
 /* ── Edge-detection ─────────────────────────────────────────────────────── */
-static int btn_pins[PAD_ROWS] = {PIN_UP, PIN_DOWN, PIN_LEFT, PIN_RIGHT, PIN_A};
+static int btn_pins[PAD_ROWS] = {PIN_UP, PIN_DOWN, PIN_LEFT, PIN_RIGHT, PIN_A, PIN_B, PIN_X, PIN_Y};
 static int prev[PAD_ROWS];
 
 static void buttons_init(void)
 {
-    gpio_configure(PIN_UP,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_DOWN,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_LEFT,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_UP, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_DOWN, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_LEFT, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(PIN_RIGHT, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_A,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_A, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_B, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_X, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(PIN_Y, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 }
 
 static int buttons_edge(void)
 {
     int mask = 0;
-    for (int i = 0; i < PAD_ROWS; i++) {
+    for (int i = 0; i < PAD_ROWS; i++)
+    {
         int cur = gpio_read(btn_pins[i]) == 1;
-        if (cur && !prev[i]) mask |= (1 << i);
+        if (cur && !prev[i])
+            mask |= (1 << i);
         prev[i] = cur;
     }
     return mask;
@@ -95,9 +117,12 @@ static void draw_row(int row, const char *label, const char *hint, int active)
     display_rect(0, y, KEY_W, ROW_H - 1, KEY_BG(active));
 
     /* Key label centred in box */
-    int llen = 0; while(label[llen]) llen++;
+    int llen = 0;
+    while (label[llen])
+        llen++;
     int lx = (KEY_W - llen * 8) / 2;
-    if(lx < 2) lx = 2;
+    if (lx < 2)
+        lx = 2;
     display_text_large(lx, y + 10, label, KEY_FG(active));
 
     /* Hint text to the right of the key box */
@@ -110,12 +135,14 @@ static void draw_row(int row, const char *label, const char *hint, int active)
 static void draw_header(int ble_active)
 {
     /* Header box */
-    display_rect(0, 0, DISPLAY_W, HEADER_H, C_FG);   /* white box */
-    display_text_large(6, 5, "Macro Pad", C_BG);       /* black title */
+    display_rect(0, 0, DISPLAY_W, HEADER_H, C_FG); /* white box */
+    display_text_large(6, 5, "Macro Pad", C_BG);   /* black title */
 
     /* BLE status on the right */
     const char *ble_lbl = ble_active ? "[BLE]" : "[ -- ]";
-    int blen = 0; while(ble_lbl[blen]) blen++;
+    int blen = 0;
+    while (ble_lbl[blen])
+        blen++;
     display_text(DISPLAY_W - blen * 8 - 6, 8, ble_lbl, C_BG);
 
     /* Bottom separator of header */
@@ -126,7 +153,8 @@ static void draw_all(int active_mask, int ble_active)
 {
     display_clear(C_BG);
     draw_header(ble_active);
-    for (int i = 0; i < PAD_ROWS; i++) {
+    for (int i = 0; i < PAD_ROWS; i++)
+    {
         draw_row(i, k_pads[i].label, k_pads[i].hint, (active_mask >> i) & 1);
     }
     display_flush();
@@ -135,13 +163,37 @@ static void draw_all(int active_mask, int ble_active)
 /* ── Macro dispatch ─────────────────────────────────────────────────────── */
 static void fire_macro(int idx)
 {
-    switch (idx) {
-    case 0: hid_type_string("akira_run_script\n"); break;
-    case 1: hid_action_trigger("screenshot"); break;
-    case 2: hid_consumer_send(HID_CONSUMER_PLAY_PAUSE); break;
-    case 3: hid_mouse_move(40, 40); break;
+    switch (idx)
+    {
+    case 0:
+        hid_type_string("akira_run_script\n");
+        break;
+    case 1:
+        hid_action_trigger("screenshot");
+        break;
+    case 2:
+        hid_consumer_send(HID_CONSUMER_PLAY_PAUSE);
+        break;
+    case 3:
+        hid_mouse_move(40, 40);
+        break;
     case 4:
         hid_key_press(HID_KEY_A);
+        delay(50000);
+        hid_key_release_all();
+        break;
+    case 5:
+        hid_key_press(HID_KEY_B);
+        delay(50000);
+        hid_key_release_all();
+        break;
+    case 6:
+        hid_key_press(HID_KEY_X);
+        delay(50000);
+        hid_key_release_all();
+        break;
+    case 7:
+        hid_key_press(HID_KEY_Y);
         delay(50000);
         hid_key_release_all();
         break;
@@ -167,21 +219,25 @@ int main(void)
 
     draw_all(0, 1);
 
-    while (1) {
+    while (1)
+    {
         int edge = buttons_edge();
 
-        if (edge) {
+        if (edge)
+        {
             draw_all(edge, 1);
 
-            for (int i = 0; i < PAD_ROWS; i++) {
-                if ((edge >> i) & 1) fire_macro(i);
+            for (int i = 0; i < PAD_ROWS; i++)
+            {
+                if ((edge >> i) & 1)
+                    fire_macro(i);
             }
 
-            delay(150000);   /* 150 ms highlight */
+            delay(150000); /* 150 ms highlight */
             draw_all(0, 1);
         }
 
-        delay(16667);   /* ~60 Hz */
+        delay(16667); /* ~60 Hz */
     }
 
     return 0;

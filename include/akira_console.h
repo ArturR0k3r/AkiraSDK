@@ -89,6 +89,12 @@
 /** Test whether a button is set in a bitmask from input_get_buttons(). */
 #define AKIRA_BTN_PRESSED(mask, btn) (((mask) & (btn)) != 0U)
 
+/**
+ * Maximum value returned by input_get_dial().
+ * The dial reports 0 (counter-clockwise stop) to AKIRA_DIAL_MAX (clockwise stop).
+ */
+#define AKIRA_DIAL_MAX 255
+
 /* ─── Display type detection ──────────────────────────────────────────────── */
 /*
  * Sharp LS027B7DH01 is 400×240 monochrome.  Call akira_display_is_mono() once
@@ -135,5 +141,19 @@ extern int input_get_buttons(void);
 /** @brief Drain one edge event from the ring buffer (non-blocking).
  *  @return 1 if event written, 0 if empty, negative on error. */
 extern int input_poll_event(akira_input_event_t *evt);
+
+/**
+ * @brief Read the current rotary dial position (non-blocking).
+ *
+ * The dial (RK10J12R0A0B potentiometer + RC oscillator on AkiraConsole
+ * Production) reports an absolute position in the range 0–AKIRA_DIAL_MAX.
+ * The value is refreshed every ~50 ms by the PWM-dial driver and is always
+ * safe to poll in a tight loop — no event queue to drain.
+ *
+ * Requires capability: "input.read"
+ *
+ * @return 0 (CCW stop) .. 255 (CW stop), or 0 if no dial hardware is present.
+ */
+extern int input_get_dial(void);
 
 #endif /* AKIRA_CONSOLE_H */

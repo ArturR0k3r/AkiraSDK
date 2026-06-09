@@ -31,10 +31,14 @@ static void draw_action(const char *L, const char *R) {
     int br = ROWS-1;
     trow_bg(br, C_HEADER);
     display_hline(0, TY(br), GW, C_ACCENT);
-    char lb[14]="["; sv_ncpy(lb+1,L,10); lb[sv_len(lb)]=']'; lb[sv_len(lb)]='\0';
-    char rb[14]="["; sv_ncpy(rb+1,R,10); rb[sv_len(rb)]=']'; rb[sv_len(rb)]='\0';
-    tput(0, br, lb, C_FG);
-    tput(COLS-sv_len(rb), br, rb, C_ACCENT);
+    if(L[0]) {
+        char lb[14]="["; sv_ncpy(lb+1,L,10); lb[sv_len(lb)]=']'; lb[sv_len(lb)]='\0';
+        tput(0, br, lb, C_DIM);
+    }
+    if(R[0]) {
+        char rb[14]="["; sv_ncpy(rb+1,R,10); rb[sv_len(rb)]=']'; rb[sv_len(rb)]='\0';
+        tput(COLS-sv_len(rb), br, rb, C_ACCENT);
+    }
 }
 static void clear_content(void) {
     display_rect(0, GLYPH_H, GW, GH-GLYPH_H*2, C_BG);
@@ -90,21 +94,23 @@ static void draw_unlock(void) {
     draw_status("AKIRAVAULT", 1);
     clear_content();
     int mr = ROWS/2-2;
-    tput(COLS/2-6, mr, "   ENTER PIN", C_FG);
+    tput((COLS-9)/2, mr, "ENTER PIN", C_FG);
+    int pin_col = (COLS - PIN_LEN*3) / 2;
     char dotrow[32]; int di=0;
-    dotrow[di++]=' '; dotrow[di++]=' '; dotrow[di++]=' '; dotrow[di++]=' ';
     for(int i=0;i<PIN_LEN;i++){
         dotrow[di++]='[';
-        dotrow[di++]=(i<pin_cur)?'\xFB':((i==pin_cur)?'0'+pin_digit_val:' ');
+        dotrow[di++]=(i<pin_cur)?'*':((i==pin_cur)?'0'+pin_digit_val:' ');
         dotrow[di++]=']';
     }
     dotrow[di]='\0';
-    tput(1, mr+2, dotrow, C_ACCENT);
-    if(g_hdr.wrong_attempts>0){
+    tput(pin_col, mr+2, dotrow, C_ACCENT);
+    if(pin_wrong){
+        trow_bg(mr+4, C_DANGER);
+        tput(COLS/2-5, mr+4, " WRONG PIN ", C_FG);
+    } else if(g_hdr.wrong_attempts>0){
         tput(2, mr+4, "attempts left: ", C_WARN);
         tput(17, mr+4, n2s(WIPE_AFTER - g_hdr.wrong_attempts), C_WARN);
     }
-    if(pin_wrong){ trow_bg(mr+4, C_DANGER); tput(COLS/2-5, mr+4, " WRONG PIN ", C_FG); }
     draw_action("CLR", "ENTER");
     display_flush();
 }
@@ -117,7 +123,7 @@ static void draw_home(void) {
     static const char *items[] = {
         "  ▶  WALLET    — HD accounts & keys",
         "  ▶  SETTINGS  — PIN, lock, reset",
-        "  ▶  ABOUT",
+        "  ▶  ABOUT     — version & info",
     };
     for(int i=0;i<3;i++){
         int row=3+i*2;
@@ -206,10 +212,7 @@ static void draw_sign_message(void) {
     tput(0,3,"  Account:",C_DIM); tput(10,3,acc->name,C_FG);
     tput(0,4,"  Addr: 0x742d....3a8F",C_DIM);
     tput(0,6,"  Hold [ENTER] 1.5s to approve",C_WARN);
-    if(sign_hold_frames>0){
-        int pct=sign_hold_frames*100/75;
-        draw_bar(2,8,pct,100,COLS-4,C_DANGER,C_BG);
-    }
+    draw_bar(2,8,sign_hold_frames*100/75,100,COLS-4,C_DANGER,C_BG);
     draw_action("REJECT","SIGN");
     display_flush();
 }
@@ -270,9 +273,10 @@ static void draw_settings(void) {
                             g_vault.autolock_s==60?"1min":"5min";
     for(int i=0;i<3;i++){
         int row=2+i*2;
-        if(i==list_sel){ trow_bg(row,C_ACCENT); tput(0,row,sitems[i],C_BG); }
-        else            { tput(0,row,sitems[i],C_FG); }
-        if(i==1) tput(COLS-6,row,lock_lbl,C_DIM);
+        int sel=(i==list_sel);
+        if(sel){ trow_bg(row,C_ACCENT); tput(0,row,sitems[i],C_BG); }
+        else   { tput(0,row,sitems[i],C_FG); }
+        if(i==1) tput(COLS-6,row,lock_lbl,sel?C_BG:C_DIM);
     }
     draw_action("BACK","ENTER");
     display_flush();

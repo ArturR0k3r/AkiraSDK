@@ -28,10 +28,14 @@ static void draw_action(const char *L, const char *R) {
     int br=ROWS-1;
     trow_bg(br, C_HEADER);
     display_hline(0, TY(br), GW, C_ACCENT);
-    char lb[14]="["; sv_ncpy(lb+1,L,10); lb[sv_len(lb)]=']'; lb[sv_len(lb)]='\0';
-    char rb[14]="["; sv_ncpy(rb+1,R,10); rb[sv_len(rb)]=']'; rb[sv_len(rb)]='\0';
-    tput(0, br, lb, C_FG);
-    tput(COLS-sv_len(rb), br, rb, C_ACCENT);
+    if(L[0]) {
+        char lb[14]="["; sv_ncpy(lb+1,L,10); lb[sv_len(lb)]=']'; lb[sv_len(lb)]='\0';
+        tput(0, br, lb, C_DIM);
+    }
+    if(R[0]) {
+        char rb[14]="["; sv_ncpy(rb+1,R,10); rb[sv_len(rb)]=']'; rb[sv_len(rb)]='\0';
+        tput(COLS-sv_len(rb), br, rb, C_ACCENT);
+    }
 }
 static void clear_content(void) { display_rect(0,GLYPH_H,GW,GH-GLYPH_H*2,C_BG); }
 
@@ -80,21 +84,23 @@ static void draw_unlock(void) {
     draw_status("AKIRAKEY", 1, 0);
     clear_content();
     int mr=ROWS/2-2;
-    tput(COLS/2-6,mr,"   ENTER PIN",C_FG);
+    tput((COLS-9)/2,mr,"ENTER PIN",C_FG);
+    int pin_col=(COLS-PIN_LEN*3)/2;
     char dotrow[32]; int di=0;
-    dotrow[di++]=' ';dotrow[di++]=' ';dotrow[di++]=' ';dotrow[di++]=' ';
     for(int i=0;i<PIN_LEN;i++){
         dotrow[di++]='[';
-        dotrow[di++]=(i<pin_cur)?'\xFB':((i==pin_cur)?'0'+pin_digit_val:' ');
+        dotrow[di++]=(i<pin_cur)?'*':((i==pin_cur)?'0'+pin_digit_val:' ');
         dotrow[di++]=']';
     }
     dotrow[di]='\0';
-    tput(1,mr+2,dotrow,C_ACCENT);
-    if(g_key_hdr.wrong_attempts>0){
+    tput(pin_col,mr+2,dotrow,C_ACCENT);
+    if(pin_wrong){
+        trow_bg(mr+4,C_DANGER);
+        tput(COLS/2-5,mr+4," WRONG PIN ",C_FG);
+    } else if(g_key_hdr.wrong_attempts>0){
         tput(2,mr+4,"attempts left: ",C_WARN);
         tput(17,mr+4,n2s(WIPE_AFTER-g_key_hdr.wrong_attempts),C_WARN);
     }
-    if(pin_wrong){ trow_bg(mr+4,C_DANGER); tput(COLS/2-5,mr+4," WRONG PIN ",C_FG); }
     draw_action("CLR","ENTER");
     display_flush();
 }
@@ -109,7 +115,7 @@ static void draw_home(void) {
         "  \x10  FIDO2 / PassKey  WebAuthn",
         "  \x10  Passwords        BLE type",
         "  \x10  SSH Agent        ed25519",
-        "  \x10  SETTINGS",
+        "  \x10  SETTINGS         PIN, BLE",
     };
     for(int i=0;i<5;i++){
         int row=2+i;
@@ -178,7 +184,7 @@ static void draw_totp_view(void) {
     if(g_key_vault.ble_enabled)
         tput(0,7,"  [A] Type via BLE keyboard",C_DIM);
     else
-        tput(0,7,"  Enable BLE in settings to type",C_DIM);
+        tput(0,7,"  Enable BLE in settings",C_WARN);
 
     draw_action("BACK","TYPE");
     display_flush();
@@ -220,7 +226,7 @@ static void draw_fido2_view(void) {
     tput(0,5,"  User: ",C_DIM); tput(8,5,cr->user_name,C_FG);
     tput(0,6,"  Signs:",C_DIM); tput(8,6,n2s(cr->sign_count),C_FG);
     tput(0,8,"  Hold [A] 2s to sign challenge",C_WARN);
-    if(hold_frames>0){ draw_bar(2,9,hold_frames,100,COLS-4,C_ACCENT,C_BG); }
+    draw_bar(2,9,hold_frames,100,COLS-4,C_ACCENT,C_BG);
     draw_action("BACK","SIGN");
     display_flush();
 }
@@ -305,8 +311,8 @@ static void draw_settings(void) {
         if(i==list_sel){trow_bg(row,C_ACCENT);tput(0,row,sitems[i],C_BG);}
         else tput(0,row,sitems[i],C_FG);
         if(i==1) tput(COLS-4,row,g_key_vault.ble_enabled?"ON ":"OFF",
-                      g_key_vault.ble_enabled?C_ACCENT:C_DIM);
-        if(i==2) tput(COLS-6,row,lock_lbl,C_DIM);
+                      (i==list_sel)?C_BG:(g_key_vault.ble_enabled?C_ACCENT:C_DIM));
+        if(i==2) tput(COLS-6,row,lock_lbl,(i==list_sel)?C_BG:C_DIM);
     }
     draw_action("BACK","ENTER");
     display_flush();

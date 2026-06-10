@@ -200,6 +200,19 @@ static void draw_chat(void) {
     if (g_msg_count > 0 && g_scroll < g_msg_count - 1)
         display_text(GW - 28, FTR_Y() - 12, "v dn", WHT);
 
+    /* Listening overlay — centered box in lower content area */
+    if (g_rx_active) {
+        const char *label  = "< Listening... >";
+        int         llen   = slen(label);
+        int         bw     = llen * 7 + 12;
+        int         bh     = 16;
+        int         bx     = (GW - bw) / 2;
+        int         by     = FTR_Y() - bh - 6;
+        display_rect(bx,     by,     bw,     bh,     WHT);
+        display_rect(bx + 1, by + 1, bw - 2, bh - 2, BLK);
+        display_text(bx + 6, by + 3, label, WHT);
+    }
+
     display_flush();
 }
 

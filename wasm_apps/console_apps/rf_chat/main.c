@@ -44,7 +44,7 @@ static int  s_tmr        = -1;
 #define BTN_COUNT 8
 
 /* GPIO pins matching hardware (active-low, external pull-up) */
-static const int BTN_PINS[BTN_COUNT] = { 4, 5, 6, 7, 15, 16, 17, 40 };
+static const int BTN_PINS[BTN_COUNT] = { 4, 5, 6, 7, 15, 16, 17, 41 };
 
 /* ── Button debounce state ──────────────────────────────────────────────── */
 #define DB_FRAMES 3   /* 3 × 20 ms = 60 ms debounce */

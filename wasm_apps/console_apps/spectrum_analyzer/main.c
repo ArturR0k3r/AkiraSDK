@@ -62,7 +62,7 @@ static int32_t GW = 0, GH = 0;
 #define BTN_Y      7
 #define BTN_COUNT  8
 
-static const int BTN_PINS[BTN_COUNT] = { 4, 5, 6, 7, 15, 16, 17, 40 };
+static const int BTN_PINS[BTN_COUNT] = { 4, 5, 6, 7, 15, 16, 17, 41 };
 
 #define DB_FRAMES 3
 

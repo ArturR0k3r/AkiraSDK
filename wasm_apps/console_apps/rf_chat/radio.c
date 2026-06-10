@@ -117,37 +117,54 @@ int radio_send(const char *text, uint8_t len) {
     return rc;
 }
 
+/* Log first bytes as hex to diagnose framing */
+static void log_hex(const char *prefix, const uint8_t *data, int len) {
+    char msg[80];
+    int i = 0;
+    for (int k = 0; prefix[k] && i < 32; k++) msg[i++] = prefix[k];
+    int show = len < 8 ? len : 8;
+    for (int k = 0; k < show; k++) {
+        uint8_t b = data[k];
+        msg[i++] = ' ';
+        msg[i++] = "0123456789ABCDEF"[b >> 4];
+        msg[i++] = "0123456789ABCDEF"[b & 0xF];
+    }
+    msg[i] = '\0';
+    printf_native(msg);
+}
+
 uint8_t radio_poll(rf_pkt_t *out) {
-    uint8_t buf[3 + CHAT_MSG_MAX];
+    uint8_t buf[1 + 3 + CHAT_MSG_MAX]; /* +1 for possible firmware prefix byte */
     int n = rf_receive((uint32_t)(uint8_t *)buf, (uint32_t)sizeof(buf), 0);
     if (n < 0) {
-        /* -EAGAIN is normal (no data), anything else log it */
-        if (n != -11) log_rc("[RF RX] rf_receive rc", n);
+        if (n != -11) log_rc("[RF RX] rc", n);
         return 0;
     }
     if (n == 0) return 0;
 
-    log_buf("[RF RX] raw ", buf, n, "");
+    log_hex("[RF RX] hex", buf, n);
 
-    if (n < 3) {
-        log_str("[RF RX] drop: too short");
-        return 0;
-    }
-    if (buf[0] != CHAT_MAGIC_0 || buf[1] != CHAT_MAGIC_1) {
+    /* Find magic — firmware may prepend 1 header byte */
+    int off = 0;
+    if (n >= 4 && buf[0] != CHAT_MAGIC_0 && buf[1] == CHAT_MAGIC_0 && buf[2] == CHAT_MAGIC_1)
+        off = 1;
+
+    if (n - off < 3) { log_str("[RF RX] drop: too short"); return 0; }
+    if (buf[off] != CHAT_MAGIC_0 || buf[off+1] != CHAT_MAGIC_1) {
         log_str("[RF RX] drop: bad magic");
         return 0;
     }
 
-    uint8_t txt_len = buf[2];
-    if (txt_len > CHAT_MSG_MAX || (int)(3 + txt_len) > n) {
+    uint8_t txt_len = buf[off + 2];
+    if (txt_len > CHAT_MSG_MAX || (int)(off + 3 + txt_len) > n) {
         log_str("[RF RX] drop: bad length");
         return 0;
     }
 
-    out->magic[0] = buf[0];
-    out->magic[1] = buf[1];
+    out->magic[0] = CHAT_MAGIC_0;
+    out->magic[1] = CHAT_MAGIC_1;
     out->len      = txt_len;
-    for (uint8_t i = 0; i < txt_len; i++) out->text[i] = (char)buf[3 + i];
+    for (uint8_t i = 0; i < txt_len; i++) out->text[i] = (char)buf[off + 3 + i];
 
     log_buf("[RF RX] ok ", (const uint8_t *)out->text, txt_len, "");
     return 1;

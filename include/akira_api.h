@@ -1853,6 +1853,59 @@ extern int settings_set(const char *key, const char *value);
  */
 extern int settings_delete(const char *key);
 
+/* =========================================================================
+ * Edge AI Inference — AkiraClaw (requires "ai.infer" capability)
+ *
+ * Three-function API wrapping TFLite Micro on the host side.  The model
+ * must be a quantized TFLite flatbuffer; pack it with:
+ *   akira-cli pack app.wasm manifest.json --model model.tflite
+ *
+ * Error codes (negative return values):
+ *   AIINFER_ERR_NOMEM    (-1)  — tensor arena or model copy OOM
+ *   AIINFER_ERR_INVALID  (-2)  — bad pointer / schema mismatch / Invoke failed
+ *   AIINFER_ERR_SHAPE    (-3)  — input/output size mismatch
+ *   AIINFER_ERR_NOSLOT   (-4)  — all inference slots occupied
+ * ========================================================================= */
+
+/**
+ * @brief Load a TFLite Micro model into an inference slot.
+ *
+ * @param model      Pointer to model bytes in WASM memory.
+ * @param model_size Size of the model in bytes.
+ * @return Non-negative slot handle on success, negative error code on failure.
+ *
+ * Required manifest capability: "ai.infer"
+ */
+extern int aiinfer_load(const void *model, int model_size);
+
+/**
+ * @brief Run inference on a loaded model.
+ *
+ * Copies @p input into the model's input tensor, invokes the interpreter,
+ * and copies the output tensor back into @p output.
+ *
+ * @param handle      Slot handle returned by aiinfer_load.
+ * @param input       Pointer to input data; size must match the model's input tensor.
+ * @param input_size  Size of @p input in bytes.
+ * @param output      Pointer to output buffer; must be >= output tensor size.
+ * @param output_size Size of @p output buffer in bytes.
+ * @return 0 on success, negative error code on failure.
+ *
+ * Required manifest capability: "ai.infer"
+ */
+extern int aiinfer_run(int handle,
+                       const void *input, int input_size,
+                       void *output, int output_size);
+
+/**
+ * @brief Release an inference slot.
+ *
+ * @param handle Slot handle to release.
+ *
+ * Required manifest capability: "ai.infer"
+ */
+extern void aiinfer_unload(int handle);
+
 
 #ifdef __cplusplus
 }

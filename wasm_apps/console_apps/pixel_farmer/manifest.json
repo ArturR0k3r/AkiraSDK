@@ -1,12 +1,11 @@
 {
   "name": "pixel_farmer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "capabilities": [
     "display.write",
     "input.read",
     "gpio.read",
-    "app.switch",
-    "timer"
+    "app.switch"
   ],
   "memory_quota": 131072,
   "min_akiraos_version": "1.0.0"

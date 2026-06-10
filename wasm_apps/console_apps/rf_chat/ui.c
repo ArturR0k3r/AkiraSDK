@@ -7,9 +7,13 @@
 /* ── Display WASM import declarations ──────────────────────────────────── */
 extern int display_clear(uint32_t color);
 extern int display_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color);
+extern int display_rect_outline(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color);
 extern int display_text(int32_t x, int32_t y, const char *text, uint32_t color);
 extern int display_text_large(int32_t x, int32_t y, const char *text, uint32_t color);
 extern int display_hline(int32_t x, int32_t y, int32_t len, uint32_t color);
+extern int display_vline(int32_t x, int32_t y, int32_t len, uint32_t color);
+extern int display_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t color);
+extern int display_pixel(int32_t x, int32_t y, uint32_t color);
 extern int display_flush(void);
 
 /* ── Monochrome palette ─────────────────────────────────────────────────── */
@@ -105,17 +109,11 @@ static void draw_header(void) {
     fmt_freq(fbuf, g_freq_hz);
     fmt_rssi(rbuf, g_rssi);
 
-    /* "RF Chat" or "[RX]" when listening */
-    if (g_rx_active) {
-        display_rect(0, 0, GW, HDR_H, BLK);
-        display_text(4, 5, "[RX] Listening...", WHT);
-    } else {
-        display_text(4, 5, "RF Chat", BLK);
-        int flen = slen(fbuf);
-        display_text((GW - flen * 7) / 2, 5, fbuf, BLK);
-        int rlen = slen(rbuf);
-        display_text(GW - rlen * 7 - 4, 5, rbuf, BLK);
-    }
+    display_text(4, 5, "RF Chat", BLK);
+    int flen = slen(fbuf);
+    display_text((GW - flen * 7) / 2, 5, fbuf, BLK);
+    int rlen = slen(rbuf);
+    display_text(GW - rlen * 7 - 4, 5, rbuf, BLK);
 }
 
 static void draw_footer(const char *hint) {
@@ -154,8 +152,7 @@ static int msg_height(const chat_msg_t *m) {
 static void draw_chat(void) {
     display_clear(BLK);
     draw_header();
-    draw_footer(g_rx_active ? "[Y] Stop RX  [A] Write  [X] Options"
-                            : "[Y] Listen  [A] Write  [X] Options");
+    draw_footer("[A] Write  [X] Options");
 
     if (!g_msg_count) {
         int cx = (GW - 15 * 7) / 2;
@@ -172,9 +169,10 @@ static void draw_chat(void) {
         const chat_msg_t *m = &g_msgs[i];
         if (!m->len) continue;
 
-        int bw = BUBBLE_MAX_W();
-        int bh = msg_height(m);
-        y -= bh;
+        int bw         = BUBBLE_MAX_W();
+        int bh         = msg_height(m);
+        int has_sender = (!m->sent && m->sender[0]) ? 1 : 0;
+        y -= bh + (has_sender ? LINE_H : 0);
         if (y < CONTENT_Y()) break;
 
         if (m->sent) {
@@ -184,11 +182,14 @@ static void draw_chat(void) {
             draw_text_block(bx + BUBBLE_PAD_X, y + BUBBLE_PAD_Y,
                             m->text, m->len, BLK, 0);
         } else {
-            /* Received: white border, black fill, white text */
             int bx = 6;
-            display_rect(bx, y, bw, bh, WHT);
-            display_rect(bx + 1, y + 1, bw - 2, bh - 2, BLK);
-            draw_text_block(bx + BUBBLE_PAD_X, y + BUBBLE_PAD_Y,
+            if (has_sender)
+                display_text(bx + BUBBLE_PAD_X, y, m->sender, WHT);
+            int by = y + (has_sender ? LINE_H : 0);
+            /* Received: white border, black fill, white text */
+            display_rect(bx, by, bw, bh, WHT);
+            display_rect(bx + 1, by + 1, bw - 2, bh - 2, BLK);
+            draw_text_block(bx + BUBBLE_PAD_X, by + BUBBLE_PAD_Y,
                             m->text, m->len, WHT, 0);
         }
 
@@ -199,19 +200,6 @@ static void draw_chat(void) {
         display_text(GW - 28, CONTENT_Y() + 2, "^ up", WHT);
     if (g_msg_count > 0 && g_scroll < g_msg_count - 1)
         display_text(GW - 28, FTR_Y() - 12, "v dn", WHT);
-
-    /* Listening overlay — centered box in lower content area */
-    if (g_rx_active) {
-        const char *label  = "< Listening... >";
-        int         llen   = slen(label);
-        int         bw     = llen * 7 + 12;
-        int         bh     = 16;
-        int         bx     = (GW - bw) / 2;
-        int         by     = FTR_Y() - bh - 6;
-        display_rect(bx,     by,     bw,     bh,     WHT);
-        display_rect(bx + 1, by + 1, bw - 2, bh - 2, BLK);
-        display_text(bx + 6, by + 3, label, WHT);
-    }
 
     display_flush();
 }
@@ -299,36 +287,184 @@ static void draw_compose(void) {
 static void draw_options(void) {
     display_clear(BLK);
     draw_header();
-    draw_footer("[A] Save  [B] Cancel");
+    draw_footer("^v:nav  L/R:adj  A:edit  B:save  X:back");
 
-    int y0 = CONTENT_Y() + 10;
+    int y = CONTENT_Y() + 4;
+    display_text_large(8, y, "Settings", WHT);
+    display_hline(0, y + 16, GW, WHT);
+    y += 22;
 
-    display_text_large(8, y0, "Options", WHT);
-    display_hline(0, y0 + 22, GW, WHT);
+    char freq_buf[16];
+    fmt_freq(freq_buf, g_opt_freq);
+    const char *chip_name = (g_opt_chip == RF_CHIP_CC1121) ? "CC1121" : "LR2021";
 
-    display_text(8, y0 + 32, "Frequency:", WHT);
-    char fbuf[16];
-    fmt_freq(fbuf, g_opt_freq);
-    display_text_large(8, y0 + 46, fbuf, WHT);
+    const char *labels[3] = { "Frequency", "Radio Chip", "Name" };
+    const char *values[3] = { freq_buf, chip_name, g_my_name };
 
-    display_text(8, y0 + 72, "UP/DOWN : +/- 100 kHz", WHT);
-    display_text(8, y0 + 86, "L/R     : +/- 1 MHz",   WHT);
+    for (int r = 0; r < 3; r++) {
+        int ry  = y + r * 34;
+        int sel = (r == g_opt_cursor);
+        if (sel) {
+            display_rect(0, ry, GW, 30, WHT);
+            display_text(6,  ry + 3,  labels[r], BLK);
+            display_text_large(10, ry + 14, values[r], BLK);
+            display_text(GW - 28, ry + 10, r < 2 ? "< >" : "[A]", BLK);
+        } else {
+            display_text(10, ry + 3,  labels[r], WHT);
+            display_text_large(14, ry + 14, values[r], WHT);
+        }
+    }
 
-    display_hline(0, y0 + 104, GW, WHT);
-
+    int info_y = y + 3 * 34 + 6;
+    display_hline(0, info_y, GW, WHT);
     char rbuf[10];
     fmt_rssi(rbuf, g_rssi);
-    display_text(8, y0 + 114, "RSSI:", WHT);
-    display_text(50, y0 + 114, rbuf, WHT);
+    display_text(8, info_y + 6, "RSSI:", WHT);
+    display_text(50, info_y + 6, rbuf, WHT);
 
+    display_flush();
+}
+
+/* ── Radio selection icons ──────────────────────────────────────────────── */
+static void draw_chip_icon(int cx, int cy, uint32_t fg, uint32_t bg) {
+    /* IC body */
+    int bw = 36, bh = 28;
+    int bx = cx - bw / 2, by = cy - bh / 2;
+    display_rect(bx, by, bw, bh, fg);
+    display_rect(bx + 1, by + 1, bw - 2, bh - 2, bg);
+    /* 4 pins each side */
+    for (int i = 0; i < 4; i++) {
+        int py = by + 4 + i * 6;
+        display_hline(bx - 7, py, 7, fg);
+        display_hline(bx + bw, py, 7, fg);
+    }
+    /* pin dots */
+    for (int i = 0; i < 4; i++) {
+        display_pixel(bx - 8, by + 4 + i * 6, fg);
+        display_pixel(bx + bw + 8, by + 4 + i * 6, fg);
+    }
+}
+
+static void draw_antenna_icon(int cx, int cy, uint32_t fg) {
+    /* Vertical pole */
+    display_vline(cx, cy - 22, 32, fg);
+    /* Base */
+    display_hline(cx - 8, cy + 10, 17, fg);
+    display_pixel(cx - 9, cy + 11, fg);
+    display_pixel(cx + 9, cy + 11, fg);
+    /* Signal waves: 3 pairs of diverging lines */
+    display_line(cx, cy - 18, cx - 6,  cy - 6,  fg);
+    display_line(cx, cy - 18, cx + 6,  cy - 6,  fg);
+    display_line(cx, cy - 18, cx - 11, cy + 2,  fg);
+    display_line(cx, cy - 18, cx + 11, cy + 2,  fg);
+    display_line(cx, cy - 18, cx - 16, cy + 8,  fg);
+    display_line(cx, cy - 18, cx + 16, cy + 8,  fg);
+    /* Dot at tip */
+    display_rect(cx - 1, cy - 24, 3, 3, fg);
+}
+
+/* ── Radio selection screen ─────────────────────────────────────────────── */
+static void draw_radio_sel(void) {
+    display_clear(WHT);   /* white background — lighter look */
+
+    /* Header: black bar */
+    display_rect(0, 0, GW, HDR_H, BLK);
+    int tlen = slen("SELECT RADIO") * 7;
+    display_text((GW - tlen) / 2, 3, "SELECT RADIO", WHT);
+
+    /* Vertical divider */
+    int mid = GW / 2;
+    display_vline(mid, HDR_H, GH - HDR_H - FTR_H, BLK);
+
+    /* Footer: black bar */
+    display_rect(0, FTR_Y(), GW, FTR_H, BLK);
+    display_text(4, FTR_Y() + 3, "L/R: select    A: confirm", WHT);
+
+    int card_y = HDR_H + 6;
+    int card_h = GH - HDR_H - FTR_H - 12;
+    int icon_y = card_y + card_h / 2 - 24;
+
+    /* ── CC1121 card (left) ── */
+    int sel0 = (g_radio_cursor == 0);
+    {
+        int bx = 4, bw = mid - 8;
+        if (sel0) {
+            display_rect(bx, card_y, bw, card_h, BLK);
+        } else {
+            /* white fill already from display_clear(WHT), just draw border */
+            display_rect_outline(bx, card_y, bw, card_h, BLK);
+        }
+        uint32_t fg = sel0 ? WHT : BLK;
+        uint32_t bg = sel0 ? BLK : WHT;
+        int ccx = mid / 2;
+        draw_chip_icon(ccx, icon_y, fg, bg);
+        int nl = slen("CC1121") * 7;
+        display_text(ccx - nl / 2, icon_y + 26, "CC1121", fg);
+        int fl = slen("Sub-GHz FSK") * 7;
+        display_text(ccx - fl / 2, icon_y + 38, "Sub-GHz FSK", fg);
+        if (sel0) {
+            int sl = slen("[ SELECTED ]") * 7;
+            display_text(ccx - sl / 2, card_y + card_h - 16, "[ SELECTED ]", WHT);
+        }
+    }
+
+    /* ── LR2021 card (right) ── */
+    int sel1 = (g_radio_cursor == 1);
+    {
+        int bx = mid + 4, bw = mid - 8;
+        if (sel1) {
+            display_rect(bx, card_y, bw, card_h, BLK);
+        } else {
+            display_rect_outline(bx, card_y, bw, card_h, BLK);
+        }
+        uint32_t fg = sel1 ? WHT : BLK;
+        int lrx = mid + mid / 2;
+        draw_antenna_icon(lrx, icon_y, fg);
+        int nl = slen("LR2021") * 7;
+        display_text(lrx - nl / 2, icon_y + 26, "LR2021", fg);
+        int fl = slen("LoRa / FSK") * 7;
+        display_text(lrx - fl / 2, icon_y + 38, "LoRa / FSK", fg);
+        if (sel1) {
+            int sl = slen("[ SELECTED ]") * 7;
+            display_text(lrx - sl / 2, card_y + card_h - 16, "[ SELECTED ]", WHT);
+        }
+    }
+
+    display_flush();
+}
+
+/* ── Name edit screen ───────────────────────────────────────────────────── */
+static void draw_name_edit(void) {
+    display_clear(BLK);
+    draw_header();
+    draw_footer("[A] Select  [B] Del/Back  [Y] Save");
+
+    /* Label */
+    display_text(8, CONTENT_Y() + 4, "Edit name (max 8):", WHT);
+
+    /* Preview box */
+    int box_h = 28;
+    display_rect(4, CONTENT_Y() + 18, GW - 8, box_h, WHT);
+    display_rect(5, CONTENT_Y() + 19, GW - 10, box_h - 2, BLK);
+
+    /* Name text + cursor */
+    char prev[MAX_NAME_LEN + 2];
+    for (int i = 0; i < g_compose_len; i++) prev[i] = g_compose[i];
+    prev[g_compose_len]     = '_';
+    prev[g_compose_len + 1] = '\0';
+    display_text(8, CONTENT_Y() + 26, prev, WHT);
+
+    draw_keyboard();
     display_flush();
 }
 
 /* ── Entry point ────────────────────────────────────────────────────────── */
 void ui_draw(void) {
     switch (g_state) {
-    case STATE_CHAT:    draw_chat();    break;
-    case STATE_COMPOSE: draw_compose(); break;
-    case STATE_OPTIONS: draw_options(); break;
+    case STATE_RADIO_SEL: draw_radio_sel();  break;
+    case STATE_CHAT:      draw_chat();       break;
+    case STATE_COMPOSE:   draw_compose();    break;
+    case STATE_OPTIONS:   draw_options();    break;
+    case STATE_NAME_EDIT: draw_name_edit();  break;
     }
 }

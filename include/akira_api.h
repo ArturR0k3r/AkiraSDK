@@ -1130,7 +1130,7 @@ extern "C"
     extern int rf_send(uint32_t payload_ptr, uint32_t len);
 
     /**
-     * @brief Receive data from RF transceiver
+     * @brief Receive data from RF transceiver (blocking)
      *
      * @param buffer_ptr Pointer to receive buffer
      * @param max_len Maximum number of bytes to receive
@@ -1138,6 +1138,31 @@ extern "C"
      * @return Number of bytes received on success, negative error code on failure
      */
     extern int rf_receive(uint32_t buffer_ptr, uint32_t max_len, uint32_t timeout_ms);
+
+    /**
+     * @brief Select the active RF chip
+     *
+     * Hardware-inits the chip on first call, then just switches the active
+     * pointer. Each chip preserves its own frequency/power across switches.
+     *
+     * @param chip  1=NRF24L01, 2=CC1121, 3=LR2021
+     * @return 0 on success, negative error code on failure
+     */
+    extern int rf_select(int chip);
+
+    /**
+     * @brief Pop one packet from the background RX queue (non-blocking receive)
+     *
+     * The RX daemon continuously polls the active chip and enqueues arriving
+     * packets. Callers pop packets without blocking the RF chip.
+     *
+     * @param buffer_ptr  Pointer to receive buffer
+     * @param max_len     Maximum bytes to copy
+     * @param timeout_ms  0 = non-blocking; >0 = wait up to this many ms
+     * @return Number of bytes copied on success, -ENOMSG if queue empty,
+     *         negative error code on failure
+     */
+    extern int rf_recv_pop(uint32_t buffer_ptr, uint32_t max_len, uint32_t timeout_ms);
 
     /*
      * =============================================================================

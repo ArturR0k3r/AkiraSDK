@@ -26,11 +26,17 @@ int         g_kb_col = 0;
 
 uint32_t    g_freq_hz   = FREQ_DEFAULT;
 uint32_t    g_opt_freq  = FREQ_DEFAULT;
-app_state_t g_state     = STATE_CHAT;
-int8_t      g_rssi      = 0;
-int         g_rx_active  = 0;
-int         g_last_tx_ms = -1000;
-static int  s_tmr        = -1;
+int         g_opt_chip  = RF_CHIP_LR2021;
+app_state_t g_state        = STATE_RADIO_SEL;
+int8_t      g_rssi         = 0;
+int         g_rf_chip      = RF_CHIP_CC1121;
+int         g_radio_cursor = 0;
+int         g_opt_cursor   = 0;
+int         g_last_tx_ms   = -1000;
+char        g_my_name[MAX_NAME_LEN + 1] = "User";
+int         g_my_name_len  = 4;
+static int  s_tmr          = -1;
+static int  g_radio_inited = 0;
 
 /* ── Button indices ─────────────────────────────────────────────────────── */
 #define BTN_UP    0
@@ -73,6 +79,7 @@ static void btns_poll(void) {
 /* Edge detectors */
 static int rose(int i)  { return  btn_st[i] && !btn_prev[i]; }
 static int held(int i)  { return  btn_st[i]; }
+static int in_kb_state(void) { return g_state == STATE_COMPOSE || g_state == STATE_NAME_EDIT; }
 
 /* ── QWERTY row data ────────────────────────────────────────────────────── */
 static const char *KB_CHARS[]   = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
@@ -87,6 +94,22 @@ static void smemcpy(void *dst, const void *src, int n) {
 
 /* ── Settings persistence ───────────────────────────────────────────────── */
 #define SETTINGS_FREQ_KEY "rf_chat/freq"
+#define SETTINGS_NAME_KEY "rf_chat/name"
+
+static void name_save(void) {
+    settings_set(SETTINGS_NAME_KEY, g_my_name);
+}
+
+static void name_load(void) {
+    char buf[MAX_NAME_LEN + 2];
+    if (settings_get(SETTINGS_NAME_KEY, buf, sizeof(buf)) != 0) return;
+    int len = 0;
+    while (buf[len] && len < MAX_NAME_LEN) len++;
+    if (len == 0) return;
+    smemcpy(g_my_name, buf, len);
+    g_my_name[len] = '\0';
+    g_my_name_len  = len;
+}
 
 static void freq_save(void) {
     char buf[12];
@@ -115,7 +138,8 @@ static uint32_t freq_load(void) {
 }
 
 /* ── Message management ─────────────────────────────────────────────────── */
-void msg_add(const char *text, uint8_t len, uint8_t sent, int8_t rssi) {
+void msg_add(const char *text, uint8_t len, uint8_t sent, int8_t rssi,
+             const char *sender, uint8_t sender_len) {
     if (!len || len > MAX_MSG_LEN) return;
 
     chat_msg_t *m;
@@ -131,14 +155,24 @@ void msg_add(const char *text, uint8_t len, uint8_t sent, int8_t rssi) {
     m->len  = len;
     m->sent = sent;
     m->rssi = rssi;
-    g_scroll = 0; /* snap to newest */
+
+    if (sender && sender_len > 0) {
+        uint8_t nl = sender_len > MAX_NAME_LEN ? MAX_NAME_LEN : sender_len;
+        smemcpy(m->sender, sender, nl);
+        m->sender[nl] = '\0';
+    } else {
+        m->sender[0] = '\0';
+    }
+
+    g_scroll = 0;
 }
 
 void msg_send(void) {
     if (!g_compose_len) return;
-    radio_send(g_compose, (uint8_t)g_compose_len);
+    radio_send(g_compose, (uint8_t)g_compose_len,
+               g_my_name, (uint8_t)g_my_name_len);
     g_last_tx_ms = (s_tmr >= 0) ? timer_elapsed(s_tmr) : 0;
-    msg_add(g_compose, (uint8_t)g_compose_len, 1, 0);
+    msg_add(g_compose, (uint8_t)g_compose_len, 1, 0, g_my_name, (uint8_t)g_my_name_len);
     g_compose[0]  = '\0';
     g_compose_len = 0;
     g_state       = STATE_CHAT;
@@ -171,15 +205,17 @@ static void kb_move(int dir) { /* 0=up 1=down 2=left 3=right */
 }
 
 static void kb_select(void) {
+    int name_mode = (g_state == STATE_NAME_EDIT);
+    int max_len   = name_mode ? MAX_NAME_LEN : MAX_MSG_LEN;
     if (g_kb_row < 3) {
-        if (g_compose_len < MAX_MSG_LEN) {
+        if (g_compose_len < max_len) {
             g_compose[g_compose_len++] = KB_CHARS[g_kb_row][g_kb_col];
             g_compose[g_compose_len]   = '\0';
         }
     } else {
         switch (g_kb_col) {
         case 0: /* SPC */
-            if (g_compose_len < MAX_MSG_LEN) {
+            if (g_compose_len < max_len) {
                 g_compose[g_compose_len++] = ' ';
                 g_compose[g_compose_len]   = '\0';
             }
@@ -187,8 +223,20 @@ static void kb_select(void) {
         case 1: /* DEL */
             if (g_compose_len > 0) g_compose[--g_compose_len] = '\0';
             break;
-        case 2: /* SEND */
-            msg_send();
+        case 2: /* SEND / SAVE */
+            if (name_mode) {
+                int nl = g_compose_len > MAX_NAME_LEN ? MAX_NAME_LEN : g_compose_len;
+                if (nl > 0) {
+                    for (int i = 0; i < nl; i++) g_my_name[i] = g_compose[i];
+                    g_my_name[nl] = '\0';
+                    g_my_name_len = nl;
+                    name_save();
+                }
+                g_compose[0] = '\0'; g_compose_len = 0;
+                g_state = STATE_OPTIONS;
+            } else {
+                msg_send();
+            }
             break;
         }
     }
@@ -211,21 +259,16 @@ int main(void) {
      * this WASM app (all other apps do this as their very first call). */
     display_get_size(&GW, &GH);
 
-    /* Splash — show before any radio init so the user sees something */
-    display_clear(COLOR_BLACK);
-    display_text_large(60, 100, "RF Chat", COLOR_CYAN);
-    display_text(80, 124, "Initializing radio...", COLOR_WHITE);
-    display_flush();
-    delay(800000); /* 0.8 s */
-
     s_tmr = timer_create();
     if (s_tmr >= 0) timer_start(s_tmr);
 
     g_freq_hz  = freq_load();
     g_opt_freq = g_freq_hz;
+    g_opt_chip = g_rf_chip;
+    name_load();
 
-    radio_init(g_freq_hz);
     btns_init();
+    /* radio_init deferred until user confirms chip on STATE_RADIO_SEL screen */
 
     int dirty        = 1;
     int last_draw_ms = 0;
@@ -241,45 +284,57 @@ int main(void) {
             dirty = 1;
 
         if (rose(BTN_UP)) {
-            if (g_state == STATE_COMPOSE)         kb_move(0);
-            else if (g_state == STATE_CHAT)        { if (g_scroll < g_msg_count - 1) g_scroll++; }
-            else if (g_state == STATE_OPTIONS)     { if (g_opt_freq + FREQ_STEP_SM <= FREQ_MAX)  g_opt_freq += FREQ_STEP_SM; }
+            if      (in_kb_state())    kb_move(0);
+            else if (g_state == STATE_CHAT)       { if (g_scroll < g_msg_count - 1) g_scroll++; }
+            else if (g_state == STATE_OPTIONS)    { if (g_opt_cursor > 0) g_opt_cursor--; }
         }
         if (rose(BTN_DOWN)) {
-            if (g_state == STATE_COMPOSE)         kb_move(1);
-            else if (g_state == STATE_CHAT)        { if (g_scroll > 0) g_scroll--; }
-            else if (g_state == STATE_OPTIONS)     { if (g_opt_freq >= FREQ_MIN + FREQ_STEP_SM)  g_opt_freq -= FREQ_STEP_SM; }
+            if      (in_kb_state())    kb_move(1);
+            else if (g_state == STATE_CHAT)       { if (g_scroll > 0) g_scroll--; }
+            else if (g_state == STATE_OPTIONS)    { if (g_opt_cursor < 2) g_opt_cursor++; }
         }
         if (rose(BTN_LEFT)) {
-            if (g_state == STATE_COMPOSE)         kb_move(2);
-            else if (g_state == STATE_OPTIONS)     { if (g_opt_freq >= FREQ_MIN + FREQ_STEP_LG)  g_opt_freq -= FREQ_STEP_LG; }
+            if      (in_kb_state())    kb_move(2);
+            else if (g_state == STATE_OPTIONS) {
+                if      (g_opt_cursor == 0 && g_opt_freq >= FREQ_MIN + FREQ_STEP_SM) g_opt_freq -= FREQ_STEP_SM;
+                else if (g_opt_cursor == 1) g_opt_chip = (g_opt_chip == RF_CHIP_CC1121) ? RF_CHIP_LR2021 : RF_CHIP_CC1121;
+            }
+            else if (g_state == STATE_RADIO_SEL)  { g_radio_cursor = 0; dirty = 1; }
         }
         if (rose(BTN_RIGHT)) {
-            if (g_state == STATE_COMPOSE)         kb_move(3);
-            else if (g_state == STATE_OPTIONS)     { if (g_opt_freq + FREQ_STEP_LG <= FREQ_MAX)  g_opt_freq += FREQ_STEP_LG; }
+            if      (in_kb_state())    kb_move(3);
+            else if (g_state == STATE_OPTIONS) {
+                if      (g_opt_cursor == 0 && g_opt_freq + FREQ_STEP_SM <= FREQ_MAX) g_opt_freq += FREQ_STEP_SM;
+                else if (g_opt_cursor == 1) g_opt_chip = (g_opt_chip == RF_CHIP_CC1121) ? RF_CHIP_LR2021 : RF_CHIP_CC1121;
+            }
+            else if (g_state == STATE_RADIO_SEL)  { g_radio_cursor = 1; dirty = 1; }
         }
 
         /* ─ D-pad: hold DAS repeat ──────────────────────────────────────── */
         if (held(BTN_UP) && dpad_should_fire(BTN_UP)) {
-            if (g_state == STATE_COMPOSE)         kb_move(0);
+            if (in_kb_state())         kb_move(0);
             else if (g_state == STATE_CHAT)        { if (g_scroll < g_msg_count - 1) g_scroll++; }
             else if (g_state == STATE_OPTIONS)     { if (g_opt_freq + FREQ_STEP_SM <= FREQ_MAX)  g_opt_freq += FREQ_STEP_SM; }
             dirty = 1;
         }
         if (held(BTN_DOWN) && dpad_should_fire(BTN_DOWN)) {
-            if (g_state == STATE_COMPOSE)         kb_move(1);
+            if (in_kb_state())         kb_move(1);
             else if (g_state == STATE_CHAT)        { if (g_scroll > 0) g_scroll--; }
             else if (g_state == STATE_OPTIONS)     { if (g_opt_freq >= FREQ_MIN + FREQ_STEP_SM)  g_opt_freq -= FREQ_STEP_SM; }
             dirty = 1;
         }
         if (held(BTN_LEFT) && dpad_should_fire(BTN_LEFT)) {
-            if (g_state == STATE_COMPOSE)         kb_move(2);
-            else if (g_state == STATE_OPTIONS)     { if (g_opt_freq >= FREQ_MIN + FREQ_STEP_LG)  g_opt_freq -= FREQ_STEP_LG; }
+            if (in_kb_state())         kb_move(2);
+            else if (g_state == STATE_OPTIONS && g_opt_cursor == 0) {
+                if (g_opt_freq >= FREQ_MIN + FREQ_STEP_SM) g_opt_freq -= FREQ_STEP_SM;
+            }
             dirty = 1;
         }
         if (held(BTN_RIGHT) && dpad_should_fire(BTN_RIGHT)) {
-            if (g_state == STATE_COMPOSE)         kb_move(3);
-            else if (g_state == STATE_OPTIONS)     { if (g_opt_freq + FREQ_STEP_LG <= FREQ_MAX)  g_opt_freq += FREQ_STEP_LG; }
+            if (in_kb_state())         kb_move(3);
+            else if (g_state == STATE_OPTIONS && g_opt_cursor == 0) {
+                if (g_opt_freq + FREQ_STEP_SM <= FREQ_MAX) g_opt_freq += FREQ_STEP_SM;
+            }
             dirty = 1;
         }
 
@@ -287,18 +342,32 @@ int main(void) {
         if (rose(BTN_A)) {
             dirty = 1;
             switch (g_state) {
+            case STATE_RADIO_SEL:
+                /* Confirm chip selection, init radio, enter chat */
+                g_rf_chip = (g_radio_cursor == 0) ? RF_CHIP_CC1121 : RF_CHIP_LR2021;
+                radio_select(g_rf_chip, g_freq_hz);
+                g_radio_inited = 1;
+                g_state = STATE_CHAT;
+                break;
             case STATE_CHAT:
-                g_rx_active = 0;
                 g_state = STATE_COMPOSE;
                 break;
             case STATE_COMPOSE:
                 kb_select();
                 break;
             case STATE_OPTIONS:
-                g_freq_hz = g_opt_freq;
-                radio_set_freq(g_freq_hz);
-                freq_save();
-                g_state = STATE_CHAT;
+                if (g_opt_cursor == 1) {
+                    g_opt_chip = (g_opt_chip == RF_CHIP_CC1121) ? RF_CHIP_LR2021 : RF_CHIP_CC1121;
+                } else if (g_opt_cursor == 2) {
+                    int nl = g_my_name_len;
+                    for (int i = 0; i < nl; i++) g_compose[i] = g_my_name[i];
+                    g_compose[nl] = '\0';
+                    g_compose_len = nl;
+                    g_state = STATE_NAME_EDIT;
+                }
+                break;
+            case STATE_NAME_EDIT:
+                kb_select();
                 break;
             }
         }
@@ -306,18 +375,35 @@ int main(void) {
         if (rose(BTN_B)) {
             dirty = 1;
             switch (g_state) {
+            case STATE_RADIO_SEL:
+                break; /* B does nothing on selection screen */
             case STATE_CHAT:
                 break;
             case STATE_COMPOSE:
                 if (g_compose_len > 0) {
-                    if (g_compose_len > 0) g_compose[--g_compose_len] = '\0';
+                    g_compose[--g_compose_len] = '\0';
                 } else {
                     g_state = STATE_CHAT;
                 }
                 break;
-            case STATE_OPTIONS:
-                g_opt_freq = g_freq_hz;
-                g_state    = STATE_CHAT;
+            case STATE_OPTIONS: {
+                int chip_ch = (g_rf_chip != g_opt_chip);
+                int freq_ch = (g_freq_hz != g_opt_freq);
+                g_freq_hz = g_opt_freq;
+                g_rf_chip = g_opt_chip;
+                if (chip_ch) radio_select(g_rf_chip, g_freq_hz);
+                else if (freq_ch) radio_set_freq(g_freq_hz);
+                if (freq_ch) freq_save();
+                g_state = STATE_CHAT;
+                break;
+            }
+            case STATE_NAME_EDIT:
+                if (g_compose_len > 0) {
+                    g_compose[--g_compose_len] = '\0';
+                } else {
+                    g_compose[0] = '\0';
+                    g_state = STATE_OPTIONS;
+                }
                 break;
             }
         }
@@ -325,8 +411,15 @@ int main(void) {
         if (rose(BTN_X)) {
             dirty = 1;
             if (g_state == STATE_CHAT) {
+                g_opt_freq   = g_freq_hz;
+                g_opt_chip   = g_rf_chip;
+                g_opt_cursor = 0;
+                g_state      = STATE_OPTIONS;
+            } else if (g_state == STATE_OPTIONS) {
+                /* Discard staged changes and return */
                 g_opt_freq = g_freq_hz;
-                g_state    = STATE_OPTIONS;
+                g_opt_chip = g_rf_chip;
+                g_state    = STATE_CHAT;
             }
         }
 
@@ -334,11 +427,17 @@ int main(void) {
             dirty = 1;
             if (g_state == STATE_COMPOSE) {
                 msg_send();
-            } else if (g_state == STATE_CHAT) {
-                g_rx_active = !g_rx_active;
-                if (g_rx_active) {
-                    g_rssi = radio_rssi(); /* snapshot RSSI on RX start */
+            } else if (g_state == STATE_NAME_EDIT) {
+                /* Save name */
+                int nl = g_compose_len > MAX_NAME_LEN ? MAX_NAME_LEN : g_compose_len;
+                if (nl > 0) {
+                    for (int i = 0; i < nl; i++) g_my_name[i] = g_compose[i];
+                    g_my_name[nl] = '\0';
+                    g_my_name_len = nl;
+                    name_save();
                 }
+                g_compose[0] = '\0'; g_compose_len = 0;
+                g_state = STATE_OPTIONS;
             }
         }
 
@@ -349,13 +448,13 @@ int main(void) {
             dirty        = 0;
         }
 
-        /* ── Manual RX: only active when user enabled, not composing ─────── */
-        if (g_rx_active && g_state == STATE_CHAT) {
+        /* ── Always poll RF when ready — rf_recv_pop is non-blocking ──────── */
+        if (g_radio_inited) {
             rf_pkt_t pkt;
             if (radio_poll(&pkt)) {
                 g_rssi = radio_rssi();
-                msg_add(pkt.text, pkt.len, 0, g_rssi);
-                g_rx_active = 0;  /* stop listening after message received */
+                msg_add(pkt.data + pkt.name_len, pkt.msg_len, 0, g_rssi,
+                        pkt.data, pkt.name_len);
                 dirty = 1;
             }
         }

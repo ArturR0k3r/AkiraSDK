@@ -63,6 +63,14 @@ static void log_rc(const char *label, int rc) {
     printf_native(msg);
 }
 
+void radio_select(int chip, uint32_t freq_hz) {
+    log_rc("[RF] select chip", chip);
+    log_rc("[RF] rf_select rc", rf_select(chip));
+    log_rc("[RF] set_frequency rc", rf_set_frequency(freq_hz));
+    log_rc("[RF] set_power rc",     rf_set_power(14));
+    log_str("[RF] chip ready");
+}
+
 void radio_init(uint32_t freq_hz) {
     log_str("[RF] init");
     log_rc("[RF] set_frequency rc", rf_set_frequency(freq_hz));
@@ -88,32 +96,25 @@ void radio_set_freq(uint32_t freq_hz) {
     rf_set_frequency(freq_hz);
 }
 
-int radio_send(const char *text, uint8_t len) {
-    if (len > CHAT_MSG_MAX) len = CHAT_MSG_MAX;
+int radio_send(const char *text, uint8_t len, const char *name, uint8_t name_len) {
+    if (len      > CHAT_MSG_MAX)  len      = CHAT_MSG_MAX;
+    if (name_len > CHAT_NAME_MAX) name_len = CHAT_NAME_MAX;
+    if (name_len == 0) { name = "?"; name_len = 1; }
 
-    uint8_t buf[3 + CHAT_MSG_MAX];
+    /* Wire: [AC][CA][name_len][msg_len][name...][msg...] */
+    uint8_t buf[4 + CHAT_NAME_MAX + CHAT_MSG_MAX];
     buf[0] = CHAT_MAGIC_0;
     buf[1] = CHAT_MAGIC_1;
-    buf[2] = len;
-    for (uint8_t i = 0; i < len; i++) buf[3 + i] = (uint8_t)text[i];
+    buf[2] = name_len;
+    buf[3] = len;
+    for (uint8_t i = 0; i < name_len; i++) buf[4 + i]            = (uint8_t)name[i];
+    for (uint8_t i = 0; i < len;      i++) buf[4 + name_len + i] = (uint8_t)text[i];
 
     log_buf("[RF TX] ", (const uint8_t *)text, len, "");
 
-    int rc = rf_send((uint32_t)(uint8_t *)buf, (uint32_t)(3 + len));
-    if (rc < 0) {
-        char emsg[32];
-        int ei = 0;
-        const char *pfx = "[RF TX] ERROR rc=";
-        for (int k = 0; pfx[k]; k++) emsg[ei++] = pfx[k];
-        int ev = rc < 0 ? -rc : rc;
-        if (rc < 0) emsg[ei++] = '-';
-        char etmp[8]; int ed = 0;
-        if (!ev) { etmp[ed++] = '0'; }
-        else { int n = ev; while (n) { etmp[ed++] = (char)('0' + n % 10); n /= 10; } }
-        for (int k = ed - 1; k >= 0; k--) emsg[ei++] = etmp[k];
-        emsg[ei] = '\0';
-        printf_native(emsg);
-    }
+    int total = 4 + name_len + len;
+    int rc = rf_send((uint32_t)(uint8_t *)buf, (uint32_t)total);
+    if (rc < 0) log_rc("[RF TX] ERROR rc", rc);
     return rc;
 }
 
@@ -135,12 +136,8 @@ static void log_hex(const char *prefix, const uint8_t *data, int len) {
 
 uint8_t radio_poll(rf_pkt_t *out) {
     uint8_t buf[1 + 3 + CHAT_MSG_MAX]; /* +1 for possible firmware prefix byte */
-    int n = rf_receive((uint32_t)(uint8_t *)buf, (uint32_t)sizeof(buf), 0);
-    if (n < 0) {
-        if (n != -11) log_rc("[RF RX] rc", n);
-        return 0;
-    }
-    if (n == 0) return 0;
+    int n = rf_recv_pop((uint32_t)(uint8_t *)buf, (uint32_t)sizeof(buf), 0);
+    if (n <= 0) return 0;   /* negative = queue empty (various errno), 0 = nothing */
 
     log_hex("[RF RX] hex", buf, n);
 
@@ -149,24 +146,29 @@ uint8_t radio_poll(rf_pkt_t *out) {
     if (n >= 4 && buf[0] != CHAT_MAGIC_0 && buf[1] == CHAT_MAGIC_0 && buf[2] == CHAT_MAGIC_1)
         off = 1;
 
-    if (n - off < 3) { log_str("[RF RX] drop: too short"); return 0; }
+    if (n - off < 4) { log_str("[RF RX] drop: too short"); return 0; }
     if (buf[off] != CHAT_MAGIC_0 || buf[off+1] != CHAT_MAGIC_1) {
         log_str("[RF RX] drop: bad magic");
         return 0;
     }
 
-    uint8_t txt_len = buf[off + 2];
-    if (txt_len > CHAT_MSG_MAX || (int)(off + 3 + txt_len) > n) {
+    uint8_t name_len = buf[off + 2];
+    uint8_t msg_len  = buf[off + 3];
+
+    if (name_len > CHAT_NAME_MAX || msg_len > CHAT_MSG_MAX ||
+        (int)(off + 4 + name_len + msg_len) > n) {
         log_str("[RF RX] drop: bad length");
         return 0;
     }
 
     out->magic[0] = CHAT_MAGIC_0;
     out->magic[1] = CHAT_MAGIC_1;
-    out->len      = txt_len;
-    for (uint8_t i = 0; i < txt_len; i++) out->text[i] = (char)buf[off + 3 + i];
+    out->name_len = name_len;
+    out->msg_len  = msg_len;
+    for (uint8_t i = 0; i < name_len; i++) out->data[i]            = buf[off + 4 + i];
+    for (uint8_t i = 0; i < msg_len;  i++) out->data[name_len + i] = buf[off + 4 + name_len + i];
 
-    log_buf("[RF RX] ok ", (const uint8_t *)out->text, txt_len, "");
+    log_buf("[RF RX] ok ", (const uint8_t *)(out->data + name_len), msg_len, "");
     return 1;
 }
 

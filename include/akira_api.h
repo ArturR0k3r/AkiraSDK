@@ -1129,6 +1129,16 @@ extern "C"
      */
     extern int rf_send(uint32_t payload_ptr, uint32_t len);
 
+    /**
+     * @brief Receive data from RF transceiver
+     *
+     * @param buffer_ptr Pointer to receive buffer
+     * @param max_len Maximum number of bytes to receive
+     * @param timeout_ms Timeout in milliseconds
+     * @return Number of bytes received on success, negative error code on failure
+     */
+    extern int rf_receive(uint32_t buffer_ptr, uint32_t max_len, uint32_t timeout_ms);
+
     /*
      * =============================================================================
      * TIMER API

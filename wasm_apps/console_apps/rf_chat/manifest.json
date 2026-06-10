@@ -1,0 +1,15 @@
+{
+  "name": "rf_chat",
+  "display_name": "RF Chat",
+  "version": "1.1.0",
+  "description": "Two-console RF messenger over CC1121 sub-GHz. QWERTY keyboard, chat bubbles, tunable 868 MHz band.",
+  "capabilities": [
+    "display.write",
+    "gpio.read",
+    "rf.transceive",
+    "settings.*",
+    "timer"
+  ],
+  "memory_quota": 262144,
+  "min_akiraos_version": "1.5.0"
+}

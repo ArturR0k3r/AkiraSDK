@@ -1,402 +1,461 @@
 /*
- * Copyright (c) 2026 PenEngineering S.R.L
+ * spectrum_analyzer/main.c — RF spectrum analyzer
+ * 64-bin RSSI sweep · monochrome · 1px thin-line bars · scrolling waterfall
+ *
+ * Controls:
+ *   LEFT / RIGHT   shift center freq by span/2
+ *   UP   / DOWN    zoom in / zoom out (halve / double span)
+ *   A              reset to 433.920 MHz, 2 MHz span
+ *   B              pause / resume
+ *   X              toggle waterfall
+ *   Y              toggle peak hold
+ *
  * SPDX-License-Identifier: Apache-2.0
- *
- * @file spectrum_analyzer.c
- * @brief RF spectrum analyzer — sweeps 64 frequency bins across a user-
- *        configurable center + span, displays live RSSI bar chart and
- *        scrolling waterfall history.
- *
- * Controls (akiraconsole, active-HIGH, pull-down):
- *   LEFT  (6)  — shift center frequency down by half span
- *   RIGHT (7)  — shift center frequency up by half span
- *   UP    (4)  — zoom in  (halve span)
- *   DOWN  (5)  — zoom out (double span)
- *   A     (15) — reset to defaults (433.92 MHz, 2 MHz span)
- *   B     (16) — pause / resume sweep
- *
- * Layout (320x240 landscape):
- *   y:0-17    Header    -- center freq, span, sweep progress bar
- *   y:18-119  Bar chart -- 64 bins x BIN_PX wide, RSSI amplitude (grayscale)
- *   y:120-239 Waterfall -- 120 rows of RSSI history, newest at top (grayscale)
- *
- * Palette: 16-step linear grayscale (0=black, 15=white).
- * All UI elements are black & white only -- no color.
  */
-
 #include "akira_api.h"
 
-/* Button pins */
-#define BTN_UP     4
-#define BTN_DOWN   5
-#define BTN_LEFT   6
-#define BTN_RIGHT  7
-#define BTN_A      15
-#define BTN_B      16
+/* ── Monochrome palette ─────────────────────────────────────────────── */
+#define BLK  0x0000u
+#define WHT  0xFFFFu
 
-/* Display */
-static int32_t SCR_W = 320, SCR_H = 240;
+/* ── Display ────────────────────────────────────────────────────────── */
+static int32_t GW = 0, GH = 0;
 
-/* Layout */
-#define HDR_H        18
-#define BAR_AREA_Y   HDR_H
-#define BAR_AREA_H   102
-#define WF_Y         (HDR_H + BAR_AREA_H)
-#define WF_H         (SCR_H - WF_Y)
+/* ── Layout (all derived at runtime from GW / GH) ───────────────────── */
+#define HDR_H          16
+#define FTR_H          12
+/* Bar-chart area: 55% of content height */
+#define CONTENT_H()    (GH - HDR_H - FTR_H)
+#define BAR_Y          HDR_H
+#define BAR_H()        (CONTENT_H() * 55 / 100)
+#define WF_Y()         (HDR_H + BAR_H())
+#define WF_H()         (CONTENT_H() - BAR_H())
 
-/* Spectrum bins */
-#define BINS         64
-#define BIN_PX       (SCR_W / BINS)
+/* ── Spectrum config ────────────────────────────────────────────────── */
+#define BINS            64
+#define SETTLE_US       800u
 
-/* RF defaults */
-#define DEFAULT_CENTER_HZ  433920000U
-#define DEFAULT_SPAN_HZ      2000000U
-#define SETTLE_US              1000U
-#define MIN_SPAN_HZ            50000U
-#define MAX_SPAN_HZ        200000000U
+/* ── RF defaults ────────────────────────────────────────────────────── */
+#define DEF_CENTER  433920000u
+#define DEF_SPAN      2000000u
+#define MIN_SPAN        50000u
+#define MAX_SPAN    200000000u
 
-/* RSSI range */
-#define RSSI_MIN   (-120)
-#define RSSI_MAX   (  -20)
+/* ── RSSI range (dBm) ───────────────────────────────────────────────── */
+#define RSSI_FLOOR  (-120)
+#define RSSI_CEIL   ( -20)
 
-/*
- * 16-step linear grayscale palette (RGB565).
- * Level n: R5 = n*2, G6 = n*4, B5 = n*2  =>  0=black, 15=white
- */
-static const uint16_t k_wf_palette[16] = {
-    0x0000,  /*  0 -- black    */
-    0x0841,  /*  1             */
-    0x1082,  /*  2             */
-    0x18C3,  /*  3             */
-    0x2104,  /*  4             */
-    0x2945,  /*  5             */
-    0x3186,  /*  6             */
-    0x39C7,  /*  7             */
-    0x4208,  /*  8 -- mid gray */
-    0x52CA,  /*  9             */
-    0x630C,  /* 10             */
-    0x738E,  /* 11             */
-    0x8410,  /* 12             */
-    0xAD75,  /* 13             */
-    0xD6BA,  /* 14             */
-    0xFFFF,  /* 15 -- white    */
-};
+/* ── Peak hold ──────────────────────────────────────────────────────── */
+#define PEAK_HOLD_SWEEPS  60
 
-/* State */
-static uint32_t g_center_hz = DEFAULT_CENTER_HZ;
-static uint32_t g_span_hz   = DEFAULT_SPAN_HZ;
-static int      g_paused    = 0;
+/* ── Waterfall ──────────────────────────────────────────────────────── */
+#define WF_ROWS  96
 
-static int8_t  g_rssi[BINS];
+/* ── Buttons ────────────────────────────────────────────────────────── */
+#define BTN_UP     0
+#define BTN_DOWN   1
+#define BTN_LEFT   2
+#define BTN_RIGHT  3
+#define BTN_A      4
+#define BTN_B      5
+#define BTN_X      6
+#define BTN_Y      7
+#define BTN_COUNT  8
 
-#define WF_ROWS_MAX 120
-static uint8_t g_wf[WF_ROWS_MAX][BINS];
-static int     g_wf_head = 0;
+static const int BTN_PINS[BTN_COUNT] = { 4, 5, 6, 7, 15, 16, 17, 40 };
 
-/* Button edge-detection */
-static uint8_t g_prev_btns = 0;
+#define DB_FRAMES 3
 
-static uint8_t read_buttons(void)
+static int btn_cnt[BTN_COUNT];
+static int btn_st[BTN_COUNT];
+static int btn_prev[BTN_COUNT];
+static int btn_hold[BTN_COUNT];
+
+/* ─────────────────────────────────────────────────────────────────────
+ * State
+ * ───────────────────────────────────────────────────────────────────── */
+static uint32_t g_center   = DEF_CENTER;
+static uint32_t g_span     = DEF_SPAN;
+static int      g_paused   = 0;
+static int      g_hold     = 1;
+static int      g_wf_on    = 1;
+
+
+static int8_t   g_rssi[BINS];
+static int8_t   g_peak[BINS];
+static int      g_peak_ttl[BINS];
+
+static uint8_t  g_wf[WF_ROWS][BINS];  /* 0=noise  1=signal */
+static int      g_wf_head = 0;
+
+static int8_t   g_noise   = -110;     /* tracked noise floor */
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Buttons — same debounce pattern as rf_chat
+ * ───────────────────────────────────────────────────────────────────── */
+static void btns_init(void)
 {
-    uint8_t b = 0;
-    if (gpio_read(BTN_UP))    b |= (1u << 0);
-    if (gpio_read(BTN_DOWN))  b |= (1u << 1);
-    if (gpio_read(BTN_LEFT))  b |= (1u << 2);
-    if (gpio_read(BTN_RIGHT)) b |= (1u << 3);
-    if (gpio_read(BTN_A))     b |= (1u << 4);
-    if (gpio_read(BTN_B))     b |= (1u << 5);
-    return b;
+    for (int i = 0; i < BTN_COUNT; i++)
+        gpio_configure(BTN_PINS[i], GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 }
 
-static int btn_pressed(uint8_t cur, int bit)
+static void btns_poll(void)
 {
-    return (cur & (1u << bit)) && !(g_prev_btns & (1u << bit));
+    for (int i = 0; i < BTN_COUNT; i++) {
+        int raw    = gpio_read(BTN_PINS[i]);
+        btn_prev[i] = btn_st[i];
+        btn_cnt[i]  = raw ? btn_cnt[i] + 1 : 0;
+        btn_st[i]   = (btn_cnt[i] >= DB_FRAMES) ? 1 : 0;
+        btn_hold[i] = btn_st[i] ? btn_hold[i] + 1 : 0;
+    }
 }
 
-static int rssi_to_palette(int8_t rssi)
-{
-    int v   = (int)rssi - RSSI_MIN;
-    int idx = v * 15 / (RSSI_MAX - RSSI_MIN);
-    if (idx < 0)  idx = 0;
-    if (idx > 15) idx = 15;
-    return idx;
-}
+static int rose(int i) { return  btn_st[i] && !btn_prev[i]; }
+static void handle_btns(void); /* forward decl — defined after do_sweep */
 
-static int rssi_to_bar_h(int8_t rssi)
-{
-    int h = ((int)rssi - RSSI_MIN) * BAR_AREA_H / (RSSI_MAX - RSSI_MIN);
-    if (h < 1)          h = 1;
-    if (h > BAR_AREA_H) h = BAR_AREA_H;
-    return h;
-}
+/* ─────────────────────────────────────────────────────────────────────
+ * String helpers (no libc)
+ * ───────────────────────────────────────────────────────────────────── */
+static int slen(const char *s) { int n = 0; while (s[n]) n++; return n; }
 
 static void fmt_freq(char *buf, uint32_t hz)
 {
-    int pos = 0;
-    uint32_t mhz = hz / 1000000U;
-    uint32_t khz = (hz % 1000000U) / 1000U;
-    buf[pos++] = '0' + (char)(mhz / 100 % 10);
-    buf[pos++] = '0' + (char)(mhz /  10 % 10);
-    buf[pos++] = '0' + (char)(mhz       % 10);
-    buf[pos++] = '.';
-    buf[pos++] = '0' + (char)(khz / 100 % 10);
-    buf[pos++] = '0' + (char)(khz /  10 % 10);
-    buf[pos++] = '0' + (char)(khz       % 10);
-    buf[pos++] = 'M';
-    buf[pos]   = '\0';
+    uint32_t mhz = hz / 1000000u;
+    uint32_t khz = (hz % 1000000u) / 1000u;
+    int i = 0;
+    buf[i++] = '0' + (char)(mhz / 100 % 10);
+    buf[i++] = '0' + (char)(mhz /  10 % 10);
+    buf[i++] = '0' + (char)(mhz       % 10);
+    buf[i++] = '.';
+    buf[i++] = '0' + (char)(khz / 100 % 10);
+    buf[i++] = '0' + (char)(khz /  10 % 10);
+    buf[i++] = '0' + (char)(khz       % 10);
+    buf[i++] = 'M';
+    buf[i]   = '\0';
 }
 
 static void fmt_span(char *buf, uint32_t hz)
 {
-    int pos = 0;
-    uint32_t k = hz / 1000U;
-    if (k >= 1000) {
-        uint32_t m = k / 1000U;
-        buf[pos++] = '0' + (char)(m / 100 % 10);
-        buf[pos++] = '0' + (char)(m /  10 % 10);
-        buf[pos++] = '0' + (char)(m       % 10);
-        buf[pos++] = 'M';
+    int i = 0;
+    uint32_t k = hz / 1000u;
+    if (k >= 1000u) {
+        uint32_t m = k / 1000u;
+        if (m >= 100) buf[i++] = '0' + (char)(m / 100 % 10);
+        if (m >=  10) buf[i++] = '0' + (char)(m /  10 % 10);
+        buf[i++] = '0' + (char)(m % 10);
+        buf[i++] = 'M';
     } else {
-        buf[pos++] = '0' + (char)(k / 1000 % 10);
-        buf[pos++] = '0' + (char)(k /  100 % 10);
-        buf[pos++] = '0' + (char)(k /   10 % 10);
-        buf[pos++] = '0' + (char)(k        % 10);
-        buf[pos++] = 'k';
+        if (k >= 100) buf[i++] = '0' + (char)(k / 100 % 10);
+        if (k >=  10) buf[i++] = '0' + (char)(k /  10 % 10);
+        buf[i++] = '0' + (char)(k % 10);
+        buf[i++] = 'k';
     }
-    buf[pos] = '\0';
+    buf[i] = '\0';
 }
 
-static void draw_header(int sweep_idx)
+static void fmt_dbm(char *buf, int v)
 {
-    char buf[24];
-
-    display_rect(0, 0, (int)SCR_W, HDR_H, COLOR_BLACK);
-
-    display_text(2, 5, "RF", COLOR_GRAY);
-
-    fmt_freq(buf, g_center_hz);
-    display_text(18, 5, buf, COLOR_WHITE);
-
-    fmt_span(buf, g_span_hz);
-    display_text(104, 5, buf, COLOR_LIGHT_GRAY);
-    display_text(136, 5, "span", COLOR_DARK_GRAY);
-
-    if (g_paused) {
-        display_rect(216, 4, 80, 10, COLOR_BLACK);
-        display_text(220, 5, "[ PAUSED ]", COLOR_LIGHT_GRAY);
-    } else {
-        display_rect(216, 6, 88, 5, COLOR_DARK_GRAY);
-        int fill = sweep_idx * 88 / BINS;
-        if (fill > 0)
-            display_rect(216, 6, fill, 5, COLOR_WHITE);
-    }
-
-    display_hline(0, HDR_H - 1, (int)SCR_W, COLOR_WHITE);
+    int i = 0;
+    if (v < 0) { buf[i++] = '-'; v = -v; }
+    if (v >= 100) buf[i++] = '0' + (char)(v / 100 % 10);
+    if (v >=  10) buf[i++] = '0' + (char)(v /  10 % 10);
+    buf[i++] = '0' + (char)(v % 10);
+    buf[i++] = 'd'; buf[i++] = 'B'; buf[i] = '\0';
 }
 
-static void draw_bars(void)
+/* ─────────────────────────────────────────────────────────────────────
+ * Geometry
+ * ───────────────────────────────────────────────────────────────────── */
+
+/* X pixel for bin b — evenly spread across full width */
+static int bin_x(int b)
 {
-    int bin, x, bar_h, bar_y;
-    int sw = (int)SCR_W;
+    return (b * (GW - 1)) / (BINS - 1);
+}
 
-    display_rect(0, BAR_AREA_Y, sw, BAR_AREA_H, COLOR_BLACK);
+/* Y pixel from RSSI within a rect (area_y, area_h) — bottom = low level */
+static int rssi_y(int8_t r, int area_y, int area_h)
+{
+    int h = ((int)r - RSSI_FLOOR) * area_h / (RSSI_CEIL - RSSI_FLOOR);
+    if (h < 0)       h = 0;
+    if (h > area_h)  h = area_h;
+    return area_y + area_h - h;
+}
 
-    /* Noise floor reference at RSSI_MIN+10 dBm */
-    int ref_h = 10 * BAR_AREA_H / (RSSI_MAX - RSSI_MIN);
-    display_hline(0, BAR_AREA_Y + BAR_AREA_H - ref_h, sw, COLOR_DARK_GRAY);
+/* ─────────────────────────────────────────────────────────────────────
+ * Drawing
+ * ───────────────────────────────────────────────────────────────────── */
+static void draw_header(int sweep_bin)
+{
+    char fbuf[12], sbuf[8];
+    fmt_freq(fbuf, g_center);
+    fmt_span(sbuf, g_span);
 
-    /* Vertical grid every 8 bins */
-    for (bin = 8; bin < BINS; bin += 8) {
-        x = bin * BIN_PX;
-        display_line(x, BAR_AREA_Y, x, BAR_AREA_Y + BAR_AREA_H - 1, COLOR_DARK_GRAY);
+    display_rect(0, 0, GW, HDR_H, WHT);
+
+    display_text(2, 3, "SPECTRUM", BLK);
+
+    int fl = slen(fbuf) * 7;
+    display_text((GW - fl) / 2, 3, fbuf, BLK);
+
+    int sl = slen(sbuf) * 7;
+    display_text(GW - sl - 2, 3, sbuf, BLK);
+
+    /* Sweep-progress underline */
+    if (!g_paused && sweep_bin > 0) {
+        int prog = sweep_bin * GW / BINS;
+        display_hline(0, HDR_H - 2, prog, BLK);
+    }
+    if (g_paused)
+        display_text((GW - 6 * 7) / 2, 3, "PAUSED", BLK);
+}
+
+static void draw_bar_chart(void)
+{
+    int by = BAR_Y;
+    int bh = BAR_H();
+
+    display_rect(0, by, GW, bh, BLK);
+
+    /* Dashed horizontal grid at 25/50/75 % */
+    for (int p = 1; p <= 3; p++) {
+        int gy = by + bh - bh * p / 4;
+        for (int x = 0; x < GW; x += 4)
+            display_pixel(x, gy, WHT);
     }
 
-    /* dBm scale on right edge */
-    display_text(sw - 22, BAR_AREA_Y + 2,              "-20",  COLOR_DARK_GRAY);
-    display_text(sw - 28, BAR_AREA_Y + BAR_AREA_H - 9, "-120", COLOR_DARK_GRAY);
-
-    /* Bars — clamp palette min to 2 so bars are always visible on black bg */
-    for (bin = 0; bin < BINS; bin++) {
-        x     = bin * BIN_PX;
-        bar_h = rssi_to_bar_h(g_rssi[bin]);
-        bar_y = BAR_AREA_Y + BAR_AREA_H - bar_h;
-        int pal = rssi_to_palette(g_rssi[bin]);
-        if (pal < 2) pal = 2;
-        display_rect(x, bar_y, BIN_PX - 1, bar_h, k_wf_palette[pal]);
+    /* Dashed vertical grid every 16 bins */
+    for (int b = 16; b < BINS; b += 16) {
+        int x = bin_x(b);
+        for (int y = by; y < by + bh; y += 3)
+            display_pixel(x, y, WHT);
     }
 
-    display_hline(0, WF_Y, sw, COLOR_WHITE);
+    /* dBm scale labels on left */
+    char db[8];
+    fmt_dbm(db, RSSI_FLOOR + (RSSI_CEIL - RSSI_FLOOR) * 3 / 4);
+    display_text(2, by + bh / 4 - 5, db, WHT);
+    fmt_dbm(db, RSSI_FLOOR + (RSSI_CEIL - RSSI_FLOOR) / 2);
+    display_text(2, by + bh / 2 - 5, db, WHT);
+
+    /* 1-px liner bars + peak dots */
+    for (int b = 0; b < BINS; b++) {
+        int x  = bin_x(b);
+        int y0 = rssi_y(g_rssi[b], by, bh);
+        int h  = by + bh - y0;
+        if (h > 0)
+            display_vline(x, y0, h, WHT);
+
+        if (g_hold && (int)g_peak[b] > (int)g_rssi[b]) {
+            int py = rssi_y(g_peak[b], by, bh);
+            if (py >= by && py < by + bh)
+                display_pixel(x, py, WHT);
+        }
+    }
+
+    /* Bottom separator */
+    display_hline(0, by + bh, GW, WHT);
 }
 
 static void draw_waterfall(void)
 {
-    int row, bin;
-    int wf_rows = (int)WF_H;
+    int wy = WF_Y();
+    int wh = WF_H();
+    if (wh <= 0) return;
 
-    for (row = 0; row < wf_rows && row < WF_ROWS_MAX; row++) {
-        int idx = (g_wf_head - row + WF_ROWS_MAX) % WF_ROWS_MAX;
-        int y   = WF_Y + row;
-        for (bin = 0; bin < BINS; bin++) {
-            int x = bin * BIN_PX;
-            display_rect(x, y, BIN_PX - 1, 1, k_wf_palette[g_wf[idx][bin]]);
+    display_rect(0, wy, GW, wh, BLK);
+
+    int rows = wh < WF_ROWS ? wh : WF_ROWS;
+    int bw   = GW / BINS;
+    if (bw < 1) bw = 1;
+
+    for (int row = 0; row < rows; row++) {
+        int idx = (g_wf_head - row + WF_ROWS) % WF_ROWS;
+        int y   = wy + row;
+        for (int b = 0; b < BINS; b++) {
+            if (g_wf[idx][b]) {
+                int x = bin_x(b);
+                display_rect(x, y, bw > 1 ? bw - 1 : 1, 1, WHT);
+            }
         }
     }
 }
 
+static void draw_footer(void)
+{
+    display_rect(0, GH - FTR_H, GW, FTR_H, WHT);
+    display_text(2, GH - FTR_H + 2,
+                 "L/R:shift  U/D:zoom  A:rst  B:pause  X:wfall  Y:peak",
+                 BLK);
+}
+
+static void full_redraw(int sweep_bin)
+{
+    draw_header(sweep_bin);
+    draw_bar_chart();
+    if (g_wf_on)
+        draw_waterfall();
+    else
+        display_rect(0, WF_Y(), GW, WF_H(), BLK);
+    draw_footer();
+    display_flush();
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * RF sweep
+ * ───────────────────────────────────────────────────────────────────── */
 static void do_sweep(void)
 {
-    int bin;
-    uint32_t step = g_span_hz / BINS;
+    uint32_t step    = g_span / BINS;
+    int      min_raw = RSSI_FLOOR;
 
-    for (bin = 0; bin < BINS; bin++) {
-        uint32_t freq = (g_center_hz - g_span_hz / 2) + (uint32_t)bin * step;
+    for (int b = 0; b < BINS; b++) {
+        uint32_t freq = g_center - g_span / 2u + (uint32_t)b * step;
         rf_set_frequency(freq);
         delay(SETTLE_US);
-        int raw = rf_get_rssi();
-        if (raw < RSSI_MIN) raw = RSSI_MIN;
-        if (raw > RSSI_MAX) raw = RSSI_MAX;
-        g_rssi[bin] = (int8_t)raw;
 
-        if ((bin & 7) == 0) {
-            draw_header(bin);
-            display_flush();
+        int raw = rf_get_rssi();
+        if (raw < RSSI_FLOOR) raw = RSSI_FLOOR;
+        if (raw > RSSI_CEIL)  raw = RSSI_CEIL;
+        g_rssi[b] = (int8_t)raw;
+
+        if (raw > min_raw) min_raw = raw;
+
+        /* Peak hold */
+        if (g_hold) {
+            if ((int)g_rssi[b] >= (int)g_peak[b]) {
+                g_peak[b]     = g_rssi[b];
+                g_peak_ttl[b] = PEAK_HOLD_SWEEPS;
+            } else if (g_peak_ttl[b] > 0) {
+                g_peak_ttl[b]--;
+            } else if (g_peak[b] > (int8_t)RSSI_FLOOR) {
+                g_peak[b]--;  /* 1 dB/sweep decay */
+            }
+        }
+
+        /* Poll buttons + partial refresh every 8 bins */
+        if ((b & 7) == 7) {
+            btns_poll();
+            handle_btns();
+            full_redraw(b + 1);
         }
     }
 
-    g_wf_head = (g_wf_head + 1) % WF_ROWS_MAX;
-    for (bin = 0; bin < BINS; bin++) {
-        int wp = rssi_to_palette(g_rssi[bin]);
-        if (wp < 1) wp = 1;
-        g_wf[g_wf_head][bin] = (uint8_t)wp;
-    }
+    /* Track noise floor (slow rise, fast fall) */
+    if (min_raw < (int)g_noise)
+        g_noise = (int8_t)min_raw;
+    else if (g_noise < (int8_t)(RSSI_CEIL - 15))
+        g_noise++;
+
+    /* Append waterfall row */
+    int8_t thresh = (int8_t)((int)g_noise + 10);
+    g_wf_head = (g_wf_head + 1) % WF_ROWS;
+    for (int b = 0; b < BINS; b++)
+        g_wf[g_wf_head][b] = (g_rssi[b] > thresh) ? 1u : 0u;
 }
 
-static void handle_buttons(uint8_t cur)
+/* ─────────────────────────────────────────────────────────────────────
+ * Button handling
+ * ───────────────────────────────────────────────────────────────────── */
+static void handle_btns(void)
 {
-    uint32_t half = g_span_hz / 2;
+    uint32_t half = g_span / 2u;
 
-    if (btn_pressed(cur, 2)) {
-        if (g_center_hz > half + DEFAULT_SPAN_HZ)
-            g_center_hz -= half;
+    if (rose(BTN_LEFT)) {                            /* LEFT: shift down */
+        if (g_center > half + MIN_SPAN)
+            g_center -= half;
     }
-    if (btn_pressed(cur, 3))
-        g_center_hz += half;
+    if (rose(BTN_RIGHT))                             /* RIGHT: shift up  */
+        g_center += half;
 
-    if (btn_pressed(cur, 0)) {
-        uint32_t ns = g_span_hz / 2;
-        if (ns >= MIN_SPAN_HZ) g_span_hz = ns;
+    if (rose(BTN_UP)) {                              /* UP: zoom in      */
+        uint32_t ns = g_span / 2u;
+        if (ns >= MIN_SPAN) g_span = ns;
     }
-    if (btn_pressed(cur, 1)) {
-        uint32_t ns = g_span_hz * 2;
-        if (ns <= MAX_SPAN_HZ) g_span_hz = ns;
+    if (rose(BTN_DOWN)) {                            /* DOWN: zoom out   */
+        uint32_t ns = g_span * 2u;
+        if (ns <= MAX_SPAN) g_span = ns;
     }
 
-    if (btn_pressed(cur, 4)) {
-        g_center_hz = DEFAULT_CENTER_HZ;
-        g_span_hz   = DEFAULT_SPAN_HZ;
-        g_paused    = 0;
+    if (rose(BTN_A)) {                               /* A: reset         */
+        g_center = DEF_CENTER;
+        g_span   = DEF_SPAN;
+        g_paused = 0;
+        for (int b = 0; b < BINS; b++) {
+            g_rssi[b] = (int8_t)RSSI_FLOOR;
+            g_peak[b] = (int8_t)RSSI_FLOOR;
+            g_peak_ttl[b] = 0;
+        }
+        g_wf_head = 0;
+        for (int r = 0; r < WF_ROWS; r++)
+            for (int b = 0; b < BINS; b++)
+                g_wf[r][b] = 0;
     }
-    if (btn_pressed(cur, 5))
+
+    if (rose(BTN_B))                                 /* B: pause         */
         g_paused = !g_paused;
-}
 
-static void draw_start_screen(void)
-{
-    int i;
-    int sw = (int)SCR_W, sh = (int)SCR_H;
+    if (rose(BTN_X))                                 /* X: waterfall     */
+        g_wf_on = !g_wf_on;
 
-    printf("[spectrum_analyzer] display: %dx%d\n", sw, sh);
-
-    display_clear(COLOR_BLACK);
-
-    /* White title bar across the top */
-    display_rect(0, 0, sw, 20, COLOR_WHITE);
-    display_text(4, 6, "SPECTRUM ANALYZER", COLOR_BLACK);
-
-    /* Section: subtitle */
-    display_text(4, 28, "64-bin RF scanner (RSSI sweep)", COLOR_LIGHT_GRAY);
-
-    /* Grayscale ramp strip */
-    for (i = 0; i < sw; i++) {
-        int pal = (i * 15) / sw;
-        display_rect(i, 40, 1, 6, k_wf_palette[pal]);
+    if (rose(BTN_Y)) {                               /* Y: peak hold     */
+        g_hold = !g_hold;
+        if (!g_hold)
+            for (int b = 0; b < BINS; b++) {
+                g_peak[b]     = (int8_t)RSSI_FLOOR;
+                g_peak_ttl[b] = 0;
+            }
     }
-
-    /* White divider */
-    display_rect(0, 48, sw, 1, COLOR_DARK_GRAY);
-
-    /* Controls */
-    display_text(4, 54,  "LEFT/RIGHT   shift center freq",   COLOR_LIGHT_GRAY);
-    display_text(4, 66,  "UP/DOWN      zoom span in/out",    COLOR_LIGHT_GRAY);
-    display_text(4, 78,  "A            reset to default",    COLOR_LIGHT_GRAY);
-    display_text(4, 90,  "B            pause / resume",      COLOR_LIGHT_GRAY);
-
-    /* Default freq info */
-    display_rect(0, 104, sw, 1, COLOR_DARK_GRAY);
-    display_text(4, 108, "Default: 433.920 MHz  2 MHz span", COLOR_GRAY);
-
-    /* Press A prompt — white box at bottom */
-    display_rect(0, sh - 18, sw, 18, COLOR_WHITE);
-    display_text(4, sh - 13, "Press A to start", COLOR_BLACK);
-
-    display_flush();
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Entry point
+ * ───────────────────────────────────────────────────────────────────── */
 int main(void)
 {
-    int i;
+    display_get_size(&GW, &GH);
+    display_clear(BLK);
 
-    printf("[spectrum_analyzer] starting\n");
-    display_get_size(&SCR_W, &SCR_H);
-
-    /* Black screen immediately */
-    display_clear(COLOR_BLACK);
+    /* Splash */
+    display_rect(0, 0, GW, 20, WHT);
+    display_text(4, 6, "RF SPECTRUM ANALYZER", BLK);
+    display_text(4, 28, "64-bin RSSI sweep", WHT);
+    display_text(4, 42, "Default: 433.920 MHz  2 MHz span", WHT);
+    display_text(4, 62, "L/R  shift center", WHT);
+    display_text(4, 74, "U/D  zoom in/out", WHT);
+    display_text(4, 86, "A    reset  B pause  X wfall  Y peak", WHT);
+    display_rect(0, GH - 20, GW, 20, WHT);
+    display_text(4, GH - 14, "Press A to start", BLK);
     display_flush();
 
-    gpio_configure(BTN_UP,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(BTN_DOWN,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(BTN_LEFT,  GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(BTN_RIGHT, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(BTN_A,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(BTN_B,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    btns_init();
 
-    for (i = 0; i < BINS; i++)
-        g_rssi[i] = (int8_t)RSSI_MIN;
-
-    for (i = 0; i < WF_ROWS_MAX; i++) {
-        int b;
-        for (b = 0; b < BINS; b++)
-            g_wf[i][b] = 0;
+    for (int b = 0; b < BINS; b++) {
+        g_rssi[b]     = (int8_t)RSSI_FLOOR;
+        g_peak[b]     = (int8_t)RSSI_FLOOR;
+        g_peak_ttl[b] = 0;
     }
+    for (int r = 0; r < WF_ROWS; r++)
+        for (int b = 0; b < BINS; b++)
+            g_wf[r][b] = 0;
 
-    draw_start_screen();
-    while (!gpio_read(BTN_A))
-        delay(10000);
-    while (gpio_read(BTN_A))
-        delay(10000);
+    /* Wait for A press + release */
+    while (!gpio_read(BTN_A)) delay(10000u);
+    while ( gpio_read(BTN_A)) delay(10000u);
 
-    display_clear(COLOR_BLACK);
-    draw_header(0);
-    draw_bars();
-    draw_waterfall();
-    display_flush();
+    display_clear(BLK);
+    full_redraw(0);
 
     while (1) {
-        uint8_t cur = read_buttons();
-        handle_buttons(cur);
-        g_prev_btns = cur;
+        btns_poll();
+        handle_btns();
 
         if (!g_paused) {
             do_sweep();
-            draw_bars();
-            draw_waterfall();
-            draw_header(BINS);
         } else {
-            draw_header(0);
+            full_redraw(0);
+            delay(50000u);
         }
-
-        display_flush();
-        delay(5000);
     }
 
     return 0;

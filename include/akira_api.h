@@ -1907,6 +1907,85 @@ extern int aiinfer_run(int handle,
 extern void aiinfer_unload(int handle);
 
 
+/* =========================================================================
+ * Matter/Thread co-processor IPC bridge (requires "matter" capability)
+ *
+ * AkiraOS communicates with a Thread/Matter co-processor (e.g. ESP32-H2)
+ * over UART. The co-processor runs the full Matter stack; WASM apps interact
+ * through this four-function API.
+ *
+ * Error codes (negative return values):
+ *   MATTER_ERR_NO_COPROC  (-1)  — co-processor not responding
+ *   MATTER_ERR_TIMEOUT    (-2)  — operation timed out
+ *   MATTER_ERR_INVALID    (-3)  — bad argument
+ *   MATTER_ERR_NOPERM     (-4)  — capability denied
+ *   MATTER_ERR_IO         (-5)  — UART transport error
+ *
+ * EUI-64 addresses are 8 bytes (IEEE 802.15.4 extended address).
+ * ========================================================================= */
+
+#define MATTER_OK             0
+#define MATTER_ERR_NO_COPROC (-1)
+#define MATTER_ERR_TIMEOUT   (-2)
+#define MATTER_ERR_INVALID   (-3)
+#define MATTER_ERR_NOPERM    (-4)
+#define MATTER_ERR_IO        (-5)
+
+/**
+ * @brief Commission a Matter device into the fabric.
+ *
+ * Sends the passcode to the co-processor which performs BLE commissioning.
+ * On success, writes the 8-byte EUI-64 into eui64_out.
+ *
+ * @param passcode   NUL-terminated commission passcode string.
+ * @param eui64_out  8-byte buffer to receive the device EUI-64.
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_commission(const char *passcode, void *eui64_out);
+
+/**
+ * @brief Send a raw payload to a commissioned Matter device.
+ *
+ * @param eui64    Pointer to 8-byte device EUI-64.
+ * @param payload  Payload bytes.
+ * @param len      Payload length in bytes.
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_send(const void *eui64, const void *payload, int len);
+
+/**
+ * @brief Subscribe to attribute change events for a Matter device.
+ *
+ * Events are queued and retrieved via matter_poll().
+ *
+ * @param eui64    Pointer to 8-byte device EUI-64.
+ * @param attr_id  Matter cluster/attribute ID (16-bit).
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_subscribe(const void *eui64, int attr_id);
+
+/**
+ * @brief Poll for the next incoming Matter attribute event (blocking).
+ *
+ * @param src_eui64   8-byte buffer to receive the source device EUI-64.
+ * @param attr_id     Pointer to int to receive the attribute ID.
+ * @param buf         Buffer to receive the attribute value.
+ * @param buf_len     Size of buf in bytes.
+ * @param timeout_ms  Milliseconds to wait; -1 = wait forever.
+ * @return Number of value bytes written on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_poll(void *src_eui64, int *attr_id,
+                       void *buf, int buf_len, int timeout_ms);
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,10 @@
+{
+  "name": "akiraclaw_bench",
+  "version": "1.0.0",
+  "description": "AkiraClaw inference benchmark: B1 hot-loop timing via bench_ccount_get native import",
+  "capabilities": [
+    "ai.infer",
+    "timer"
+  ],
+  "memory_quota": 131072
+}

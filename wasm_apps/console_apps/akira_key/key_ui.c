@@ -106,6 +106,7 @@ static void draw_unlock(void) {
         tput(2,mr+4,"attempts left: ",C_WARN);
         tput(17,mr+4,n2s(WIPE_AFTER-g_key_hdr.wrong_attempts),C_WARN);
     }
+    tput(1,ROWS-3,"hold B = reset vault",C_DIM);
     draw_action("CLR","ENTER");
     display_flush();
 }
@@ -445,7 +446,10 @@ static void go(screen_t s){ g_prev_screen=g_screen; g_screen=s; ui_init(); }
 static void back(void){ g_screen=g_prev_screen; ui_init(); }
 
 void ui_handle_key(int key, int long_press) {
-    if(long_press && key==KEY_B && g_screen!=SCR_UNLOCK && g_screen!=SCR_BOOT){
+    if(long_press && key==KEY_B && g_screen==SCR_UNLOCK){
+        storage_delete("key.bin"); g_screen=SCR_SET_PIN; ui_init(); return;
+    }
+    if(long_press && key==KEY_B && g_screen!=SCR_BOOT){
         kstore_lock(); return;
     }
 
@@ -462,7 +466,7 @@ void ui_handle_key(int key, int long_press) {
                 if(kstore_load(pin_digits)==0){ go(SCR_HOME); return; }
                 pin_cur=0; pin_digit_val=0; pin_wrong=1;
                 if(g_key_hdr.wrong_attempts>=WIPE_AFTER){
-                    storage_delete("key.bin"); g_screen=SCR_UNLOCK; ui_init();
+                    storage_delete("key.bin"); g_screen=SCR_SET_PIN; ui_init();
                 }
             }
         }

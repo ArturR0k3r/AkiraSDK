@@ -17,7 +17,7 @@ extern int32_t GW, GH;
 /* ── Colours (RGB565) ───────────────────────────────────────────────────── */
 #define C_BG      0x0000u
 #define C_FG      0xFFFFu
-#define C_ACCENT  0x07E0u   /* green */
+#define C_ACCENT  0x07E0u
 #define C_WARN    0xFFE0u
 #define C_DANGER  0xF800u
 #define C_DIM     0x8410u
@@ -31,12 +31,9 @@ extern int32_t GW, GH;
 #define PIN_RIGHT    7
 #define PIN_A        15
 #define PIN_B        16
-#define PIN_SET      0   /* active-low */
+#define PIN_SET      0
 
 /* ── Limits ──────────────────────────────────────────────────────────────── */
-#define PIN_LEN         6
-#define PIN_KDF_ROUNDS  10000
-#define WIPE_AFTER      3
 #define MAX_TOTP_SLOTS  16
 #define MAX_FIDO2_SLOTS 8
 #define MAX_PASS_SLOTS  8
@@ -44,7 +41,6 @@ extern int32_t GW, GH;
 /* ── Screen IDs ──────────────────────────────────────────────────────────── */
 typedef enum {
     SCR_BOOT = 0,
-    SCR_UNLOCK,
     SCR_HOME,
     SCR_TOTP_LIST,
     SCR_TOTP_VIEW,
@@ -53,9 +49,7 @@ typedef enum {
     SCR_PASS_LIST,
     SCR_PASS_VIEW,
     SCR_SSH_VIEW,
-    SCR_SET_PIN,
     SCR_SETTINGS,
-    SCR_CHANGE_PIN,
     SCR_FACTORY_RESET,
     SCR_ABOUT,
     SCR_COUNT
@@ -66,8 +60,8 @@ typedef struct {
     char     label[32];
     uint8_t  secret[32];
     uint8_t  secret_len;
-    uint8_t  digits;    /* 6 or 8 */
-    uint8_t  period;    /* 30 or 60 */
+    uint8_t  digits;
+    uint8_t  period;
     uint8_t  active;
 } totp_slot_t;
 
@@ -75,7 +69,7 @@ typedef struct {
 typedef struct {
     char     rp_id[48];
     char     user_name[32];
-    uint8_t  private_key[32];   /* ed25519 */
+    uint8_t  private_key[32];
     uint32_t sign_count;
     uint8_t  active;
 } fido2_cred_t;
@@ -84,16 +78,16 @@ typedef struct {
 typedef struct {
     char    label[24];
     char    username[32];
-    char    password[48];   /* stored encrypted in vault body */
+    char    password[48];
     uint8_t active;
 } pass_slot_t;
 
-/* ── Key vault body (ChaCha20-encrypted) ─────────────────────────────────── */
+/* ── Key vault (stored plaintext) ────────────────────────────────────────── */
 typedef struct {
-    uint8_t      magic[4];     /* "AKK1" */
-    uint8_t      ssh_key[32];  /* ed25519 private key for SSH agent */
-    uint8_t      ssh_pub[32];  /* ed25519 public key */
-    uint32_t     autolock_s;
+    uint8_t      magic[4];     /* "AKK2" */
+    uint8_t      ssh_key[32];
+    uint8_t      ssh_pub[32];
+    uint32_t     _reserved;
     uint8_t      ble_enabled;
     uint8_t      pad[3];
     totp_slot_t  totp[MAX_TOTP_SLOTS];
@@ -101,21 +95,8 @@ typedef struct {
     pass_slot_t  pass[MAX_PASS_SLOTS];
 } key_vault_t;
 
-/* ── File header (plaintext) ─────────────────────────────────────────────── */
-typedef struct {
-    uint8_t  magic[4];     /* "AKK1" */
-    uint8_t  salt[32];
-    uint8_t  nonce[12];
-    uint8_t  pin_hash[32];
-    uint32_t body_len;
-    uint8_t  wrong_attempts;
-} key_hdr_t;
-
 /* ── Global state ────────────────────────────────────────────────────────── */
 extern key_vault_t g_key_vault;
-extern key_hdr_t   g_key_hdr;
-extern uint8_t     g_enc_key[32];
-extern int         g_locked;
 extern int         g_dirty;
 extern screen_t    g_screen;
 extern screen_t    g_prev_screen;
@@ -123,10 +104,6 @@ extern screen_t    g_prev_screen;
 /* ── Crypto (key_crypto.c) ───────────────────────────────────────────────── */
 void     sha256(const uint8_t *d, int l, uint8_t *out);
 void     hmac_sha256(const uint8_t *k, int kl, const uint8_t *m, int ml, uint8_t *out);
-void     pbkdf2_sha256(const uint8_t *pw, int pwl, const uint8_t *salt, int sl,
-                       int iters, uint8_t *out);
-void     chacha20_xor(const uint8_t *key, const uint8_t *nonce,
-                      uint32_t ctr, uint8_t *data, int len);
 uint32_t totp_generate(const uint8_t *secret, int slen,
                        uint64_t unix_sec, int period, int digits);
 int      base32_decode(const char *b32, uint8_t *out, int max);
@@ -135,10 +112,9 @@ void     ed25519_generate_keypair(const uint8_t *seed32,
 
 /* ── Store (key_store.c) ─────────────────────────────────────────────────── */
 int  kstore_exists(void);
-int  kstore_create(const char *pin6);
-int  kstore_load(const char *pin6);
+int  kstore_create(void);
+int  kstore_load(void);
 void kstore_save(void);
-void kstore_lock(void);
 
 /* ── UI (key_ui.c) ───────────────────────────────────────────────────────── */
 void ui_init(void);

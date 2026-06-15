@@ -30,7 +30,11 @@ static int cnt[7], st[7], prev[7], hold[7];
 static const int PINS[7]={PIN_UP,PIN_DOWN,PIN_LEFT,PIN_RIGHT,PIN_A,PIN_B,PIN_SET};
 
 static void btns_init(void){
-    for(int i=0;i<7;i++) gpio_configure(PINS[i],GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
+    /* UP/DOWN/LEFT/RIGHT/A/B: active-high with pull-down (hardware: GPIO_PULL_DOWN|GPIO_ACTIVE_HIGH) */
+    int i;
+    for(i=0;i<6;i++) gpio_configure(PINS[i],GPIO_INPUT|GPIO_PULL_DOWN);
+    /* SET (pin 0): active-low with pull-up */
+    gpio_configure(PIN_SET,GPIO_INPUT|GPIO_PULL_UP|GPIO_ACTIVE_LOW);
 }
 static void btns_poll(void){
     for(int i=0;i<7;i++){

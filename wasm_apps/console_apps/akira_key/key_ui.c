@@ -65,6 +65,11 @@ static uint32_t totp_code;
 static int     totp_remain;
 static int     hold_frames = 0;
 
+/* ── Change-PIN state (0=verify old, 1=enter new, 2=confirm new) ─────────── */
+static int  chpin_phase;
+static char chpin_new[PIN_LEN+1];
+static int  chpin_err;
+
 /* ── BOOT ────────────────────────────────────────────────────────────────── */
 static void draw_boot(void) {
     display_clear(C_BG);
@@ -292,6 +297,30 @@ static void draw_ssh_view(void) {
     display_flush();
 }
 
+/* ── CHANGE PIN ──────────────────────────────────────────────────────────── */
+static void draw_change_pin(void) {
+    display_clear(C_BG);
+    draw_status("CHANGE PIN",0,0);
+    clear_content();
+    static const char *phases[]={"Step 1/3  Current PIN","Step 2/3  New PIN    ","Step 3/3  Confirm PIN"};
+    int ph=chpin_phase<3?chpin_phase:0;
+    tput((COLS-20)/2,2,phases[ph],C_ACCENT);
+    int mr=4;
+    char dotrow[PIN_LEN*3+2]; int di=0;
+    for(int i=0;i<PIN_LEN;i++){
+        if(i>0){dotrow[di++]=' ';}
+        dotrow[di++]=(i<pin_cur)?'*':((i==pin_cur)?'0'+pin_digit_val:'_');
+    }
+    dotrow[di]='\0';
+    int pin_col=(COLS-PIN_LEN*2)/2;
+    tput(pin_col,mr+1,dotrow,C_ACCENT);
+    if(chpin_err==1) tput(COLS/2-6,mr+3," WRONG PIN ",C_DANGER);
+    if(chpin_err==2) tput(COLS/2-7,mr+3," NO MATCH  ",C_DANGER);
+    tput(0,mr+5,"  UP/DOWN: digit   RIGHT: next",C_DIM);
+    draw_action("CANCEL","CONFIRM");
+    display_flush();
+}
+
 /* ── SETTINGS ────────────────────────────────────────────────────────────── */
 static void draw_settings(void) {
     display_clear(C_BG);
@@ -357,6 +386,7 @@ void ui_init(void) {
     list_sel=0; list_scroll=0;
     pin_cur=0; pin_digit_val=0; pin_wrong=0;
     hold_frames=0;
+    if(g_screen==SCR_CHANGE_PIN){ chpin_phase=0; chpin_err=0; }
 }
 
 void ui_draw(void) {
@@ -372,6 +402,7 @@ void ui_draw(void) {
     case SCR_PASS_VIEW:    draw_pass_view();     break;
     case SCR_SSH_VIEW:     draw_ssh_view();      break;
     case SCR_SETTINGS:     draw_settings();      break;
+    case SCR_CHANGE_PIN:   draw_change_pin();    break;
     case SCR_FACTORY_RESET:draw_factory_reset(); break;
     case SCR_ABOUT:        draw_about();         break;
     default: break;
@@ -490,11 +521,40 @@ void ui_handle_key(int key, int long_press) {
         if(key==KEY_DOWN) list_sel=(list_sel+1)%4;
         if(key==KEY_LEFT) back();
         if(key==KEY_RIGHT){
+            if(list_sel==0){ go(SCR_CHANGE_PIN); }
             if(list_sel==1){ g_key_vault.ble_enabled^=1; g_dirty=1; }
             if(list_sel==2){ g_key_vault.autolock_s=
                              g_key_vault.autolock_s==0?30:g_key_vault.autolock_s==30?60:
                              g_key_vault.autolock_s==60?300:0; g_dirty=1; }
             if(list_sel==3){ hold_frames=0; go(SCR_FACTORY_RESET); }
+        }
+        break;
+
+    case SCR_CHANGE_PIN:
+        chpin_err=0;
+        if(key==KEY_UP)   pin_digit_val=(pin_digit_val+1)%10;
+        if(key==KEY_DOWN) pin_digit_val=(pin_digit_val+9)%10;
+        if(key==KEY_LEFT){ if(pin_cur>0){ pin_cur--; pin_digit_val=0; } else back(); }
+        if(key==KEY_RIGHT){
+            pin_digits[pin_cur]='0'+pin_digit_val;
+            if(++pin_cur==PIN_LEN){
+                pin_digits[PIN_LEN]='\0';
+                if(chpin_phase==0){
+                    /* verify current PIN */
+                    if(kstore_load(pin_digits)!=0){ chpin_err=1; pin_cur=0; pin_digit_val=0; }
+                    else{ chpin_phase=1; pin_cur=0; pin_digit_val=0; }
+                } else if(chpin_phase==1){
+                    /* store new PIN candidate */
+                    sv_cpy(chpin_new,pin_digits,PIN_LEN+1); chpin_phase=2; pin_cur=0; pin_digit_val=0;
+                } else {
+                    /* confirm new PIN */
+                    if(sv_cmp(pin_digits,chpin_new)!=0){ chpin_err=2; chpin_phase=1; pin_cur=0; pin_digit_val=0; }
+                    else{
+                        kstore_create(chpin_new); /* re-encrypt vault with new PIN */
+                        back();
+                    }
+                }
+            }
         }
         break;
 

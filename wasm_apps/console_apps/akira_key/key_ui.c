@@ -297,6 +297,36 @@ static void draw_ssh_view(void) {
     display_flush();
 }
 
+/* ── SET PIN (first run) ─────────────────────────────────────────────────── */
+static int  setpin_phase; /* 0=enter, 1=confirm */
+static char setpin_buf[PIN_LEN+1];
+
+static void draw_set_pin(void) {
+    display_clear(C_BG);
+    trow_bg(0, C_HEADER);
+    tput((COLS-11)/2, 0, "[AKIRAKEY]", C_ACCENT);
+    display_hline(0, GLYPH_H-1, GW, C_ACCENT);
+    int mr=3;
+    if(setpin_phase==0){
+        tput((COLS-16)/2, mr,   "  Set your PIN  ", C_FG);
+        tput((COLS-22)/2, mr+1, "  (6 digits, remember it!)  ", C_DIM);
+    } else {
+        tput((COLS-14)/2, mr,   "  Confirm PIN  ", C_ACCENT);
+    }
+    char dotrow[PIN_LEN*3+2]; int di=0;
+    for(int i=0;i<PIN_LEN;i++){
+        if(i>0){dotrow[di++]=' ';}
+        dotrow[di++]=(i<pin_cur)?'*':((i==pin_cur)?'0'+pin_digit_val:'_');
+    }
+    dotrow[di]='\0';
+    int pin_col=(COLS-PIN_LEN*2)/2;
+    tput(pin_col, mr+3, dotrow, C_ACCENT);
+    if(chpin_err==2) tput(COLS/2-6, mr+5, " NO MATCH ", C_DANGER);
+    tput(0, mr+6, "  UP/DOWN: digit   RIGHT: next", C_DIM);
+    draw_action("", "NEXT");
+    display_flush();
+}
+
 /* ── CHANGE PIN ──────────────────────────────────────────────────────────── */
 static void draw_change_pin(void) {
     display_clear(C_BG);
@@ -387,6 +417,7 @@ void ui_init(void) {
     pin_cur=0; pin_digit_val=0; pin_wrong=0;
     hold_frames=0;
     if(g_screen==SCR_CHANGE_PIN){ chpin_phase=0; chpin_err=0; }
+    if(g_screen==SCR_SET_PIN){ setpin_phase=0; chpin_err=0; }
 }
 
 void ui_draw(void) {
@@ -401,6 +432,7 @@ void ui_draw(void) {
     case SCR_PASS_LIST:    draw_pass_list();     break;
     case SCR_PASS_VIEW:    draw_pass_view();     break;
     case SCR_SSH_VIEW:     draw_ssh_view();      break;
+    case SCR_SET_PIN:      draw_set_pin();       break;
     case SCR_SETTINGS:     draw_settings();      break;
     case SCR_CHANGE_PIN:   draw_change_pin();    break;
     case SCR_FACTORY_RESET:draw_factory_reset(); break;
@@ -513,6 +545,30 @@ void ui_handle_key(int key, int long_press) {
             }
             hexout[hi]='\0';
             hid_type_string(hexout);
+        }
+        break;
+
+    case SCR_SET_PIN:
+        chpin_err=0;
+        if(key==KEY_UP)   pin_digit_val=(pin_digit_val+1)%10;
+        if(key==KEY_DOWN) pin_digit_val=(pin_digit_val+9)%10;
+        if(key==KEY_LEFT && pin_cur>0){ pin_cur--; pin_digit_val=0; }
+        if(key==KEY_RIGHT){
+            pin_digits[pin_cur]='0'+pin_digit_val;
+            if(++pin_cur==PIN_LEN){
+                pin_digits[PIN_LEN]='\0';
+                if(setpin_phase==0){
+                    sv_cpy(setpin_buf, pin_digits, PIN_LEN+1);
+                    setpin_phase=1; pin_cur=0; pin_digit_val=0;
+                } else {
+                    if(sv_cmp(pin_digits, setpin_buf)!=0){
+                        chpin_err=2; setpin_phase=0; pin_cur=0; pin_digit_val=0;
+                    } else {
+                        kstore_create(setpin_buf);
+                        g_screen=SCR_HOME; ui_init();
+                    }
+                }
+            }
         }
         break;
 

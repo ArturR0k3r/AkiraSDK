@@ -53,6 +53,7 @@ typedef enum {
     SCR_PASS_LIST,
     SCR_PASS_VIEW,
     SCR_SSH_VIEW,
+    SCR_SET_PIN,
     SCR_SETTINGS,
     SCR_CHANGE_PIN,
     SCR_FACTORY_RESET,

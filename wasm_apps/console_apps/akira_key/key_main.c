@@ -98,9 +98,7 @@ int main(void) {
     g_screen=SCR_BOOT; ui_draw(); delay(1200000);
 
     if(kstore_exists()) g_screen=SCR_UNLOCK;
-    else{ /* First run: auto-create with PIN 000000 — user must change */
-        kstore_create("000000"); g_screen=SCR_HOME;
-    }
+    else g_screen=SCR_SET_PIN; /* First run: let user choose their PIN */
     ui_init();
 
     int dirty=1, last_draw_ms=0, last_tick_ms=0, last_save_ms=0;

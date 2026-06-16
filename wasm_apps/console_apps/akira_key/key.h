@@ -1,5 +1,5 @@
 /*
- * key.h — AkiraKey electronic key: types, constants, shared state
+ * key.h — AkiraKey: types, constants, shared state
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef KEY_H
@@ -7,40 +7,62 @@
 
 #include <stdint.h>
 
-/* ── Display ────────────────────────────────────────────────────────────── */
+/* ── Display ─────────────────────────────────────────────────────────── */
 extern int32_t GW, GH;
 #define GLYPH_W   8
 #define GLYPH_H   13
 #define COLS      (GW / GLYPH_W)
 #define ROWS      (GH / GLYPH_H)
 
-/* ── Colours (RGB565) ───────────────────────────────────────────────────── */
+/* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BG      0x0000u
 #define C_FG      0xFFFFu
-#define C_ACCENT  0x07E0u
-#define C_WARN    0xFFE0u
-#define C_DANGER  0xF800u
-#define C_DIM     0x8410u
-#define C_HEADER  0x0010u
+#define C_ACCENT  0x07E0u   /* green  */
+#define C_WARN    0xFFE0u   /* yellow */
+#define C_DANGER  0xF800u   /* red    */
+#define C_DIM     0x8410u   /* grey   */
+#define C_HEADER  0x0010u   /* dark blue */
 #define C_BLUE    0x001Fu
+#define C_CYAN    0x07FFu
+#define C_SEL_BG  0x07E0u   /* selection background (green) */
+#define C_SEL_FG  0x0000u   /* selection foreground (black) */
+#define C_PIN_BOX 0x3186u   /* dim grey for PIN box */
 
-/* ── GPIO pins ───────────────────────────────────────────────────────────── */
-#define PIN_UP       4
-#define PIN_DOWN     5
-#define PIN_LEFT     6
-#define PIN_RIGHT    7
-#define PIN_A        15
-#define PIN_B        16
-#define PIN_SET      0
+/* ── GPIO pins (match space_invaders / all other console apps) ───────── */
+#define PIN_UP    4
+#define PIN_DOWN  5
+#define PIN_LEFT  7
+#define PIN_RIGHT 6
+#define PIN_A     15
+#define PIN_B     16
+#define PIN_SET   0
 
-/* ── Limits ──────────────────────────────────────────────────────────────── */
+/* ── Limits ──────────────────────────────────────────────────────────── */
 #define MAX_TOTP_SLOTS  16
-#define MAX_FIDO2_SLOTS 8
-#define MAX_PASS_SLOTS  8
+#define MAX_FIDO2_SLOTS  8
+#define MAX_PASS_SLOTS   8
+#define PIN_DIGITS       4
+#define PIN_MAX_ATTEMPTS 3
 
-/* ── Screen IDs ──────────────────────────────────────────────────────────── */
+/* ── Vault file constants ────────────────────────────────────────────── */
+/*
+ * File layout (key.bin):
+ *   [0..71]  Plaintext header  (magic, pin_hash, pin_salt, enc_nonce, pad)
+ *   [72..]   ChaCha20-encrypted body (ssh keys, TOTP, FIDO2, passwords)
+ *
+ * Encryption key = PBKDF2-SHA256(pin, pin_salt XOR 0xAA, 1024 iters)
+ * PIN hash       = PBKDF2-SHA256(pin, pin_salt,          1024 iters)
+ */
+#define VAULT_HDR_SIZE  72
+#define KEY_MAGIC       "AKK3"
+
+/* ── Screen IDs ──────────────────────────────────────────────────────── */
 typedef enum {
     SCR_BOOT = 0,
+    SCR_PIN_ENTRY,      /* unlock vault with PIN          */
+    SCR_PIN_SETUP_1,    /* first-boot: enter new PIN      */
+    SCR_PIN_SETUP_2,    /* first-boot: confirm new PIN    */
+    SCR_PIN_ERROR,      /* wrong PIN feedback             */
     SCR_HOME,
     SCR_TOTP_LIST,
     SCR_TOTP_VIEW,
@@ -55,125 +77,165 @@ typedef enum {
     SCR_COUNT
 } screen_t;
 
-/* ── TOTP/HOTP slot ──────────────────────────────────────────────────────── */
+/* ── TOTP/HOTP slot ──────────────────────────────────────────────────── */
 typedef struct {
-    char     label[32];
-    uint8_t  secret[32];
-    uint8_t  secret_len;
-    uint8_t  digits;
-    uint8_t  period;
-    uint8_t  active;
+    char    label[32];
+    uint8_t secret[32];
+    uint8_t secret_len;
+    uint8_t digits;
+    uint8_t period;
+    uint8_t active;
 } totp_slot_t;
 
-/* ── FIDO2 resident credential ───────────────────────────────────────────── */
+/* ── FIDO2 resident credential ───────────────────────────────────────── */
 typedef struct {
     char     rp_id[48];
     char     user_name[32];
     uint8_t  private_key[32];
     uint32_t sign_count;
     uint8_t  active;
+    uint8_t  _pad[3];
 } fido2_cred_t;
 
-/* ── Password slot ───────────────────────────────────────────────────────── */
+/* ── Password slot ───────────────────────────────────────────────────── */
 typedef struct {
     char    label[24];
     char    username[32];
     char    password[48];
     uint8_t active;
+    uint8_t _pad[3];
 } pass_slot_t;
 
-/* ── Key vault (stored plaintext) ────────────────────────────────────────── */
+/*
+ * Key vault.
+ * The first VAULT_HDR_SIZE (72) bytes are plaintext on disk.
+ * Everything from offset 72 onward is ChaCha20-encrypted.
+ */
 typedef struct {
-    uint8_t      magic[4];     /* "AKK2" */
+    /* ── Plaintext header (72 bytes) ──── */
+    uint8_t  magic[4];       /* "AKK3"                               */
+    uint8_t  pin_hash[32];   /* PBKDF2(pin, pin_salt, 1024)          */
+    uint8_t  pin_salt[16];   /* random, fixed at vault creation      */
+    uint8_t  enc_nonce[12];  /* ChaCha20 nonce, refreshed each save  */
+    uint8_t  _hdr_pad[8];    /* pad to 72 bytes                      */
+
+    /* ── Encrypted body (from byte 72) ── */
     uint8_t      ssh_key[32];
     uint8_t      ssh_pub[32];
     uint32_t     _reserved;
     uint8_t      ble_enabled;
-    uint8_t      pad[3];
+    uint8_t      _body_pad[3];
     totp_slot_t  totp[MAX_TOTP_SLOTS];
     fido2_cred_t fido2[MAX_FIDO2_SLOTS];
     pass_slot_t  pass[MAX_PASS_SLOTS];
 } key_vault_t;
 
-/* ── Global state ────────────────────────────────────────────────────────── */
+/* ── Global state ────────────────────────────────────────────────────── */
 extern key_vault_t g_key_vault;
 extern int         g_dirty;
 extern screen_t    g_screen;
 extern screen_t    g_prev_screen;
+extern int         g_locked;
+extern int         g_boot_usb_status; /* 0=waiting, 1=connected, -1=no host */
+extern int         g_exit;            /* set to 1 to break main loop        */
 
-/* ── Crypto (key_crypto.c) ───────────────────────────────────────────────── */
+/* ── Crypto (key_crypto.c) ───────────────────────────────────────────── */
 void     sha256(const uint8_t *d, int l, uint8_t *out);
 void     hmac_sha256(const uint8_t *k, int kl, const uint8_t *m, int ml, uint8_t *out);
+void     pbkdf2_sha256(const uint8_t *pw, int pwl,
+                       const uint8_t *salt, int sl,
+                       int iters, uint8_t *out);
+void     chacha20_xor(const uint8_t *key, const uint8_t *nonce, uint32_t ctr,
+                      uint8_t *data, int len);
 uint32_t totp_generate(const uint8_t *secret, int slen,
                        uint64_t unix_sec, int period, int digits);
 int      base32_decode(const char *b32, uint8_t *out, int max);
 void     ed25519_generate_keypair(const uint8_t *seed32,
                                   uint8_t pub[32], uint8_t priv[64]);
 
-/* ── Store (key_store.c) ─────────────────────────────────────────────────── */
+/* ── Store (key_store.c) ─────────────────────────────────────────────── */
 int  kstore_exists(void);
-int  kstore_create(void);
-int  kstore_load(void);
-void kstore_save(void);
+int  kstore_load_hdr(void);           /* read file; body stays encrypted  */
+int  kstore_unlock(const char *pin);  /* verify PIN, decrypt body; 0=ok   */
+int  kstore_create(const char *pin);  /* new vault; auto-unlocks           */
+void kstore_set_pin(const char *pin); /* change PIN (vault must be open)  */
+void kstore_save(void);               /* encrypt + write                   */
+void kstore_lock(void);               /* zero derived key, set g_locked   */
+void kstore_wipe(void);               /* delete key.bin + zero memory     */
 
-/* ── UI (key_ui.c) ───────────────────────────────────────────────────────── */
+/* ── UI (key_ui.c) ───────────────────────────────────────────────────── */
 void ui_init(void);
 void ui_draw(void);
 void ui_handle_key(int key, int long_press);
 void ui_tick(uint64_t unix_sec);
 
-#define KEY_UP      0
-#define KEY_DOWN    1
-#define KEY_LEFT    2
-#define KEY_RIGHT   3
-#define KEY_A       4
-#define KEY_B       5
-#define KEY_NONE   -1
+/* ── Key codes ───────────────────────────────────────────────────────── */
+#define KEY_UP    0
+#define KEY_DOWN  1
+#define KEY_LEFT  2
+#define KEY_RIGHT 3
+#define KEY_A     4
+#define KEY_B     5
+#define KEY_SET   6
+#define KEY_NONE -1
 
-/* ── AkiraOS API forwards ───────────────────────────────────────────────── */
-extern int display_clear(uint32_t color);
-extern int display_rect(int32_t x,int32_t y,int32_t w,int32_t h,uint32_t color);
-extern int display_text(int32_t x,int32_t y,const char *t,uint32_t color);
-extern int display_text_large(int32_t x,int32_t y,const char *t,uint32_t color);
-extern int display_hline(int32_t x,int32_t y,int32_t len,uint32_t color);
-extern int display_flush(void);
-extern int display_get_size(int32_t *w,int32_t *h);
-extern int gpio_configure(uint32_t pin,uint32_t flags);
-extern int gpio_read(uint32_t pin);
-extern int hid_init(int transport,int types);
-extern int hid_disable(void);
-extern int hid_fido_recv(void *buf,int len);
-extern int hid_fido_send(const void *buf,int len);
-extern int hid_type_string(const char *s);
-extern int storage_open(const char *path,int flags);
-extern int storage_read(int fd,void *buf,int len);
-extern int storage_write(int fd,const void *buf,int len);
-extern void storage_close(int fd);
-extern int storage_delete(const char *path);
-extern int settings_get(const char *key,char *buf,int32_t len);
-extern int settings_set(const char *key,const char *val);
-extern int timer_create(void);
-extern int timer_start(int32_t h);
-extern int timer_elapsed(int32_t h);
-extern int delay(uint32_t us);
+/* ── AkiraOS API ─────────────────────────────────────────────────────── */
+extern int   display_clear(uint32_t color);
+extern int   display_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color);
+extern int   display_text(int32_t x, int32_t y, const char *t, uint32_t color);
+extern int   display_text_large(int32_t x, int32_t y, const char *t, uint32_t color);
+extern int   display_hline(int32_t x, int32_t y, int32_t len, uint32_t color);
+extern int   display_flush(void);
+extern int   display_get_size(int32_t *w, int32_t *h);
+extern int   hid_init(int transport, int types);
+extern int   hid_disable(void);
+extern int   hid_is_connected(void);
+extern int   hid_fido_recv(void *buf, int len);
+extern int   hid_fido_send(const void *buf, int len);
+extern int   hid_type_string(const char *s);
+extern int   storage_open(const char *path, int flags);
+extern int   storage_read(int fd, void *buf, int len);
+extern int   storage_write(int fd, const void *buf, int len);
+extern void  storage_close(int fd);
+extern int   storage_delete(const char *path);
+extern int   settings_get(const char *key, char *buf, int32_t len);
+extern int   settings_set(const char *key, const char *val);
+extern int   timer_create(void);
+extern int   timer_start(int32_t h);
+extern int   timer_elapsed(int32_t h);
+extern int   delay(uint32_t us);
+
+extern int   gpio_configure(uint32_t pin, uint32_t flags);
+extern int   gpio_read(uint32_t pin);
 
 #ifndef GPIO_INPUT
-#define GPIO_INPUT            (1U<<0)
-#define GPIO_PULL_UP          (1U<<4)
-#define GPIO_PULL_DOWN        (1U<<5)
-#define GPIO_ACTIVE_LOW       (1U<<6)
+#define GPIO_INPUT      (1U << 0)
+#define GPIO_PULL_UP    (1U << 4)
+#define GPIO_PULL_DOWN  (1U << 5)
+#define GPIO_ACTIVE_LOW (1U << 6)
 #endif
-#define STORAGE_O_READ  0
-#define STORAGE_O_WRITE 1
-#define STORAGE_O_RDWR  3
+
+#define STORAGE_O_READ   0
+#define STORAGE_O_WRITE  1
+#define STORAGE_O_RDWR   3
 #define HID_TRANSPORT_BLE   1
 #define HID_TRANSPORT_USB   2
 #define HID_DEVICE_KEYBOARD 0x01
 
-/* ── String helpers ─────────────────────────────────────────────────────── */
-static inline int sv_len(const char *s){int n=0;while(s[n])n++;return n;}
-static inline void sv_cpy(char *d,const char *s,int m){int i=0;while(i<m-1&&s[i]){d[i]=s[i];i++;}d[i]='\0';}
-static inline int sv_cmp(const char *a,const char *b){while(*a&&*a==*b){a++;b++;}return(unsigned char)*a-(unsigned char)*b;}
-static inline void sv_ncpy(char *d,const char *s,int n){int i=0;while(i<n&&s[i]){d[i]=s[i];i++;}while(i<n)d[i++]='\0';}
+/* ── String helpers ──────────────────────────────────────────────────── */
+static inline int sv_len(const char *s) {
+    int n = 0; while (s[n]) n++; return n;
+}
+static inline void sv_cpy(char *d, const char *s, int m) {
+    int i = 0; while (i < m-1 && s[i]) { d[i] = s[i]; i++; } d[i] = '\0';
+}
+static inline int sv_cmp(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+static inline void sv_ncpy(char *d, const char *s, int n) {
+    int i = 0; while (i < n && s[i]) { d[i] = s[i]; i++; }
+    while (i < n) d[i++] = '\0';
+}
 
 #endif /* KEY_H */

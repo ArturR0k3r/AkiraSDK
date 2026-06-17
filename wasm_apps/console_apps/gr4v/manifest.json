@@ -1,13 +1,12 @@
 {
-  "name": "pixel_farmer",
-  "version": "1.0.0",
+  "name": "gr4v",
+  "version": "2.0.0",
   "capabilities": [
     "display.write",
     "input.read",
     "gpio.read",
-    "app.switch",
-    "timer"
+    "app.switch"
   ],
-  "memory_quota": 131072,
+  "memory_quota": 65536,
   "min_akiraos_version": "1.0.0"
 }

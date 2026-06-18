@@ -18,9 +18,9 @@
 
 #include "akira_api.h"
 
-/* ── Display constants ────────────────────────────────────────────────── */
-#define SCR_W 320
-#define SCR_H 240
+/* ── Display dimensions (populated at startup via display_get_size) ───── */
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
 
 /* ── Colors ───────────────────────────────────────────────────────────── */
 #define COL_BG 0x0000
@@ -48,14 +48,14 @@ static void render(const char *handle, const char *name,
 
     /* Corner accents only — no border rectangle, full screen */
     int cl = 20;
-    display_rect(0,         0,         cl, 2,  COL_ACCENT);
-    display_rect(0,         0,         2,  cl, COL_ACCENT);
-    display_rect(SCR_W - cl,0,         cl, 2,  COL_ACCENT);
-    display_rect(SCR_W - 2, 0,         2,  cl, COL_ACCENT);
-    display_rect(0,         SCR_H - 2, cl, 2,  COL_ACCENT);
-    display_rect(0,         SCR_H - cl,2,  cl, COL_ACCENT);
-    display_rect(SCR_W - cl,SCR_H - 2, cl, 2,  COL_ACCENT);
-    display_rect(SCR_W - 2, SCR_H - cl,2,  cl, COL_ACCENT);
+    display_rect(0, 0, cl, 2, COL_ACCENT);
+    display_rect(0, 0, 2, cl, COL_ACCENT);
+    display_rect(SCR_W - cl, 0, cl, 2, COL_ACCENT);
+    display_rect(SCR_W - 2, 0, 2, cl, COL_ACCENT);
+    display_rect(0, SCR_H - 2, cl, 2, COL_ACCENT);
+    display_rect(0, SCR_H - cl, 2, cl, COL_ACCENT);
+    display_rect(SCR_W - cl, SCR_H - 2, cl, 2, COL_ACCENT);
+    display_rect(SCR_W - 2, SCR_H - cl, 2, cl, COL_ACCENT);
 
     /* "AKIRA BADGE" — small dim watermark, top center */
     display_text(SCR_W / 2 - 38, 8, "AKIRA BADGE", COL_DIM);
@@ -69,19 +69,22 @@ static void render(const char *handle, const char *name,
     display_rect(24, 108, SCR_W - 48, 1, COL_BORDER);
 
     /* Name */
-    if (str_len(name) > 0) {
+    if (str_len(name) > 0)
+    {
         int nx = SCR_W / 2 - str_len(name) * 7 / 2;
         display_text(nx, 122, name, COL_WHITE);
     }
 
     /* Org */
-    if (str_len(org) > 0) {
+    if (str_len(org) > 0)
+    {
         int ox = SCR_W / 2 - str_len(org) * 7 / 2;
         display_text(ox, 150, org, COL_GRAY);
     }
 
     /* Role pill */
-    if (str_len(role) > 0) {
+    if (str_len(role) > 0)
+    {
         int rw = str_len(role) * 7 + 16;
         int rx = SCR_W / 2 - rw / 2;
         display_rounded_rect_fill(rx, 176, rw, 18, 4, COL_ACCENT);
@@ -101,6 +104,8 @@ int main(void)
     char name[33] = "ARTUR";
     char org[17] = "PENENGINEERING";
     char role[17] = "CEO";
+
+    display_get_size(&SCR_W, &SCR_H);
 
     settings_get("badge/handle", handle, sizeof(handle));
     settings_get("badge/name", name, sizeof(name));
@@ -124,12 +129,6 @@ int main(void)
             settings_get("badge/org", org, sizeof(org));
             settings_get("badge/role", role, sizeof(role));
             render(handle, name, org, role);
-        }
-
-        if (pressed & AKIRA_BTN_B)
-        {
-            app_switch("supervisor");
-            return 0;
         }
 
         delay(20000);

@@ -1,0 +1,15 @@
+{
+  "name": "badge",
+  "display_name": "Akira Badge",
+  "version": "1.0.0",
+  "description": "DEF CON / conference badge — identity display, AkiraMesh BLE card exchange, crypto challenge. Set badge/handle, badge/name, badge/org, badge/role via settings.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "ble",
+    "settings.*",
+    "timer"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

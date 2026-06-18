@@ -15,9 +15,9 @@ LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main
 LDFLAGS += -Wl,--allow-undefined
 LDFLAGS += -Wl,--strip-all
-LDFLAGS += -z stack-size=8192
-LDFLAGS += -Wl,--initial-memory=131072
-LDFLAGS += -Wl,--max-memory=131072
+LDFLAGS += -z stack-size=4096
+LDFLAGS += -Wl,--initial-memory=65536
+LDFLAGS += -Wl,--max-memory=65536
 
 all: $(TARGET)
 	@if [ -f manifest.json ] && [ -f ../../../scripts/embed_manifest.py ]; then \

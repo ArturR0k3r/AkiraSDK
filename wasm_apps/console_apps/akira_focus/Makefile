@@ -1,6 +1,6 @@
-# radio_scan - AkiraOS WASM Application Makefile
+# akira_focus - AkiraOS WASM Application Makefile
 
-APP_NAME   = radio_scan
+APP_NAME   = akira_focus
 WASI_SDK  ?= /opt/wasi-sdk
 CC         = $(WASI_SDK)/bin/clang
 
@@ -15,9 +15,9 @@ LDFLAGS  = -Wl,--no-entry
 LDFLAGS += -Wl,--export=main
 LDFLAGS += -Wl,--allow-undefined
 LDFLAGS += -Wl,--strip-all
-LDFLAGS += -z stack-size=8192
-LDFLAGS += -Wl,--initial-memory=131072
-LDFLAGS += -Wl,--max-memory=131072
+LDFLAGS += -z stack-size=4096
+LDFLAGS += -Wl,--initial-memory=65536
+LDFLAGS += -Wl,--max-memory=65536
 
 all: $(TARGET)
 	@if [ -f manifest.json ] && [ -f ../../../scripts/embed_manifest.py ]; then \

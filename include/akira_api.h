@@ -1082,12 +1082,80 @@ extern int rf_get_rssi(int16_t *rssi);
 
 /**
  * @brief Send data over RF transceiver
- * 
+ *
  * @param payload_ptr Pointer to payload data
  * @param len Length of payload in bytes
  * @return 0 on success, negative error code on failure
  */
 extern int rf_send(uint32_t payload_ptr, uint32_t len);
+
+/**
+ * @brief Select active RF chip.
+ * @param chip  RF chip index (AKIRA_RF_CHIP_* enum value).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_select(int chip);
+
+/**
+ * @brief Pop one packet from the background RX queue (non-blocking if timeout_ms=0).
+ * @param buf_ptr   Pointer to receive buffer.
+ * @param max_len   Size of receive buffer.
+ * @param timeout_ms  Milliseconds to wait; 0 = non-blocking.
+ * @return Number of bytes copied on success, -ENOMSG if queue empty, negative errno on error.
+ */
+extern int rf_recv_pop(void *buf_ptr, uint32_t max_len, uint32_t timeout_ms);
+
+/**
+ * @brief Blocking receive — waits up to timeout_ms for a single packet.
+ * @param buf_ptr   Pointer to receive buffer.
+ * @param max_len   Size of receive buffer.
+ * @param timeout_ms  Milliseconds to wait.
+ * @return Number of bytes received on success, negative errno on error.
+ */
+extern int rf_receive(void *buf_ptr, uint32_t max_len, uint32_t timeout_ms);
+
+/**
+ * @brief Set RF modulation mode.
+ * @param mod  Modulation type: RADIO_MOD_FSK=2, RADIO_MOD_LORA=5.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_modulation(int mod);
+
+/**
+ * @brief Set LoRa spreading factor (6..12).
+ * @param sf  Spreading factor (SF6–SF12; use SF10 for Meshtastic LongFast).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_spreading_factor(int sf);
+
+/**
+ * @brief Set LoRa bandwidth in Hz.
+ * @param bw_hz  Bandwidth in Hz (e.g. 125000, 250000, 500000).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_bandwidth(uint32_t bw_hz);
+
+/**
+ * @brief Set LoRa coding rate denominator (5..8, i.e. 4/5..4/8).
+ * @param cr  Coding rate denominator (use 8 for Meshtastic LongFast = 4/8).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_coding_rate(int cr);
+
+/* RF chip identifiers */
+#define AKIRA_RF_CHIP_NONE   0
+#define AKIRA_RF_CHIP_NRF24  1
+#define AKIRA_RF_CHIP_CC1101 2
+#define AKIRA_RF_CHIP_LR1121 3
+#define AKIRA_RF_CHIP_CC1121 4
+#define AKIRA_RF_CHIP_LR2021 5
+
+/* Radio modulation modes (matches radio_modulation_t on host) */
+#define RADIO_MOD_OOK   1
+#define RADIO_MOD_FSK   2
+#define RADIO_MOD_GFSK  3
+#define RADIO_MOD_GMSK  4
+#define RADIO_MOD_LORA  5
 
 /*
  * =============================================================================
@@ -1985,6 +2053,26 @@ extern int crypto_ed25519_keygen(uint8_t *seed_out, uint8_t *pub_out);
 extern int crypto_ed25519_sign(const uint8_t *seed,
                                 const void *msg, uint32_t msg_len,
                                 uint8_t *sig_out);
+
+/**
+ * @brief AES-256-CTR encrypt/decrypt (CTR is its own inverse).
+ *
+ * Meshtastic channel encryption uses AES-256-CTR with:
+ *   nonce[0..3]  = packet_id LE
+ *   nonce[4..7]  = 0
+ *   nonce[8..11] = from_node LE
+ *   nonce[12..15]= 0
+ * Default "LongFast" PSK "AQ==" expands to key = {0x01, 0x00×31}.
+ *
+ * @param key    32-byte AES key.
+ * @param nonce  16-byte initial counter block.
+ * @param in     Input buffer (plaintext or ciphertext, any length).
+ * @param len    Input length.
+ * @param out    Output buffer (same length as @p in).
+ * @return 0 on success, negative errno on error.
+ */
+extern int crypto_aes256_ctr(const uint8_t *key, const uint8_t *nonce,
+                              const void *in, uint32_t len, void *out);
 
 /*
  * =============================================================================

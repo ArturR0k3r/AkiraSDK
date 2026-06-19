@@ -1243,6 +1243,43 @@ extern int rf_set_coding_rate(int cr);
 #define RADIO_MOD_LORA  5
 
 /*
+ * Raw OOK/ASK signal capture and replay.
+ * Supported chips: CC1101, CC1121.  Returns -ENOTSUP on LoRa-only chips.
+ *
+ * Pulse buffer: uint16_t[] — alternating mark/space durations in microseconds.
+ *   [0]=first mark (µs), [1]=first space (µs), [2]=second mark, ...
+ *
+ * Required manifest capability: "rf.transceive"
+ */
+
+/** Maximum pulse count accepted by rf_raw_capture / rf_raw_replay */
+#define RF_RAW_MAX_SAMPLES 4096
+
+/**
+ * @brief Capture raw OOK pulse timings into @p buf.
+ *
+ * Puts the chip into async serial RX mode, waits for a signal, and records
+ * pulse durations until a silence gap >20 ms is detected or the buffer fills.
+ *
+ * @param buf         uint16_t[] in WASM memory — each element is µs.
+ * @param max_samples Maximum number of uint16_t values to write.
+ * @param timeout_ms  Time to wait for signal onset (0 = default 5 s).
+ * @return Sample count on success; -ETIMEDOUT if no signal; -ENOTSUP if chip
+ *         doesn't support raw mode; negative errno on error.
+ */
+extern int rf_raw_capture(uint16_t *buf, uint32_t max_samples, int32_t timeout_ms);
+
+/**
+ * @brief Replay a raw OOK pulse sequence captured by rf_raw_capture().
+ *
+ * @param buf          uint16_t[] of pulse durations (same format as capture).
+ * @param sample_count Number of samples in @p buf.
+ * @param repeat       Transmission count (1–9); 10 ms gap between repetitions.
+ * @return 0 on success, -ENOTSUP if chip doesn't support raw TX, negative errno.
+ */
+extern int rf_raw_replay(const uint16_t *buf, uint32_t sample_count, int32_t repeat);
+
+/*
  * =============================================================================
  * TIMER API
  * =============================================================================

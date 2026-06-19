@@ -1,0 +1,7 @@
+{
+  "name": "vault_ssh_key",
+  "version": "1.0.0",
+  "capabilities": ["display.write", "input.read", "crypto", "settings.*", "uart", "app.switch"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

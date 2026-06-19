@@ -1895,6 +1895,99 @@ extern int app_run_from_sd(const char *name);
 
 /*
  * =============================================================================
+ * CRYPTO API
+ * =============================================================================
+ * Required capability: "crypto"
+ * Gate: CONFIG_AKIRA_WASM_CRYPTO=y (selects TinyCrypt + PSA on host)
+ *
+ * All operations are synchronous. Buffers must be in WASM linear memory.
+ * Key material is zeroed from host memory after each call.
+ */
+
+/**
+ * @brief SHA-256 hash.
+ * @param data     Input buffer.
+ * @param data_len Input length in bytes.
+ * @param out      32-byte output buffer.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int crypto_sha256(const void *data, uint32_t data_len, uint8_t *out);
+
+/**
+ * @brief AES-256-CBC encrypt.
+ * @param key  32-byte key.
+ * @param iv   16-byte IV.
+ * @param in   Plaintext (length must be a multiple of 16).
+ * @param len  Plaintext length.
+ * @param out  Ciphertext output buffer (same length as @p in).
+ * @return 0 on success, -EINVAL if len is not a multiple of 16, -EIO on error.
+ */
+extern int crypto_aes256_encrypt(const uint8_t *key, const uint8_t *iv,
+                                  const void *in, uint32_t len, void *out);
+
+/** @brief AES-256-CBC decrypt. Same layout as crypto_aes256_encrypt(). */
+extern int crypto_aes256_decrypt(const uint8_t *key, const uint8_t *iv,
+                                  const void *in, uint32_t len, void *out);
+
+/**
+ * @brief HMAC-SHA256.
+ * @param key      Key buffer.
+ * @param key_len  Key length (max 64 bytes).
+ * @param data     Input buffer.
+ * @param data_len Input length.
+ * @param out      32-byte HMAC output.
+ * @return 0 on success.
+ */
+extern int crypto_hmac_sha256(const void *key, uint32_t key_len,
+                               const void *data, uint32_t data_len,
+                               uint8_t *out);
+
+/**
+ * @brief Fill buffer with cryptographically secure random bytes.
+ *
+ * Sources entropy from the ESP32-S3 hardware RNG via Zephyr sys_csrand_get().
+ *
+ * @param buf  Output buffer.
+ * @param len  Number of bytes to generate.
+ * @return 0 on success.
+ */
+extern int crypto_random(void *buf, uint32_t len);
+
+/**
+ * @brief Generate a new Ed25519 key pair.
+ *
+ * Internally sources entropy from the ESP32-S3 hardware RNG.
+ * Requires CONFIG_AKIRA_WASM_CRYPTO_ED25519=y on the host.
+ *
+ * The 32-byte seed is the canonical Ed25519 private key scalar. Store it
+ * (encrypted with crypto_aes256_encrypt) in NVS settings for persistence.
+ * The public key is re-derivable from the seed via the signing path, but
+ * storing it saves computation at startup.
+ *
+ * @param seed_out  32-byte output: private key seed (keep secret, store encrypted).
+ * @param pub_out   32-byte output: corresponding Ed25519 public key.
+ * @return 0 on success, -ENOTSUP if Ed25519 not compiled in, -EIO on PSA error.
+ */
+extern int crypto_ed25519_keygen(uint8_t *seed_out, uint8_t *pub_out);
+
+/**
+ * @brief Sign a message with an Ed25519 private key seed (pure EdDSA, no pre-hash).
+ *
+ * This matches OpenSSH `ssh-ed25519` and produces a 64-byte signature
+ * compatible with the SSH agent protocol.
+ *
+ * @param seed    32-byte private key seed (from crypto_ed25519_keygen or NVS).
+ * @param msg     Message bytes to sign.
+ * @param msg_len Message length.
+ * @param sig_out 64-byte signature output (r ∥ s).
+ * @return 0 on success, -ENOTSUP if Ed25519 not compiled in, -EIO on error.
+ */
+extern int crypto_ed25519_sign(const uint8_t *seed,
+                                const void *msg, uint32_t msg_len,
+                                uint8_t *sig_out);
+
+/*
+ * =============================================================================
  * SETTINGS API
  * =============================================================================
  *

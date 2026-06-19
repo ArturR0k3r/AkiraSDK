@@ -765,17 +765,95 @@ extern int ble_event_pop(uint8_t *buf, uint32_t len);
 #define HID_CONSUMER_BRIGHTNESS_UP 0x006F
 #define HID_CONSUMER_BRIGHTNESS_DN 0x0070
 
-/* USB HID keyboard keycodes (HUT 1.4 table 10) */
-#define HID_KEY_A     0x04
-#define HID_KEY_B     0x05
-#define HID_KEY_C     0x06
-#define HID_KEY_S     0x16
-#define HID_KEY_GRAVE  0x35  /**< Backtick / grave; with SHIFT → tilde */
-#define HID_KEY_MINUS  0x2D  /**< - / _ */
-#define HID_KEY_PRTSCN 0x46  /**< Print Screen / SysRq */
-#define HID_KEY_ENTER  0x28
-#define HID_KEY_ESC   0x29
-#define HID_KEY_SPACE 0x2C
+/* USB HID keyboard keycodes (HUT 1.4, Usage Page 0x07) */
+/* Letters */
+#define HID_KEY_A  0x04
+#define HID_KEY_B  0x05
+#define HID_KEY_C  0x06
+#define HID_KEY_D  0x07
+#define HID_KEY_E  0x08
+#define HID_KEY_F  0x09
+#define HID_KEY_G  0x0A
+#define HID_KEY_H  0x0B
+#define HID_KEY_I  0x0C
+#define HID_KEY_J  0x0D
+#define HID_KEY_K  0x0E
+#define HID_KEY_L  0x0F
+#define HID_KEY_M  0x10
+#define HID_KEY_N  0x11
+#define HID_KEY_O  0x12
+#define HID_KEY_P  0x13
+#define HID_KEY_Q  0x14
+#define HID_KEY_R  0x15
+#define HID_KEY_S  0x16
+#define HID_KEY_T  0x17
+#define HID_KEY_U  0x18
+#define HID_KEY_V  0x19
+#define HID_KEY_W  0x1A
+#define HID_KEY_X  0x1B
+#define HID_KEY_Y  0x1C
+#define HID_KEY_Z  0x1D
+/* Numbers */
+#define HID_KEY_1  0x1E
+#define HID_KEY_2  0x1F
+#define HID_KEY_3  0x20
+#define HID_KEY_4  0x21
+#define HID_KEY_5  0x22
+#define HID_KEY_6  0x23
+#define HID_KEY_7  0x24
+#define HID_KEY_8  0x25
+#define HID_KEY_9  0x26
+#define HID_KEY_0  0x27
+/* Control */
+#define HID_KEY_ENTER      0x28
+#define HID_KEY_ESC        0x29
+#define HID_KEY_BACKSPACE  0x2A
+#define HID_KEY_TAB        0x2B
+#define HID_KEY_SPACE      0x2C
+/* Punctuation */
+#define HID_KEY_MINUS      0x2D  /**< - / _ */
+#define HID_KEY_EQUAL      0x2E  /**< = / + */
+#define HID_KEY_LBRACKET   0x2F  /**< [ / { */
+#define HID_KEY_RBRACKET   0x30  /**< ] / } */
+#define HID_KEY_BACKSLASH  0x31  /**< \ / | */
+#define HID_KEY_SEMICOLON  0x33  /**< ; / : */
+#define HID_KEY_APOSTROPHE 0x34  /**< ' / " */
+#define HID_KEY_GRAVE      0x35  /**< ` / ~ */
+#define HID_KEY_COMMA      0x36  /**< , / < */
+#define HID_KEY_DOT        0x37  /**< . / > */
+#define HID_KEY_SLASH      0x38  /**< / / ? */
+/* Lock keys */
+#define HID_KEY_CAPSLOCK   0x39
+#define HID_KEY_NUMLOCK    0x53
+#define HID_KEY_SCROLLLOCK 0x47
+/* Function keys */
+#define HID_KEY_F1   0x3A
+#define HID_KEY_F2   0x3B
+#define HID_KEY_F3   0x3C
+#define HID_KEY_F4   0x3D
+#define HID_KEY_F5   0x3E
+#define HID_KEY_F6   0x3F
+#define HID_KEY_F7   0x40
+#define HID_KEY_F8   0x41
+#define HID_KEY_F9   0x42
+#define HID_KEY_F10  0x43
+#define HID_KEY_F11  0x44
+#define HID_KEY_F12  0x45
+/* Navigation */
+#define HID_KEY_PRINTSCREEN 0x46
+#define HID_KEY_PRTSCN      0x46
+#define HID_KEY_PAUSE       0x48
+#define HID_KEY_INSERT      0x49
+#define HID_KEY_HOME        0x4A
+#define HID_KEY_PAGEUP      0x4B
+#define HID_KEY_DELETE      0x4C
+#define HID_KEY_END         0x4D
+#define HID_KEY_PAGEDOWN    0x4E
+#define HID_KEY_RIGHT       0x4F
+#define HID_KEY_LEFT        0x50
+#define HID_KEY_DOWN        0x51
+#define HID_KEY_UP          0x52
+#define HID_KEY_APP         0x65  /**< Application / Menu key */
 
 /** @brief Enable HID subsystem. Must be called before other HID functions. */
 extern int hid_enable(void);
@@ -803,6 +881,13 @@ extern int hid_key_release_all(void);
  * Handles uppercase via Shift automatically.
  */
 extern int hid_type_string(const char *str);
+
+/**
+ * @brief Set keyboard modifier keys (does NOT release automatically).
+ * Call hid_key_release_all() to clear both keys and modifiers.
+ * @param mod_mask  Bitmask of HID_MOD_* constants.
+ */
+extern int hid_set_modifiers(int32_t mod_mask);
 
 /** @brief Press one or more gamepad buttons (bitmask). */
 extern int hid_gamepad_press(int32_t btn_mask);
@@ -2073,6 +2158,82 @@ extern int crypto_ed25519_sign(const uint8_t *seed,
  */
 extern int crypto_aes256_ctr(const uint8_t *key, const uint8_t *nonce,
                               const void *in, uint32_t len, void *out);
+
+/*
+ * =============================================================================
+ * FILESYSTEM API
+ * =============================================================================
+ * Required manifest capability: "fs.read" (reads) and/or "fs.write" (writes).
+ * Apps are jailed to their sandbox directory; ".." components are rejected.
+ *
+ * File paths are relative to the app sandbox (e.g. "payloads/foo.txt").
+ */
+
+/* fs_open flags */
+#define AKIRA_FS_O_READ   0x00   /**< Open for reading */
+#define AKIRA_FS_O_WRITE  0x01   /**< Open for writing (must exist) */
+#define AKIRA_FS_O_APPEND 0x02   /**< Open for appending */
+#define AKIRA_FS_O_RDWR   0x04   /**< Open for read+write */
+#define AKIRA_FS_O_CREATE 0x08   /**< Create if not exists */
+#define AKIRA_FS_O_TRUNC  0x10   /**< Truncate on open */
+
+/* fs_seek whence */
+#define AKIRA_FS_SEEK_SET 0
+#define AKIRA_FS_SEEK_CUR 1
+#define AKIRA_FS_SEEK_END 2
+
+/** File/directory stat result (little-endian, packed). */
+typedef struct __attribute__((packed)) {
+    uint32_t size;      /**< File size (0 for dirs). */
+    uint8_t  type;      /**< 0=file, 1=directory. */
+    uint8_t  _pad[3];
+    uint64_t mtime_ms;  /**< Modification time ms since epoch (0 if unknown). */
+} akira_stat_t;
+
+/**
+ * @brief Open a file. Returns a file descriptor ≥0 on success, negative errno on error.
+ * @param path   Path relative to the app sandbox.
+ * @param flags  AKIRA_FS_O_* flags.
+ */
+extern int fs_open(const char *path, int32_t flags);
+
+/** @brief Close a file descriptor. */
+extern int fs_close(int32_t fd);
+
+/**
+ * @brief Read up to @p len bytes. Returns bytes read, 0 at EOF, negative errno on error.
+ */
+extern int fs_read(int32_t fd, void *buf, uint32_t len);
+
+/** @brief Write @p len bytes. Returns bytes written or negative errno. */
+extern int fs_write(int32_t fd, const void *buf, uint32_t len);
+
+/**
+ * @brief Seek within a file.
+ * @param whence  AKIRA_FS_SEEK_SET / _CUR / _END.
+ */
+extern int fs_seek(int32_t fd, int32_t offset, int32_t whence);
+
+/** @brief Return current file position. */
+extern int fs_tell(int32_t fd);
+
+/**
+ * @brief Stat a path. Returns 0 on success, negative errno on error.
+ * @param out  Pointer to akira_stat_t to fill.
+ */
+extern int fs_stat(const char *path, akira_stat_t *out);
+
+/** @brief Delete a file. */
+extern int fs_unlink(const char *path);
+
+/** @brief Create a directory. */
+extern int fs_mkdir(const char *path);
+
+/**
+ * @brief List directory entries into @p out_buf as newline-separated names.
+ * The buffer is NUL-terminated. Returns bytes written or negative errno.
+ */
+extern int fs_readdir(const char *path, char *out_buf, uint32_t out_len);
 
 /*
  * =============================================================================

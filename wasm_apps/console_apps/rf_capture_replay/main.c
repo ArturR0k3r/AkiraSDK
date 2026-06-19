@@ -745,9 +745,23 @@ static void draw_done(void)
 
 int main(void)
 {
-    rf_select(AKIRA_RF_CHIP_CC1101);
+    if (rf_select(AKIRA_RF_CHIP_CC1121) < 0) {
+        display_clear(COL_BG);
+        display_rect(0, 0, DW, HDR_H, COL_HDR);
+        display_text(4, 3, "RF CAPTURE+REPLAY", COL_TXT);
+        display_text(8, HDR_H + 20, "RF module not available.", COL_ERR);
+        display_text(8, HDR_H + 40, "CC1121 not detected or", COL_DIM);
+        display_text(8, HDR_H + 55, "not enabled in firmware.", COL_DIM);
+        display_rect(0, FOT_Y, DW, FOT_H, COL_HDR);
+        display_text(4, FOT_Y + 2, "[B]Exit", COL_DIM);
+        display_flush();
+        while (!(input_get_buttons() & AKIRA_BTN_B)) {
+            delay(50);
+        }
+        return -1;
+    }
 
-    /* Ensure captures directory exists */
+    /* Ensure captures directory exists (non-fatal if SD not available) */
     fs_mkdir(CAPTURES_DIR);
 
     /* Init name entry state */
@@ -810,9 +824,7 @@ int main(void)
             if (pressed & AKIRA_BTN_B) { g_state = STATE_HOME; break; }
 
             /* Poll RSSI for the meter */
-            int16_t raw_rssi = 0;
-            rf_get_rssi(&raw_rssi);
-            int new_rssi = (int)raw_rssi;
+            int new_rssi = rf_get_rssi();
             if (new_rssi != g_rssi) { g_rssi = new_rssi; g_needs_redraw = 1; }
 
             /* Capture */

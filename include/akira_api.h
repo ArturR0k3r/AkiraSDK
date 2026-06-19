@@ -1159,11 +1159,10 @@ extern int rf_set_power(int8_t dbm);
 
 /**
  * @brief Get received signal strength indicator (RSSI)
- * 
- * @param rssi Pointer to store RSSI value
- * @return 0 on success, negative error code on failure
+ *
+ * @return RSSI value in dBm, or negative error code on failure
  */
-extern int rf_get_rssi(int16_t *rssi);
+extern int rf_get_rssi(void);
 
 /**
  * @brief Send data over RF transceiver

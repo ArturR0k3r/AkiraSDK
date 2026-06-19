@@ -1538,6 +1538,38 @@ extern int wifi_scan_aps(akira_wifi_ap_t *buf, uint32_t buf_len);
  */
 extern int wifi_scan_rssi(int8_t *buf, uint32_t buf_len);
 
+/**
+ * @brief Inject 802.11 deauthentication frames.
+ *
+ * Sends @p count deauthentication management frames spoofed from @p bssid
+ * to @p client_mac (or FF:FF:FF:FF:FF:FF for broadcast) on @p channel.
+ * The inter-frame delay is @p interval_ms milliseconds (minimum 10 ms).
+ *
+ * Requires manifest capability: "wifi.inject"
+ *
+ * @param bssid        6-byte AP BSSID to spoof as source/BSSID fields.
+ * @param client_mac   6-byte destination MAC (use WIFI_MAC_BROADCAST for all clients).
+ * @param channel      2.4 GHz channel (1–14).
+ * @param count        Number of frames to send (1–9999).
+ * @param interval_ms  Inter-frame gap in ms (clamped to ≥ 10 ms).
+ * @return Number of frames sent on success, negative errno on error.
+ *         -EPERM   "wifi.inject" capability not granted
+ *         -EINVAL  Invalid channel, count, or NULL pointer
+ *         -ENODEV  WiFi interface not available
+ */
+extern int wifi_deauth(const uint8_t *bssid, const uint8_t *client_mac,
+                       int32_t channel, int32_t count, int32_t interval_ms);
+
+/** Broadcast MAC — pass as client_mac to deauth all associated clients */
+#define WIFI_MAC_BROADCAST ((const uint8_t *)"\xff\xff\xff\xff\xff\xff")
+
+/** Deauth reason codes (IEEE 802.11-2020 Table 9-49) */
+#define WIFI_DEAUTH_REASON_UNSPECIFIED      1
+#define WIFI_DEAUTH_REASON_AUTH_EXPIRED     2
+#define WIFI_DEAUTH_REASON_LEAVING          3
+#define WIFI_DEAUTH_REASON_INACTIVITY       4
+#define WIFI_DEAUTH_REASON_CLASS3_NONASSOC  7  /**< Default: Class-3 from non-assoc STA */
+
 /*
  * =============================================================================
  * STORAGE API

@@ -1,0 +1,7 @@
+{
+  "name": "wifi_scanner",
+  "version": "1.0.0",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "rtc.read", "app.switch"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
+}

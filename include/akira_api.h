@@ -1317,6 +1317,76 @@ extern int wdt_pet(void);
 
 /*
  * =============================================================================
+ * WIFI SCAN API
+ * =============================================================================
+ * Required capability: "rf.transceive"
+ *
+ * Passive 802.11 scanner — no association, no authentication.
+ * Uses the ESP32 built-in WiFi radio via Zephyr NET_REQUEST_WIFI_SCAN.
+ *
+ * Security type codes returned in akira_wifi_ap_t.security:
+ */
+#define WIFI_SEC_OPEN 0  /**< Open / no encryption                         */
+#define WIFI_SEC_WEP  1  /**< WEP (deprecated)                             */
+#define WIFI_SEC_WPA  2  /**< WPA-Personal (TKIP)                          */
+#define WIFI_SEC_WPA2 3  /**< WPA2-Personal (CCMP) and WPA2-FT             */
+#define WIFI_SEC_WPA3 4  /**< WPA3-Personal (SAE) including SAE-H2E / auto */
+#define WIFI_SEC_ENT  5  /**< Enterprise (EAP-TLS, PEAP, TTLS, …)         */
+
+/**
+ * @brief One AP record returned by wifi_scan_aps().
+ *
+ * Fixed 48-byte wire format — layout must stay in sync with
+ * struct wifi_ap_wire in akira_rf_api.c.
+ */
+typedef struct {
+    uint8_t  ssid[33];       /**< Null-terminated SSID (max 32 chars)       */
+    uint8_t  bssid[6];       /**< BSSID (MAC address)                       */
+    uint8_t  channel;        /**< 2.4 GHz channel (1–14)                   */
+    int8_t   rssi;           /**< Signal strength in dBm                    */
+    uint8_t  security;       /**< WIFI_SEC_* constant                       */
+    uint8_t  _pad[2];        /**< Reserved, always zero                     */
+    uint32_t last_seen_ms;   /**< Host uptime (ms) when this AP was scanned */
+} akira_wifi_ap_t;           /* sizeof == 48 */
+
+/**
+ * @brief Passive 802.11 AP scan.
+ *
+ * Blocks for up to ~8 seconds while the WiFi radio sweeps all 2.4 GHz
+ * channels. Returns once scanning is complete (or times out).
+ * Deduplicates by BSSID, keeping the strongest RSSI reading per AP.
+ *
+ * @param buf      Pointer to an array of akira_wifi_ap_t in WASM memory.
+ * @param buf_len  Size of @p buf in bytes. Maximum APs = buf_len / 48.
+ * @return Number of APs written (≥ 0), or negative errno on error.
+ *         -ENODEV  WiFi interface not available
+ *         -EINVAL  buf_len < 48
+ *         -EPERM   "rf.transceive" capability not granted
+ *
+ * Typical usage:
+ * @code
+ *   akira_wifi_ap_t aps[64];
+ *   int n = wifi_scan_aps(aps, sizeof(aps));
+ *   for (int i = 0; i < n; i++) { ... aps[i].ssid ... }
+ * @endcode
+ */
+extern int wifi_scan_aps(akira_wifi_ap_t *buf, uint32_t buf_len);
+
+/**
+ * @brief Passive 802.11 spectrum scan (per-channel max RSSI).
+ *
+ * Fills @p buf with one int8_t per channel (channels 1–14, index 0–13).
+ * Values are the strongest RSSI seen on that channel, or 0x80 (INT8_MIN)
+ * if no traffic was detected.
+ *
+ * @param buf     int8_t array of at least 14 bytes.
+ * @param buf_len Must be ≥ 14.
+ * @return 14 on success, negative errno on failure.
+ */
+extern int wifi_scan_rssi(int8_t *buf, uint32_t buf_len);
+
+/*
+ * =============================================================================
  * STORAGE API
  * =============================================================================
  *
@@ -1852,6 +1922,29 @@ extern int settings_set(const char *key, const char *value);
  * @return 0 on success, -ENOENT if not found.
  */
 extern int settings_delete(const char *key);
+
+/*
+ * =============================================================================
+ * RTC API
+ * =============================================================================
+ * Required capability: "rtc.read"
+ */
+
+/**
+ * @brief Return the current Unix timestamp (seconds since 1970-01-01 UTC).
+ * @return Unix time, or -1 if RTC is not set / available.
+ */
+extern int rtc_get_unix_time(void);
+
+/**
+ * @brief Return system uptime in milliseconds.
+ *
+ * Wraps after ~49.7 days. Cast to uint32_t for correct subtraction across
+ * a wrap boundary: (uint32_t)(now - then).
+ *
+ * @return Uptime in ms as int32 (unsigned interpretation).
+ */
+extern int rtc_get_uptime_ms(void);
 
 /* =========================================================================
  * Edge AI Inference — AkiraClaw (requires "ai.infer" capability)

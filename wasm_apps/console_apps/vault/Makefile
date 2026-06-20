@@ -1,6 +1,7 @@
-# vault_totp - AkiraOS WASM Application Makefile
+# vault — Unified Hardware Security Suite
+# Sections: TOTP · SSH Agent · FIDO2 Passkeys
 
-APP_NAME  = vault_totp
+APP_NAME  = vault
 WASI_SDK ?= /opt/wasi-sdk
 CC        = $(WASI_SDK)/bin/clang
 

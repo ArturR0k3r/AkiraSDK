@@ -771,7 +771,10 @@ int main(void)
     g_name_cur    = 0;
     for (int i = 0; i < DISPLAY_NAME_MAX; i++) g_name_char_idx[i] = 0;
 
-    int prev_btns = 0;
+    /* Seed prev_btns from current hardware state so any buttons held from
+     * before this app launched (e.g. the B-press that exited the previous
+     * run) are not treated as fresh presses on the first frame. */
+    int prev_btns = input_get_buttons();
 
     while (1) {
         int btns    = input_get_buttons();

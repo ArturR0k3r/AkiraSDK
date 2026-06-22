@@ -1234,49 +1234,58 @@ extern int rf_set_coding_rate(int cr);
 #define AKIRA_RF_CHIP_CC1121 4
 #define AKIRA_RF_CHIP_LR2021 5
 
-/* Radio modulation modes (matches radio_modulation_t on host) */
-#define RADIO_MOD_OOK   1
-#define RADIO_MOD_FSK   2
-#define RADIO_MOD_GFSK  3
-#define RADIO_MOD_GMSK  4
+/* Radio modulation modes (must match radio_modulation_t enum on host) */
+#define RADIO_MOD_FSK   1
+#define RADIO_MOD_GFSK  2
+#define RADIO_MOD_OOK   3
+#define RADIO_MOD_MSK   4
 #define RADIO_MOD_LORA  5
 
 /*
- * Raw OOK/ASK signal capture and replay.
- * Supported chips: CC1101, CC1121.  Returns -ENOTSUP on LoRa-only chips.
+ * Raw OOK/ASK signal capture and replay (CC1121 byte-stream mode).
+ * Supported chips: CC1121.  Returns -ENOTSUP on chips without raw mode.
  *
- * Pulse buffer: uint16_t[] — alternating mark/space durations in microseconds.
- *   [0]=first mark (µs), [1]=first space (µs), [2]=second mark, ...
+ * Data format: raw OOK bitstream — 8 samples per byte at sample_rate_hz.
+ *   The chip samples the OOK envelope at the given rate; each byte holds
+ *   8 consecutive 1-bit samples (MSB-first).  Mark=1, space=0.
  *
  * Required manifest capability: "rf.transceive"
  */
 
-/** Maximum pulse count accepted by rf_raw_capture / rf_raw_replay */
-#define RF_RAW_MAX_SAMPLES 4096
+/** Maximum bytes accepted by rf_raw_capture / rf_raw_replay */
+#define RF_RAW_MAX_BYTES 8192
 
 /**
- * @brief Capture raw OOK pulse timings into @p buf.
+ * @brief Capture raw OOK bitstream bytes into @p buf.
  *
- * Puts the chip into async serial RX mode, waits for a signal, and records
- * pulse durations until a silence gap >20 ms is detected or the buffer fills.
+ * Arms the chip in raw OOK RX mode at @p sample_rate_hz and streams
+ * hard-sliced bits into buf until @p max_bytes is reached or @p timeout_ms
+ * elapses.
  *
- * @param buf         uint16_t[] in WASM memory — each element is µs.
- * @param max_samples Maximum number of uint16_t values to write.
- * @param timeout_ms  Time to wait for signal onset (0 = default 5 s).
- * @return Sample count on success; -ETIMEDOUT if no signal; -ENOTSUP if chip
- *         doesn't support raw mode; negative errno on error.
+ * @param buf            Byte buffer in WASM memory.
+ * @param max_bytes      Maximum bytes to capture (1..8192).
+ * @param sample_rate_hz OOK envelope sampling rate in Hz (e.g. 38400).
+ * @param timeout_ms     Capture timeout (0 = default 5 s).
+ * @return Bytes captured on success; 0 if no signal within timeout; -ENOTSUP
+ *         if chip doesn't support raw mode; negative errno on error.
  */
-extern int rf_raw_capture(uint16_t *buf, uint32_t max_samples, int32_t timeout_ms);
+extern int rf_raw_capture(void *buf, uint32_t max_bytes,
+                          uint32_t sample_rate_hz, int32_t timeout_ms);
 
 /**
- * @brief Replay a raw OOK pulse sequence captured by rf_raw_capture().
+ * @brief Replay a raw OOK bitstream captured by rf_raw_capture().
  *
- * @param buf          uint16_t[] of pulse durations (same format as capture).
- * @param sample_count Number of samples in @p buf.
- * @param repeat       Transmission count (1–9); 10 ms gap between repetitions.
+ * Gates the carrier from @p buf bits at @p sample_rate_hz, repeated
+ * @p repeat times with a 10 ms gap between repetitions.
+ *
+ * @param buf            Byte buffer (same format as capture output).
+ * @param len            Number of bytes in @p buf (1..8192).
+ * @param sample_rate_hz Bit rate for replay in Hz.
+ * @param repeat         Transmission count (1..N).
  * @return 0 on success, -ENOTSUP if chip doesn't support raw TX, negative errno.
  */
-extern int rf_raw_replay(const uint16_t *buf, uint32_t sample_count, int32_t repeat);
+extern int rf_raw_replay(const void *buf, uint32_t len,
+                         uint32_t sample_rate_hz, int32_t repeat);
 
 /*
  * =============================================================================

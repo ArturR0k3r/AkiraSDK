@@ -27,6 +27,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 #include <stddef.h>   /* NULL */
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
@@ -262,13 +263,13 @@ static void draw_histogram(void)
 
 static void draw_header(const char *title, const char *right)
 {
-    display_rect(0, HDR_Y, SCR_W, HDR_H, COL_HDR);
-    display_text(6, HDR_Y + 6, title, COL_TEXT);
-    if (right) {
-        int rlen = slen(right);
-        display_text(SCR_W - rlen * 7 - 4, HDR_Y + 6, right, COL_ACCENT);
-    }
-    display_hline(0, HDR_H, SCR_W, COL_SEP);
+    /* Shared chrome: the kit's inverted top bar (title left, count right). */
+    akira_ui_status_t sb = {
+        .title = title,
+        .clock = right,
+        .battery_pct = -1,
+    };
+    akira_ui_status_bar(&sb);
 }
 
 /* ── Footer bar ──────────────────────────────────────────────────────── */
@@ -307,31 +308,24 @@ static void draw_row(int idx, int y, int selected)
 {
     const akira_wifi_ap_t *ap = &g_aps[idx];
 
-    uint32_t bg  = selected ? COL_SEL : COL_BG;
-    uint32_t fg  = selected ? COL_TEXT : COL_DIM;
-
-    display_rect(0, y, SCR_W, ROW_H, bg);
-
-    /* Channel */
-    char ch_s[3];
-    fmt_dec2(ch_s, ap->channel);
-    display_text(COL_CH, y + 6, ch_s, fg);
-
     /* SSID — truncate to 22 chars */
     char ssid_buf[24];
     sncopy(ssid_buf, (const char *)ap->ssid, 23);
     if (slen((const char *)ap->ssid) > 22) {
         ssid_buf[20] = '.'; ssid_buf[21] = '.'; ssid_buf[22] = '\0';
     }
-    display_text(COL_SSID, y + 6, ssid_buf, selected ? COL_TEXT : COL_TEXT);
 
-    /* Security */
+    /* Meta: "ch06" + security label (e.g. "ch06 WPA2"). */
+    char meta[10];
+    meta[0] = 'c'; meta[1] = 'h';
+    fmt_dec2(meta + 2, ap->channel);
+    meta[4] = ' ';
     const char *sl = sec_label(ap->security);
-    uint32_t sc    = sec_color(ap->security);
-    display_text(COL_SEC, y + 6, sl, selected ? sc : COL_SEP);
+    meta[5] = sl[0]; meta[6] = sl[1]; meta[7] = sl[2]; meta[8] = sl[3];
+    meta[9] = '\0';
 
-    /* Signal bars */
-    draw_signal_bars(COL_BARS, y, ap->rssi);
+    /* Shared row: selection inverts, block meter encodes signal (0..5). */
+    akira_ui_list_row(y, ROW_H, ssid_buf, meta, rssi_bars(ap->rssi), selected);
 }
 
 /* ── List view ───────────────────────────────────────────────────────── */

@@ -17,6 +17,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 #include <stdint.h>
 
 /* ── Limits ─────────────────────────────────────────────────────────────── */
@@ -666,28 +667,28 @@ int main(void)
             if (pressed & AKIRA_BTN_A)     { g_hold_start = 0; g_state = STATE_CONFIRM; }
             break;
 
-        case STATE_CONFIRM:
-            if (pressed & AKIRA_BTN_B) {
-                g_state      = STATE_CONFIG;
-                g_hold_start = 0;
-            }
-            if (btns & AKIRA_BTN_A) {
-                uint32_t now = (uint32_t)rtc_get_uptime_ms();
-                if (!g_hold_start) g_hold_start = now;
-                if (now - g_hold_start >= HOLD_DURATION) {
-                    /* Arm injection */
-                    g_frames_target = COUNT_PRESETS[g_count_idx];
-                    g_frames_total  = 0;
-                    g_frames_sent   = 0;
-                    g_inject_done   = 0;
-                    g_done_msg[0]   = '\0';
-                    g_hold_start    = 0;
-                    g_state         = STATE_INJECT;
-                }
+        case STATE_CONFIRM: {
+            /* wifi_deauth() is a restricted syscall — gate it through the
+             * shared 3px Capability-Guard dialog (blocking). */
+            bool ok = akira_ui_confirm_dialog("WIFI_DEAUTH",
+                                              "inject deauth frames?");
+            if (ok) {
+                /* Arm injection */
+                g_frames_target = COUNT_PRESETS[g_count_idx];
+                g_frames_total  = 0;
+                g_frames_sent   = 0;
+                g_inject_done   = 0;
+                g_done_msg[0]   = '\0';
+                g_hold_start    = 0;
+                g_state         = STATE_INJECT;
             } else {
                 g_hold_start = 0;
+                g_state      = STATE_CONFIG;
             }
+            prev_btns = input_get_buttons(); /* swallow buttons held in dialog */
+            g_needs_redraw = 1;
             break;
+        }
 
         case STATE_INJECT:
             if ((pressed & AKIRA_BTN_B) && !g_inject_done) {

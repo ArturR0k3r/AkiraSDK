@@ -18,6 +18,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 
 /* ── Probe pins ──────────────────────────────────────────────────────── */
 #define CH_COUNT  4
@@ -104,23 +105,27 @@ static int ch_y(int ch) { return WAVE_Y + ch * CH_H; }
 
 /* ── Header ──────────────────────────────────────────────────────────── */
 static void draw_header(void) {
-    display_rect(0, 0, SCR_W, HDR_H, COL_HDR);
-    display_text(4,   4, "LOGIC ANALYZER",      COL_TITLE);
-    display_text(216, 4, RATE_STR[rate_idx],    COL_VALUE);
-    if (paused)
-        display_text(272, 4, "PAUSED", COL_PAUSED);
+    /* Shared chrome: kit status bar (spans real display via get_size). Rate +
+     * paused flag ride the right-aligned status slot. */
+    char right[24];
+    int p = 0;
+    for (const char *rs = RATE_STR[rate_idx]; *rs; rs++) right[p++] = *rs;
+    if (paused) {
+        for (const char *ps = " PAUSED"; *ps; ps++) right[p++] = *ps;
+    }
+    right[p] = '\0';
+    akira_ui_status_t sb = {
+        .title = "LOGIC ANALYZER",
+        .clock = right,
+        .battery_pct = -1,
+    };
+    akira_ui_status_bar(&sb);
 }
 
-static void update_header_rate(void) {
-    display_rect(216, 2, 52, 14, COL_HDR);
-    display_text(216, 4, RATE_STR[rate_idx], COL_VALUE);
-}
-
-static void update_header_status(void) {
-    display_rect(272, 2, 46, 14, COL_HDR);
-    if (paused)
-        display_text(272, 4, "PAUSED", COL_PAUSED);
-}
+/* Live header sub-updates now redraw the whole kit bar (still no flush; the
+ * caller flushes). */
+static void update_header_rate(void)   { draw_header(); }
+static void update_header_status(void) { draw_header(); }
 
 /* ── Footer ──────────────────────────────────────────────────────────── */
 static void draw_footer(void) {

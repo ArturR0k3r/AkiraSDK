@@ -495,8 +495,8 @@ static void handle_pkt(const uint8_t *pkt, int pkt_len)
 
 /* ── Display ──────────────────────────────────────────────────────────── */
 
-#define DW    320
-#define DH    240
+static int32_t DW = 320; /* runtime display size — set in main() */
+static int32_t DH = 240;
 #define HDR_H 16
 #define ROW_H 14
 #define COL_BG   CONSOLE_COLOR_BG
@@ -802,6 +802,7 @@ static int radio_init(void)
 
 int main(void)
 {
+    display_get_size(&DW, &DH); /* adapt layout to the real display width */
     load_settings();
 
     if (radio_init() != 0) {

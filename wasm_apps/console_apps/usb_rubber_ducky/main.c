@@ -43,8 +43,8 @@
 
 /* ── Display ─────────────────────────────────────────────────────────────── */
 
-#define DW  320
-#define DH  240
+static int32_t DW = 320; /* runtime display size — set in main() */
+static int32_t DH = 240;
 #define HDR_H 16
 #define ROW_H 14
 #define BAR_Y (DH - 22)
@@ -658,6 +658,8 @@ static void draw_done(void)
 
 int main(void)
 {
+    display_get_size(&DW, &DH); /* adapt layout to the real display width */
+
     /* Initialise USB HID keyboard */
     hid_init(HID_TRANSPORT_USB, HID_DEVICE_KEYBOARD);
 

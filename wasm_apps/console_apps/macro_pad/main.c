@@ -26,8 +26,8 @@
 #define PIN_A     15
 
 /* ── Display geometry ───────────────────────────────────────────────────── */
-#define DISPLAY_W  320
-#define DISPLAY_H  240
+static int32_t DISPLAY_W = 320; /* runtime display size — set in main() */
+static int32_t DISPLAY_H = 240;
 #define TITLE_H     26
 #define ROW_H       40
 
@@ -135,6 +135,7 @@ int main(void)
 {
     printf("[macro_pad] starting\n");
     buttons_init();
+    display_get_size(&DISPLAY_W, &DISPLAY_H); /* adapt layout to real display */
 
     /* ── Self-initialize HID over BLE ──────────────────────────────────── */
     display_clear(COLOR_BLACK);

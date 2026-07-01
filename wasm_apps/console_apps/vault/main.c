@@ -45,8 +45,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * Display geometry
  * ═══════════════════════════════════════════════════════════════════════════ */
-#define SCR_W   320
-#define SCR_H   240
+static int32_t SCR_W = 320; /* runtime display size — set in main() */
+static int32_t SCR_H = 240;
 #define HDR_H    20
 #define FOOT_Y  220
 
@@ -1978,6 +1978,8 @@ static void handle_input(int secs_left)
 int main(void)
 {
     printf("vault v1.0 — TOTP · SSH · Passkeys");
+
+    display_get_size(&SCR_W, &SCR_H); /* adapt layout to the real display width */
 
     g_tmr       = timer_create();
     g_state     = ST_HOME;

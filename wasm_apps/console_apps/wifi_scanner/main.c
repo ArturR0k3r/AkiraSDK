@@ -31,8 +31,10 @@
 #include <stddef.h>   /* NULL */
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
-#define SCR_W   CONSOLE_WIDTH     /* 320 */
-#define SCR_H   CONSOLE_HEIGHT    /* 240 */
+/* Runtime display size — set via display_get_size() in main(); defaults to the
+ * console dims but adapts to the wider (400) Sharp LCD. */
+static int32_t SCR_W = CONSOLE_WIDTH;
+static int32_t SCR_H = CONSOLE_HEIGHT;
 
 #define HDR_Y    0
 #define HDR_H   20
@@ -528,6 +530,8 @@ static void handle_input(void)
 int main(void)
 {
     printf("wifi.scanner v1.0 — passive 802.11 scanner");
+
+    display_get_size(&SCR_W, &SCR_H); /* adapt layout to the real display width */
 
     g_tmr = timer_create();
     timer_start(g_tmr);

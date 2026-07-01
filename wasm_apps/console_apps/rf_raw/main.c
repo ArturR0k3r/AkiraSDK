@@ -10,6 +10,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 #include <stdint.h>
 
 /* ── Button GPIO pins (akiraconsole_prod) ─────────────────────────────── */
@@ -191,8 +192,9 @@ static int g_home_sel = 0;
 
 static void draw_header(const char *title)
 {
-    display_rect(0, 0, DW, HDR_H, C_FG);
-    display_text(4, 3, title, C_BG);
+    /* Shared chrome: kit status bar (spans the real display via get_size). */
+    akira_ui_status_t sb = { .title = title, .battery_pct = -1 };
+    akira_ui_status_bar(&sb);
 }
 
 static void draw_footer(const char *hint)
@@ -984,8 +986,13 @@ int main(void)
                 ? RATE_PRESETS[g_rate_idx].rate
                 : DEFAULT_SAMPLE_RATE;
             if (g_cap_bytes > 0) {
-                rf_raw_replay(g_cap_buf, (uint32_t)g_cap_bytes,
-                              rate, (int32_t)g_repeat);
+                /* rf_raw_replay() keys the radio — gate it through the shared
+                 * 3px Capability-Guard dialog. */
+                if (akira_ui_confirm_dialog("RF_RAW_TX", "transmit captured RF?")) {
+                    rf_raw_replay(g_cap_buf, (uint32_t)g_cap_bytes,
+                                  rate, (int32_t)g_repeat);
+                }
+                prev_btns = read_buttons(); /* swallow buttons held in dialog */
             }
             /* After replay, show captured screen */
             g_state = STATE_CAPTURED;

@@ -21,6 +21,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 #include <stdint.h>
 
 /* ── Limits ────────────────────────────────────────────────────────────── */
@@ -691,21 +692,14 @@ int main(void)
         }
         /* ── CONFIRM state ── */
         else if (g_state == STATE_CONFIRM) {
-            if (pressed & AKIRA_BTN_B) {
-                g_state      = STATE_LIST;
-                g_hold_start = 0;
-            }
-            if (btns & AKIRA_BTN_A) {
-                uint32_t now = (uint32_t)rtc_get_uptime_ms();
-                if (!g_hold_start) g_hold_start = now;
-                if (now - g_hold_start >= HOLD_DURATION) {
-                    /* Interlock satisfied — start execution */
-                    g_state      = STATE_EXEC;
-                    g_hold_start = 0;
-                }
-            } else {
-                g_hold_start = 0; /* Released early — reset */
-            }
+            /* Running a DuckyScript payload injects keystrokes into the USB
+             * host — a restricted syscall. Gate it through the shared 3px
+             * Capability-Guard dialog. */
+            bool ok = akira_ui_confirm_dialog("USB_HID",
+                                              "run DuckyScript payload?");
+            g_state      = ok ? STATE_EXEC : STATE_LIST;
+            g_hold_start = 0;
+            prev_btns    = input_get_buttons(); /* swallow held buttons */
         }
         /* ── EXEC state ── */
         else if (g_state == STATE_EXEC) {

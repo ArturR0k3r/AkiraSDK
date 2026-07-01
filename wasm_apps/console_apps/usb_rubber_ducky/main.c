@@ -515,12 +515,13 @@ static void draw_progress(int y, int h, uint32_t filled, uint32_t total, uint16_
 
 static void draw_hdr(const char *title)
 {
-    display_rect(0, 0, DW, HDR_H, COL_HDR);
-    display_text(4, 3, title, COL_TXT);
-    /* USB icon + status */
-    int connected = hid_is_connected();
-    display_text(DW - 56, 3, connected ? "[USB OK]" : "[NO USB]",
-                 connected ? COL_OK : COL_WARN);
+    /* Shared chrome: kit status bar (spans real display via get_size). */
+    akira_ui_status_t sb = {
+        .title = title,
+        .clock = hid_is_connected() ? "USB OK" : "NO USB",
+        .battery_pct = -1,
+    };
+    akira_ui_status_bar(&sb);
 }
 
 static void draw_footer(const char *hint)

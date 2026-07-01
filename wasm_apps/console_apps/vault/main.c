@@ -30,6 +30,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -1243,12 +1244,12 @@ static void poll_ctap_hid(void)
  * ═══════════════════════════════════════════════════════════════════════════ */
 static void draw_header(const char *left, const char *right, uint32_t bg)
 {
-    /* When bg is white (inverted header) text is black, otherwise white */
-    uint32_t fg = (bg == M_FG) ? M_BG : M_FG;
-    display_rect(0,0,SCR_W,HDR_H,bg);
-    display_text(6,6,left,fg);
-    if(right){ int rx=SCR_W-slen(right)*7-4; display_text(rx,6,right,fg); }
-    display_hline(0,HDR_H,SCR_W,M_FG);
+    /* Shared chrome: kit status bar (spans real display via get_size). The
+     * kit bar is always the inverted paper-on-ink chrome, so the per-screen
+     * bg distinction is no longer needed. */
+    (void)bg;
+    akira_ui_status_t sb = { .title = left, .clock = right, .battery_pct = -1 };
+    akira_ui_status_bar(&sb);
 }
 static void draw_footer(const char *hint)
 {

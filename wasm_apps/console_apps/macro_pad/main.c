@@ -16,6 +16,7 @@
  */
 
 #include "../include/akira_api.h"
+#include "../../common/akira_ui.h"
 
 /* ── Button pins (gpio0, ACTIVE_HIGH, PULL_DOWN) ───────────────────────── */
 #define PIN_UP    4
@@ -91,10 +92,9 @@ static void draw_row(int row, const char *label, const char *hint, int active)
 static void draw_all(int active_mask)
 {
     display_clear(COLOR_BLACK);
-    display_rect(0, 0, DISPLAY_W, TITLE_H, C_HEADER);
-    display_text_large(8, 5, "Macro Pad", COLOR_WHITE);
-    display_text(180, 8, "HID via USB/BLE", C_DIM);
-    display_hline(0, TITLE_H, DISPLAY_W, COLOR_LIGHT_GRAY);
+    /* Shared chrome: kit status bar (spans real display via get_size). */
+    akira_ui_status_t sb = { .title = "Macro Pad", .clock = "HID", .battery_pct = -1 };
+    akira_ui_status_bar(&sb);
     for (int i = 0; i < PAD_ROWS; i++) {
         draw_row(i, k_pads[i].label, k_pads[i].hint, (active_mask >> i) & 1);
     }

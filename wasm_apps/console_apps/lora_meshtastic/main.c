@@ -15,6 +15,7 @@
  */
 
 #include "akira_api.h"
+#include "../../common/akira_ui.h"
 #include <stdint.h>
 
 /* ── Radio configuration ──────────────────────────────────────────────── */
@@ -432,8 +433,7 @@ static void handle_pkt(const uint8_t *pkt, int pkt_len)
 
     mesh_node_t *node = node_get_or_add(hdr.from);
     node->last_seen_ms = (uint32_t)rtc_get_uptime_ms();
-    int16_t raw_rssi = 0;
-    rf_get_rssi(&raw_rssi);
+    int16_t raw_rssi = (int16_t)rf_get_rssi(); /* SDK v1.6.x: rf_get_rssi(void)→int */
     node->rssi = (int8_t)raw_rssi;
     uint8_t hops = hdr.flags & 0x07;
 
@@ -512,16 +512,12 @@ static void handle_pkt(const uint8_t *pkt, int pkt_len)
 
 static void draw_hdr(const char *title, int rx_count)
 {
-    display_rect(0, 0, DW, HDR_H, COL_HDR);
-    display_text(4, 3, title, COL_TXT);
-    /* "RX:NNN" right-aligned */
-    char buf[8];
-    buf[0]='R'; buf[1]='X'; buf[2]=':';
-    int n = rx_count, pos = 6;
-    buf[6] = '\0'; buf[5] = '0';
-    if (n == 0) { buf[5] = '0'; pos = 5; }
-    else { while (n && pos > 3) { buf[--pos] = '0' + n % 10; n /= 10; } }
-    display_text(DW - 52, 3, buf + pos, COL_DIM);
+    /* Shared chrome: kit status bar (spans real display via get_size). */
+    char rx[12];
+    rx[0] = 'R'; rx[1] = 'X'; rx[2] = ':';
+    itoa(rx_count, rx + 3);
+    akira_ui_status_t sb = { .title = title, .clock = rx, .battery_pct = -1 };
+    akira_ui_status_bar(&sb);
 }
 
 static void draw_footer(const char *hint)

@@ -284,6 +284,12 @@ extern int display_text(int32_t x, int32_t y, const char *text, uint32_t color);
 extern int display_text_large(int32_t x, int32_t y, const char *text, uint32_t color);
 
 /**
+ * @brief Draw text in the 16x28 hero font — reserved for the one value being
+ * tuned/read on a screen (e.g. a frequency or clock). Requires display.write.
+ */
+extern int display_text_huge(int32_t x, int32_t y, const char *text, uint32_t color);
+
+/**
  * @brief Flush the framebuffer to the display hardware.
  *
  * Draw calls (rect, pixel, text, …) write into a back-buffer.  Call

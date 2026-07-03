@@ -9,7 +9,8 @@
 #include "akira_api.h"
 #include "akira_ui.h"
 
-/* PoC: the home grid rendered with the Playdate dither-shadow cards. */
+/* PoC: the home rendered as a VERTICAL carousel of dither-shadow cards —
+ * focused app is a large filled card, neighbours are smaller idle cards. */
 static void draw_home(int sel)
 {
     int W, H;
@@ -20,19 +21,23 @@ static void draw_home(int sel)
     akira_ui_status_bar(&sb);
 
     static const char *labels[] = { "wifi", "subghz", "lora", "ble", "vault", "more" };
+    const int n = 6;
 
-    /* 3 cols x 2 rows, grid-snapped with generous padding. */
-    const int cols = 3, rows = 2, pad = 10;
-    int top = AKIRA_UI_STATUSBAR_H + pad;
-    int cw = (W - pad * (cols + 1)) / cols;
-    int ch = (H - top - pad * rows) / rows;
+    int cx = W / 2;
+    int cy = (AKIRA_UI_STATUSBAR_H + H) / 2;
+    const int sel_h = 58, adj_h = 40, gap = 8, card_w = W - 40;
 
-    for (int i = 0; i < 6; i++) {
-        int r = i / cols, c = i % cols;
-        int x = pad + c * (cw + pad);
-        int y = top + r * (ch + pad);
-        /* icon = NULL here (icons come from akira_icons.h in real apps). */
-        akira_ui_grid_tile(x, y, cw, ch, 1, 0, 0, 0, labels[i], i == sel);
+    for (int slot = -2; slot <= 2; slot++) {
+        int idx = sel + slot;
+        if (idx < 0 || idx >= n) continue;
+        bool foc = (slot == 0);
+        int ch = foc ? sel_h : adj_h;
+        int cw = foc ? card_w : card_w - 28;
+        int x = cx - cw / 2;
+        int y = cy - ch / 2 + slot * (adj_h + gap);
+        akira_ui_dither_card(x, y, cw, ch, 12, foc, foc ? 5 : 2);
+        uint16_t fg = foc ? AKIRA_UI_INK : AKIRA_UI_PAPER;
+        display_text(x + 18, y + (ch - 10) / 2, labels[idx], fg);
     }
     display_flush();
 }

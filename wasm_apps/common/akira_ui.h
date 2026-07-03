@@ -224,6 +224,52 @@ static inline void akira_ui_list_row(int y, int h, const char *text, const char 
     }
 }
 
+/* ---- dither-shadow card (signature elevation primitive) --------------- */
+
+/* 50% checkerboard fill clipped to a rounded-rect mask (the "shadow"). No
+ * pattern-fill primitive exists on-device — composed from display_pixel. The
+ * 2x2 checker is pure parity, so no cache is needed; the corner distance test
+ * is the only cost. If card-dense screens lag, pre-render into a display_bitmap
+ * and blit instead. */
+static inline void akira_ui__dither_rounded(int x, int y, int w, int h, int r,
+                                            uint16_t color)
+{
+    if (r * 2 > w) r = w / 2;
+    if (r * 2 > h) r = h / 2;
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            int cx = -1, cy = -1;
+            if (i < r && j < r)                { cx = r - 1 - i; cy = r - 1 - j; }
+            else if (i >= w - r && j < r)      { cx = i - (w - r); cy = r - 1 - j; }
+            else if (i < r && j >= h - r)      { cx = r - 1 - i; cy = j - (h - r); }
+            else if (i >= w - r && j >= h - r) { cx = i - (w - r); cy = j - (h - r); }
+            if (cx >= 0 && cx * cx + cy * cy > r * r) {
+                continue;
+            }
+            if (((i + j) & 1) == 0) {
+                display_pixel(x + i, y + j, color);
+            }
+        }
+    }
+}
+
+/* The signature Playdate-style card: rounded body + dithered offset shadow.
+ * Selected = paper-on-ink fill; idle = ink body + paper outline. Larger
+ * shadow_offset = more elevated (the confirm dialog uses the largest). */
+static inline void akira_ui_dither_card(int x, int y, int w, int h, int radius,
+                                        bool selected, int shadow_offset)
+{
+    if (shadow_offset > 0) {
+        akira_ui__dither_rounded(x + shadow_offset, y + shadow_offset, w, h,
+                                 radius, AKIRA_UI_PAPER);
+    }
+    display_rounded_rect_fill(x, y, w, h, radius,
+                              selected ? AKIRA_UI_PAPER : AKIRA_UI_INK);
+    if (!selected) {
+        display_rounded_rect(x, y, w, h, radius, AKIRA_UI_PAPER);
+    }
+}
+
 /* ---- grid tile -------------------------------------------------------- */
 
 static inline void akira_ui_grid_tile(int x, int y, int w, int h, int scale,
@@ -233,17 +279,16 @@ static inline void akira_ui_grid_tile(int x, int y, int w, int h, int scale,
     uint16_t bg = selected ? AKIRA_UI_PAPER : AKIRA_UI_INK;
     uint16_t fg = selected ? AKIRA_UI_INK : AKIRA_UI_PAPER;
 
-    display_rect(x, y, w, h, bg);
-    if (!selected) {
-        display_rect_outline(x, y, w, h, fg);
-    }
+    /* Playdate-style rounded dither-shadow card instead of a square outline. */
+    akira_ui_dither_card(x, y, w, h, /*radius=*/10, selected, /*shadow=*/4);
+
     if (icon) {
         int sw = icon_w * scale;
-        akira_ui_icon_1bpp(x + (w - sw) / 2, y + 8, scale, icon,
+        akira_ui_icon_1bpp(x + (w - sw) / 2, y + 12, scale, icon,
                            icon_w, icon_rows, fg, bg, AKIRA_UI_TRANSPARENT);
     }
     if (label && label[0]) {
-        display_text(x + (w - akira_ui__tw(label)) / 2, y + h - 14, label, fg);
+        display_text(x + (w - akira_ui__tw(label)) / 2, y + h - 16, label, fg);
     }
 }
 
@@ -340,8 +385,13 @@ static inline void akira_ui__confirm_render(int bx, int by, int bw, int bh,
 
     display_clear(AKIRA_UI_INK);
 
+    /* The reserved Capability-Guard marker: the system's largest dither-shadow
+     * offset (6px) + a rounded card + a heavy 3px outline. Weight = stakes. */
+    akira_ui__dither_rounded(bx + 6, by + 6, bw, bh, 14, AKIRA_UI_PAPER);
+    display_rounded_rect_fill(bx, by, bw, bh, 14, AKIRA_UI_INK);
     for (int i = 0; i < 3; i++) {
-        display_rect_outline(bx - i, by - i, bw + 2 * i, bh + 2 * i, AKIRA_UI_PAPER);
+        display_rounded_rect(bx + i, by + i, bw - 2 * i, bh - 2 * i, 14 - i,
+                             AKIRA_UI_PAPER);
     }
 
     if (question && question[0]) {
@@ -353,15 +403,22 @@ static inline void akira_ui__confirm_render(int bx, int by, int bw, int bh,
     akira_ui__strcpy(cap + n, " - restricted");
     display_text(cx - akira_ui__tw(cap) / 2, by + 60, cap, AKIRA_UI_PAPER);
 
-    int btn_y = by + bh - 42;
+    int btn_y = by + bh - 44;
+    /* cancel = plain text (focus ring when selected). */
     const char *cancel = "cancel";
     int cxl = bx + bw / 4 - akira_ui__tw(cancel) / 2;
     if (sel == 0) {
-        display_rect_outline(cxl - 8, btn_y - 4, akira_ui__tw(cancel) + 16, 26, AKIRA_UI_PAPER);
+        display_rounded_rect(cxl - 10, btn_y - 4, akira_ui__tw(cancel) + 20, 28, 8,
+                             AKIRA_UI_PAPER);
     }
-    display_text(cxl, btn_y + 4, cancel, AKIRA_UI_PAPER);
+    display_text(cxl, btn_y + 5, cancel, AKIRA_UI_PAPER);
 
-    akira_ui_button(bx + bw / 2 + 8, btn_y, bw / 2 - 24, 26, "confirm", sel == 1);
+    /* confirm = filled rounded button; elevates (gains a shadow) when focused. */
+    int cbx = bx + bw / 2 + 8, cbw = bw / 2 - 24, cbh = 28;
+    akira_ui_dither_card(cbx, btn_y, cbw, cbh, 8, /*selected=*/true,
+                         /*shadow=*/sel == 1 ? 3 : 0);
+    display_text(cbx + (cbw - akira_ui__tw("confirm")) / 2, btn_y + 5, "confirm",
+                 AKIRA_UI_INK);
 
     display_flush();
 }

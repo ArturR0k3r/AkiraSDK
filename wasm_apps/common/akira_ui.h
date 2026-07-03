@@ -145,48 +145,57 @@ static inline void akira_ui_status_bar(const akira_ui_status_t *s)
     int txt_y = (bar_h - 10) / 2;
     if (txt_y < 0) txt_y = 0;
 
-    display_rect(0, 0, W, bar_h, AKIRA_UI_PAPER);
+    /* Rounded pill near the top (not a full-width filled bar): ink interior +
+     * paper outline, all content in paper. */
+    int pill_h = bar_h - 2, pr = pill_h / 2;
+    display_rounded_rect_fill(2, 1, W - 4, pill_h, pr, AKIRA_UI_INK);
+    display_rounded_rect(2, 1, W - 4, pill_h, pr, AKIRA_UI_PAPER);
 
     if (s->title && s->title[0]) {
-        display_text(6, txt_y, s->title, AKIRA_UI_INK);
+        display_text(10, txt_y, s->title, AKIRA_UI_PAPER);
     } else if (s->battery_pct >= 0) {
-        int by = txt_y;
-        display_rect_outline(4, by, 22, 10, AKIRA_UI_INK);
-        display_rect(26, by + 3, 2, 4, AKIRA_UI_INK);
+        int bx = 8, by = txt_y;
+        display_rounded_rect(bx, by, 22, 10, 2, AKIRA_UI_PAPER);
+        display_rect(bx + 22, by + 3, 2, 4, AKIRA_UI_PAPER);
         int pct = s->battery_pct > 100 ? 100 : s->battery_pct;
         int segs = (pct * 5 + 50) / 100;
         for (int i = 0; i < 5; i++) {
-            display_rect(6 + i * 4, by + 2, 3, 6,
-                         (i < segs) ? AKIRA_UI_INK : AKIRA_UI_PAPER);
+            display_rect(bx + 2 + i * 4, by + 2, 3, 6,
+                         (i < segs) ? AKIRA_UI_PAPER : AKIRA_UI_INK);
         }
         char buf[8];
         itoa(pct, buf);
         int bl = (int)strlen(buf);
         buf[bl] = '%';
         buf[bl + 1] = '\0';
-        display_text(30, txt_y, buf, AKIRA_UI_INK);
+        display_text(bx + 28, txt_y, buf, AKIRA_UI_PAPER);
     }
 
-    int right = W - 4;
+    int right = W - 8;
     if (s->clock && s->clock[0]) {
-        display_text(W - akira_ui__tw(s->clock) - 4, txt_y, s->clock, AKIRA_UI_INK);
-        right = W - akira_ui__tw(s->clock) - 8;
+        display_text(W - akira_ui__tw(s->clock) - 10, txt_y, s->clock, AKIRA_UI_PAPER);
+        right = W - akira_ui__tw(s->clock) - 14;
     }
     int icon_y = (bar_h - 16) / 2;
     if (icon_y < 0) icon_y = 0;
     if (s->show_bt && s->icon_bt) {
         right -= 24;
         akira_ui_icon_1bpp(right, icon_y, 1, s->icon_bt, 24, 16,
-                           AKIRA_UI_INK, AKIRA_UI_PAPER,
+                           AKIRA_UI_PAPER, AKIRA_UI_INK,
                            s->bt_on ? AKIRA_UI_TRANSPARENT : AKIRA_UI_DITHER);
     }
     if (s->show_wifi && s->icon_wifi) {
         right -= 24;
         akira_ui_icon_1bpp(right, icon_y, 1, s->icon_wifi, 24, 16,
-                           AKIRA_UI_INK, AKIRA_UI_PAPER,
+                           AKIRA_UI_PAPER, AKIRA_UI_INK,
                            s->wifi_on ? AKIRA_UI_TRANSPARENT : AKIRA_UI_DITHER);
     }
 }
+
+/* Forward decl — the dither-shadow card (defined below) is used by the row,
+ * button, tile, alert and confirm primitives. */
+static inline void akira_ui_dither_card(int x, int y, int w, int h, int radius,
+                                        bool selected, int shadow_offset);
 
 /* ---- list row --------------------------------------------------------- */
 
@@ -195,29 +204,33 @@ static inline void akira_ui_list_row(int y, int h, const char *text, const char 
 {
     int W, H;
     akira_ui__size(&W, &H);
-    uint16_t bg = selected ? AKIRA_UI_PAPER : AKIRA_UI_INK;
     uint16_t fg = selected ? AKIRA_UI_INK : AKIRA_UI_PAPER;
-    int ty = y + (h - 10) / 2;
 
-    display_rect(0, y, W, h, bg);
+    /* Each row is its own rounded dither-shadow card with side margins. */
+    const int mx = 6;
+    int cw = W - mx * 2;
+    int rh = h - 4; /* leave the bottom gap for the dither shadow */
+    akira_ui_dither_card(mx, y, cw, rh, 8, selected, selected ? 3 : 2);
+
+    int ty = y + (rh - 10) / 2;
     if (text) {
-        display_text(6, ty, text, fg);
+        display_text(mx + 10, ty, text, fg);
     }
 
-    int rx = W - 6;
+    int rx = mx + cw - 10;
     if (meter_0_5 >= 0) {
         const int nblk = 5, bw = 6, bh = 8, gap = 2;
-        int mx = W - 6 - nblk * (bw + gap);
-        int my = y + (h - bh) / 2;
+        int bx0 = mx + cw - 10 - nblk * (bw + gap);
+        int my = y + (rh - bh) / 2;
         for (int i = 0; i < nblk; i++) {
-            int cx = mx + i * (bw + gap);
+            int cx = bx0 + i * (bw + gap);
             if (i < meter_0_5) {
                 display_rect(cx, my, bw, bh, fg);
             } else {
                 display_rect_outline(cx, my, bw, bh, fg);
             }
         }
-        rx = mx - 6;
+        rx = bx0 - 6;
     }
     if (meta && meta[0]) {
         display_text(rx - akira_ui__tw(meta), ty, meta, fg);
@@ -297,13 +310,10 @@ static inline void akira_ui_grid_tile(int x, int y, int w, int h, int scale,
 static inline void akira_ui_button(int x, int y, int w, int h, const char *label,
                                    bool pressed)
 {
-    uint16_t bg = pressed ? AKIRA_UI_PAPER : AKIRA_UI_INK;
     uint16_t fg = pressed ? AKIRA_UI_INK : AKIRA_UI_PAPER;
 
-    display_rect(x, y, w, h, bg);
-    if (!pressed) {
-        display_rect_outline(x, y, w, h, fg);
-    }
+    /* Rounded dither-shadow card; pressed = filled invert + more elevation. */
+    akira_ui_dither_card(x, y, w, h, 8, pressed, pressed ? 3 : 2);
     if (label) {
         display_text(x + (w - akira_ui__tw(label)) / 2, y + (h - 10) / 2, label, fg);
     }
@@ -317,14 +327,14 @@ static inline void akira_ui_toggle(int x, int y, const char *label, bool on)
         display_text(x, y + 2, label, AKIRA_UI_PAPER);
     }
     int tx = x + (label ? akira_ui__tw(label) + 8 : 0);
-    const int tw = 26, th = 14;
+    const int tw = 28, th = 16, r = 8;
 
     if (on) {
-        display_rect(tx, y, tw, th, AKIRA_UI_PAPER);
-        display_rect(tx + tw - 12, y + 2, 10, 10, AKIRA_UI_INK);
+        display_rounded_rect_fill(tx, y, tw, th, r, AKIRA_UI_PAPER);
+        display_circle_fill(tx + tw - 8, y + th / 2, 5, AKIRA_UI_INK);   /* knob R */
     } else {
-        display_rect_outline(tx, y, tw, th, AKIRA_UI_PAPER);
-        display_rect(tx + 2, y + 2, 10, 10, AKIRA_UI_PAPER);
+        display_rounded_rect(tx, y, tw, th, r, AKIRA_UI_PAPER);
+        display_circle_fill(tx + 8, y + th / 2, 5, AKIRA_UI_PAPER);      /* knob L */
     }
 }
 
@@ -332,21 +342,30 @@ static inline void akira_ui_toggle(int x, int y, const char *label, bool on)
 
 static inline void akira_ui_meter(int x, int y, int w, int h, int value, int max)
 {
-    display_progress_bar(x, y, w, h, value, max, AKIRA_UI_PAPER, AKIRA_UI_INK);
+    if (max <= 0) max = 1;
+    if (value < 0) value = 0;
+    if (value > max) value = max;
+    int r = h / 2;
+    display_rounded_rect(x, y, w, h, r, AKIRA_UI_PAPER);          /* pill track */
+    int fw = (w - 4) * value / max;
+    if (fw > 0) {
+        display_rounded_rect_fill(x + 2, y + 2, fw, h - 4, r > 2 ? r - 2 : 0,
+                                  AKIRA_UI_PAPER);
+    }
 }
 
 /* ---- tag -------------------------------------------------------------- */
 
 static inline void akira_ui_tag(int x, int y, const char *text, bool dithered)
 {
-    int w = akira_ui__tw(text) + 8, h = 14;
+    int w = akira_ui__tw(text) + 10, h = 16, r = 7;
     if (dithered) {
-        akira_ui__dither(x, y, w, h, AKIRA_UI_PAPER);
-        display_rect_outline(x, y, w, h, AKIRA_UI_PAPER);
-        display_text(x + 4, y + 2, text, AKIRA_UI_INK);
+        akira_ui__dither_rounded(x, y, w, h, r, AKIRA_UI_PAPER);
+        display_rounded_rect(x, y, w, h, r, AKIRA_UI_PAPER);
+        display_text(x + 5, y + 3, text, AKIRA_UI_INK);
     } else {
-        display_rect_outline(x, y, w, h, AKIRA_UI_PAPER);
-        display_text(x + 4, y + 2, text, AKIRA_UI_PAPER);
+        display_rounded_rect(x, y, w, h, r, AKIRA_UI_PAPER);
+        display_text(x + 5, y + 3, text, AKIRA_UI_PAPER);
     }
 }
 
@@ -356,21 +375,26 @@ static inline void akira_ui_alert(const char *title, const char *subtitle)
 {
     int W, H;
     akira_ui__size(&W, &H);
-    int cx = W / 2;
-
     display_clear(AKIRA_UI_INK);
 
-    int apex_y = H / 2 - 54, ts = 22;
+    /* Non-actionable message inside an elevated rounded dither-shadow card. */
+    int bw = W - 80, bh = 130;
+    int bx = (W - bw) / 2, by = (H - bh) / 2;
+    akira_ui_dither_card(bx, by, bw, bh, 12, /*selected=*/false, /*shadow=*/5);
+
+    int cx = bx + bw / 2;
+    int apex_y = by + 18, ts = 16;
     display_triangle(cx, apex_y, cx - ts, apex_y + ts * 2,
                      cx + ts, apex_y + ts * 2, AKIRA_UI_PAPER);
-    display_vline(cx, apex_y + 12, ts - 6, AKIRA_UI_PAPER);
-    display_rect(cx - 1, apex_y + ts + 4, 2, 2, AKIRA_UI_PAPER);
+    display_vline(cx, apex_y + 8, ts - 6, AKIRA_UI_PAPER);
+    display_rect(cx - 1, apex_y + ts + 2, 2, 2, AKIRA_UI_PAPER);
 
     if (title && title[0]) {
-        display_text(cx - akira_ui__tw(title) / 2, H / 2 + 4, title, AKIRA_UI_PAPER);
+        display_text(cx - akira_ui__tw(title) / 2, by + bh / 2 + 6, title, AKIRA_UI_PAPER);
     }
     if (subtitle && subtitle[0]) {
-        display_text(cx - akira_ui__tw(subtitle) / 2, H / 2 + 20, subtitle, AKIRA_UI_PAPER);
+        display_text(cx - akira_ui__tw(subtitle) / 2, by + bh / 2 + 22, subtitle,
+                     AKIRA_UI_PAPER);
     }
     display_flush();
 }

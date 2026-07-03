@@ -1,0 +1,7 @@
+{
+  "name": "rf_raw",
+  "version": "1.0.0",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "fs.read", "fs.write", "app.switch", "gpio.read"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

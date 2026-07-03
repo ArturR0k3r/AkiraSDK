@@ -17,9 +17,9 @@
 
 #include "akira_api.h"
 
-/* ── Display ─────────────────────────────────────────────────────────── */
-#define SCR_W   320
-#define SCR_H   240
+/* ── Display (set at startup via display_get_size) ────────────────────── */
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 #define BTN_UP       4
@@ -37,22 +37,22 @@
 #define COL_CEIL      0x2104
 #define COL_SPIKE_T   0xF800   /* red     */
 #define COL_SPIKE_B   0xF800
-#define COL_WALL      0x8410   /* grey    */
+#define COL_WALL      0xFFFF   /* white, was grey (invisible on black bg) */
 #define COL_GEM       0xFFE0   /* yellow  */
 #define COL_TRAIL     0x0208   /* dim cyan trail */
 #define COL_SCORE     0xFFFF
-#define COL_LABEL     0x8410
+#define COL_LABEL     0xFFFF   /* white, was grey (invisible on black/dark bg) */
 #define COL_TITLE     0x07FF
 #define COL_GAMEOVER  0xF800
 #define COL_BEST      0xFFE0
 
 /* ── Game area (inside floor/ceiling borders) ────────────────────────── */
-#define BORDER_H   16
-#define PLAY_Y     BORDER_H
-#define PLAY_H     (SCR_H - BORDER_H * 2)
+static int32_t BORDER_H;
+static int32_t PLAY_Y;
+static int32_t PLAY_H;
 
 /* ── Player ──────────────────────────────────────────────────────────── */
-#define P_X        40
+static int32_t P_X;
 #define P_W        12
 #define P_H        12
 
@@ -234,8 +234,8 @@ static void update(void) {
         /* Collision */
         if (obs[i].type == OBS_WALL_GAP) {
             /* Wall with gap in middle */
-            int gap_y = PLAY_Y + PLAY_H / 2 - 25;
-            int gap_h = 50;
+            int gap_h = PLAY_H * 25 / 100;
+            int gap_y = PLAY_Y + PLAY_H / 2 - gap_h / 2;
             /* Top part */
             if (rect_overlap(P_X, py, P_W, P_H,
                              obs[i].x, PLAY_Y, obs[i].w, gap_y - PLAY_Y))
@@ -287,7 +287,8 @@ static void draw_bg(void) {
     display_rect(0, PLAY_Y, SCR_W, PLAY_H, COL_BG);
 
     /* Grid lines for depth effect */
-    for (int x = 0; x < SCR_W; x += 40) {
+    int grid_step = SCR_W * 125 / 1000;
+    for (int x = 0; x < SCR_W; x += grid_step) {
         display_vline(x, PLAY_Y, PLAY_H, 0x0841);
     }
 }
@@ -320,8 +321,8 @@ static void draw_obstacles(void) {
         if (!obs[i].active) continue;
 
         if (obs[i].type == OBS_WALL_GAP) {
-            int gap_y = PLAY_Y + PLAY_H / 2 - 25;
-            int gap_h = 50;
+            int gap_h = PLAY_H * 25 / 100;
+            int gap_y = PLAY_Y + PLAY_H / 2 - gap_h / 2;
             /* Top wall */
             display_rect(obs[i].x, PLAY_Y, obs[i].w, gap_y - PLAY_Y, COL_WALL);
             /* Bottom wall */
@@ -353,13 +354,15 @@ static void draw_gems(void) {
 }
 
 static void draw_hud(void) {
-    display_rect(4, 2, 120, 12, COL_FLOOR);
+    int box_w1 = SCR_W * 375 / 1000;
+    display_rect(4, 2, box_w1, 12, COL_FLOOR);
     display_text(4, 2, "SCORE", COL_LABEL);
-    display_number(48, 2, score, COL_SCORE);
+    display_number(4 + box_w1 * 44 / 120, 2, score, COL_SCORE);
 
-    display_rect(SCR_W - 100, 2, 96, 12, COL_FLOOR);
-    display_text(SCR_W - 100, 2, "BEST", COL_LABEL);
-    display_number(SCR_W - 62, 2, best_score, COL_BEST);
+    int box_w2 = SCR_W * 3 / 10;
+    display_rect(SCR_W - box_w2 - 4, 2, box_w2, 12, COL_FLOOR);
+    display_text(SCR_W - box_w2 - 4, 2, "BEST", COL_LABEL);
+    display_number(SCR_W - box_w2 + 38 - 4, 2, best_score, COL_BEST);
 }
 
 /* ── Pause menu ──────────────────────────────────────────────────────── */
@@ -370,14 +373,19 @@ static int show_pause_menu(void) {
     int cur = 0;
     int pu = 1, pd = 1, pa = 1, ps = 1;
 
+    int box_w = SCR_W / 2;
+    int box_h = SCR_H / 2;
+    int box_x = (SCR_W - box_w) / 2;
+    int box_y = (SCR_H - box_h) / 2;
+
     while (1) {
-        display_rect(80, 60, 160, 120, 0x0000);
-        display_rect_outline(80, 60, 160, 120, COL_TITLE);
-        display_text(118, 70, "PAUSED", COL_TITLE);
+        display_rect(box_x, box_y, box_w, box_h, 0x0000);
+        display_rect_outline(box_x, box_y, box_w, box_h, COL_TITLE);
+        display_text(box_x + box_w / 2 - 20, box_y + 10, "PAUSED", COL_TITLE);
         for (int i = 0; i < MENU_ITEMS; i++) {
             uint16_t cl = (i == cur) ? COL_TITLE : COL_LABEL;
-            display_text(120, 95 + i * 18, menu_labels[i], cl);
-            if (i == cur) display_text(108, 95 + i * 18, ">", cl);
+            display_text(box_x + 40, box_y + 35 + i * 18, menu_labels[i], cl);
+            if (i == cur) display_text(box_x + 28, box_y + 35 + i * 18, ">", cl);
         }
         display_flush();
 
@@ -402,6 +410,12 @@ int main(void)
 {
     printf("AkiraOS Gravity Dash v1.0");
 
+    display_get_size(&SCR_W, &SCR_H);
+    BORDER_H = SCR_H * 7 / 100;
+    PLAY_Y = BORDER_H;
+    PLAY_H = SCR_H - BORDER_H * 2;
+    P_X = SCR_W * 125 / 1000;
+
     gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);
@@ -414,11 +428,11 @@ int main(void)
 
     /* Title screen */
     display_clear(0x0000);
-    display_text_large(36, 50, "GRAVITY", COL_TITLE);
-    display_text_large(68, 85, "DASH", COL_GAMEOVER);
-    display_text(60, 140, "Flip gravity to survive", COL_SCORE);
-    display_text(84, 170, "Press A to start", COL_SCORE);
-    display_text(80, 200, "AkiraOS Edition", COL_LABEL);
+    display_text_large(SCR_W * 1125 / 10000, SCR_H * 208 / 1000, "GRAVITY", COL_TITLE);
+    display_text_large(SCR_W * 2125 / 10000, SCR_H * 354 / 1000, "DASH", COL_GAMEOVER);
+    display_text(SCR_W * 1875 / 10000, SCR_H * 583 / 1000, "Flip gravity to survive", COL_SCORE);
+    display_text(SCR_W * 2625 / 10000, SCR_H * 708 / 1000, "Press A to start", COL_SCORE);
+    display_text(SCR_W / 4, SCR_H * 833 / 1000, "AkiraOS Edition", COL_LABEL);
     display_flush();
 
     uint32_t seed = 1;
@@ -469,13 +483,13 @@ int main(void)
 
         /* Death screen */
         display_clear(0x0000);
-        display_text_large(68, 50, "GAME", COL_GAMEOVER);
-        display_text_large(68, 85, "OVER", COL_GAMEOVER);
-        display_text(100, 130, "SCORE:", COL_LABEL);
-        display_number(155, 130, score, COL_SCORE);
-        display_text(100, 155, "BEST:", COL_LABEL);
-        display_number(150, 155, best_score, COL_BEST);
-        display_text(72, 195, "A:Retry  SETTINGS:Exit", COL_LABEL);
+        display_text_large(SCR_W * 2125 / 10000, SCR_H * 208 / 1000, "GAME", COL_GAMEOVER);
+        display_text_large(SCR_W * 2125 / 10000, SCR_H * 354 / 1000, "OVER", COL_GAMEOVER);
+        display_text(SCR_W * 3125 / 10000, SCR_H * 542 / 1000, "SCORE:", COL_LABEL);
+        display_number(SCR_W * 4844 / 10000, SCR_H * 542 / 1000, score, COL_SCORE);
+        display_text(SCR_W * 3125 / 10000, SCR_H * 646 / 1000, "BEST:", COL_LABEL);
+        display_number(SCR_W * 46875 / 100000, SCR_H * 646 / 1000, best_score, COL_BEST);
+        display_text(SCR_W * 225 / 1000, SCR_H * 8125 / 10000, "A:Retry  SETTINGS:Exit", COL_LABEL);
         display_flush();
 
         /* Wait for retry or exit */

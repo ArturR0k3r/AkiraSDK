@@ -20,8 +20,8 @@
 #include "akira_api.h"
 
 /* ── Screen ──────────────────────────────────────────────────────────── */
-#define SCR_W   320
-#define SCR_H   240
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
 #define CX      (SCR_W / 2)
 #define CY      (SCR_H / 2)
 
@@ -200,10 +200,10 @@ static void init_round(void)
 
     /* Score bar at bottom */
     display_rect(0, SCR_H - CELL, SCR_W, CELL, BLACK);
-    display_text(4, SCR_H - CELL + 1, "You:", WHITE);
-    display_number(36, SCR_H - CELL + 1, p_wins, WHITE);
+    display_text(SCR_W * 1 / 100, SCR_H - CELL + 1, "You:", WHITE);
+    display_number(SCR_W * 11 / 100, SCR_H - CELL + 1, p_wins, WHITE);
     display_text(CX, SCR_H - CELL + 1, "AI:", WHITE);
-    display_number(CX + 24, SCR_H - CELL + 1, ai_wins, WHITE);
+    display_number(CX + SCR_W * 7 / 100, SCR_H - CELL + 1, ai_wins, WHITE);
 
     display_flush();
 }
@@ -281,14 +281,14 @@ static void draw_heads(void)
 
     /* Score strip refresh */
     display_rect(0, SCR_H - CELL, SCR_W, CELL, BLACK);
-    display_text(4, SCR_H - CELL + 1, "You:", WHITE);
-    display_number(36, SCR_H - CELL + 1, p_wins, WHITE);
+    display_text(SCR_W * 1 / 100, SCR_H - CELL + 1, "You:", WHITE);
+    display_number(SCR_W * 11 / 100, SCR_H - CELL + 1, p_wins, WHITE);
     display_text(CX, SCR_H - CELL + 1, "AI:", WHITE);
-    display_number(CX + 24, SCR_H - CELL + 1, ai_wins, WHITE);
+    display_number(CX + SCR_W * 7 / 100, SCR_H - CELL + 1, ai_wins, WHITE);
 
     if (paused) {
-        display_rect(CX - 28, CY - 8, 56, 16, BLACK);
-        display_text(CX - 24, CY - 6, "PAUSE", WHITE);
+        display_rect(CX - SCR_W * 9 / 100, CY - SCR_H * 3 / 100, SCR_W * 18 / 100, SCR_H * 7 / 100, BLACK);
+        display_text(CX - SCR_W * 8 / 100, CY - SCR_H * 3 / 100 + 2, "PAUSE", WHITE);
     }
 
     display_flush();
@@ -300,14 +300,14 @@ static void show_round_result(void)
 {
     /* Flash the loser's position */
     for (int i = 0; i < 6; i++) {
-        display_rect(0, CY - 10, SCR_W, 20, BLACK);
+        display_rect(0, CY - SCR_H * 4 / 100, SCR_W, SCR_H * 8 / 100, BLACK);
         if (i & 1) {
             if (p_wins > ai_wins)
-                display_text(CX - 32, CY - 6, "YOU WIN!", WHITE);
+                display_text(CX - SCR_W * 10 / 100, CY - SCR_H * 2 / 100, "YOU WIN!", WHITE);
             else if (ai_wins > p_wins)
-                display_text(CX - 20, CY - 6, "AI WINS", WHITE);
+                display_text(CX - SCR_W * 6 / 100, CY - SCR_H * 2 / 100, "AI WINS", WHITE);
             else
-                display_text(CX - 20, CY - 6, "DRAW", WHITE);
+                display_text(CX - SCR_W * 6 / 100, CY - SCR_H * 2 / 100, "DRAW", WHITE);
         }
         display_flush();
         delay(150000);
@@ -317,23 +317,23 @@ static void show_round_result(void)
 static void show_match_result(void)
 {
     display_clear(BLACK);
-    display_rect_outline(10, 10, SCR_W - 20, SCR_H - 20, WHITE);
+    display_rect_outline(SCR_W * 3 / 100, SCR_H * 4 / 100, SCR_W * 94 / 100, SCR_H * 92 / 100, WHITE);
 
     if (p_wins > ai_wins) {
-        display_text_large(56, 50, "YOU WIN!", WHITE);
-        display_text(76, 100, "You beat the AI!", WHITE);
+        display_text_large(SCR_W * 18 / 100, SCR_H * 21 / 100, "YOU WIN!", WHITE);
+        display_text(SCR_W * 24 / 100, SCR_H * 42 / 100, "You beat the AI!", WHITE);
     } else {
-        display_text_large(44, 50, "AI WINS", WHITE);
-        display_text(70, 100, "Better luck next time!", WHITE);
+        display_text_large(SCR_W * 14 / 100, SCR_H * 21 / 100, "AI WINS", WHITE);
+        display_text(SCR_W * 22 / 100, SCR_H * 42 / 100, "Better luck next time!", WHITE);
     }
 
-    display_text(40, 140, "Final score:", WHITE);
-    display_text(50, 158, "You:", WHITE);
-    display_number(88, 158, p_wins, WHITE);
-    display_text(50, 174, "AI: ", WHITE);
-    display_number(88, 174, ai_wins, WHITE);
+    display_text(SCR_W * 13 / 100, SCR_H * 58 / 100, "Final score:", WHITE);
+    display_text(SCR_W * 16 / 100, SCR_H * 66 / 100, "You:", WHITE);
+    display_number(SCR_W * 28 / 100, SCR_H * 66 / 100, p_wins, WHITE);
+    display_text(SCR_W * 16 / 100, SCR_H * 73 / 100, "AI: ", WHITE);
+    display_number(SCR_W * 28 / 100, SCR_H * 73 / 100, ai_wins, WHITE);
 
-    display_text(58, 210, "Press A for a rematch", WHITE);
+    display_text(SCR_W * 18 / 100, SCR_H * 88 / 100, "Press A for a rematch", WHITE);
     display_flush();
 }
 
@@ -343,20 +343,20 @@ static void draw_title(void)
     display_clear(BLACK);
 
     /* Simulate a Tron grid with a few trail lines */
-    display_hline(20, 50,  180, WHITE);
-    display_vline(200, 50, 80,  WHITE);
-    display_hline(40, 130, 160, WHITE);
-    display_vline(40, 50,  80,  WHITE);
-    display_hline(40, 50,  80,  WHITE);  /* inner */
-    display_vline(120, 50, 40,  WHITE);
+    display_hline(SCR_W * 6 / 100, SCR_H * 21 / 100, SCR_W * 56 / 100, WHITE);
+    display_vline(SCR_W * 63 / 100, SCR_H * 21 / 100, SCR_H * 33 / 100, WHITE);
+    display_hline(SCR_W * 12 / 100, SCR_H * 54 / 100, SCR_W * 50 / 100, WHITE);
+    display_vline(SCR_W * 12 / 100, SCR_H * 21 / 100, SCR_H * 33 / 100, WHITE);
+    display_hline(SCR_W * 12 / 100, SCR_H * 21 / 100, SCR_W * 25 / 100, WHITE);  /* inner */
+    display_vline(SCR_W * 38 / 100, SCR_H * 21 / 100, SCR_H * 17 / 100, WHITE);
 
-    display_text_large(56, 20, "TRON", WHITE);
+    display_text_large(SCR_W * 18 / 100, SCR_H * 8 / 100, "TRON", WHITE);
 
-    display_text(30, 165, "LEFT / RIGHT : turn your cycle", WHITE);
-    display_text(30, 182, "Leave a trail. Trap the AI.", WHITE);
-    display_text(30, 199, "First to 3 round wins!", WHITE);
+    display_text(SCR_W * 9 / 100,  SCR_H * 69 / 100, "LEFT / RIGHT : turn your cycle", WHITE);
+    display_text(SCR_W * 9 / 100,  SCR_H * 76 / 100, "Leave a trail. Trap the AI.", WHITE);
+    display_text(SCR_W * 9 / 100,  SCR_H * 83 / 100, "First to 3 round wins!", WHITE);
 
-    display_text(60, 220, "Press A to race!", WHITE);
+    display_text(SCR_W * 19 / 100, SCR_H * 92 / 100, "Press A to race!", WHITE);
     display_flush();
 }
 
@@ -364,6 +364,8 @@ static void draw_title(void)
 int main(void)
 {
     printf("AkiraOS TRON v1.0");
+
+    display_get_size(&SCR_W, &SCR_H);
 
     gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_DOWN);

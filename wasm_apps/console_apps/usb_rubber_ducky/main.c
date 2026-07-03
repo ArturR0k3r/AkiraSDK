@@ -507,7 +507,7 @@ static int load_payload(int idx)
 static void draw_progress(int y, int h, uint32_t filled, uint32_t total, uint16_t color)
 {
     int w = total > 0 ? (int)((uint32_t)(DW - 8) * filled / total) : 0;
-    display_rect(4, y, DW - 8, h, COL_SEP);
+    display_rect(4, y, DW - 8, h, COL_BG);
     if (w > 0) display_rect(4, y, w, h, color);
 }
 
@@ -549,7 +549,7 @@ static void draw_list(void)
         int y   = HDR_H + i * ROW_H;
         uint16_t bg = (idx == g_sel) ? COL_SEL : COL_BG;
         display_rect(0, y, DW, ROW_H, bg);
-        display_text(8, y + 3, g_files[idx], idx == g_sel ? COL_TXT : COL_DIM);
+        display_text(8, y + 3, g_files[idx], idx == g_sel ? COL_BG : COL_DIM);
     }
 
     draw_footer("[A]Select [B]Exit [Y]Reload");

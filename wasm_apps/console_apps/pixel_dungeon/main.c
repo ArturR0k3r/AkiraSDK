@@ -15,8 +15,8 @@
 #include "akira_api.h"
 
 /* ── Display ─────────────────────────────────────────────────────────── */
-#define SCR_W   320
-#define SCR_H   240
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 #define BTN_UP       4
@@ -32,8 +32,10 @@
 #define MAP_H    13
 #define TILE_W   16
 #define TILE_H   16
-#define MAP_OX   0
-#define MAP_OY   32   /* below HUD */
+static int32_t MAP_OX = 0;
+static int32_t MAP_OY = 32;   /* below HUD */
+static int32_t HUD_H  = 30;
+static int32_t MSG_H  = 16;
 
 #define FRAME_US 33333
 
@@ -617,8 +619,8 @@ static void draw_floats_fn(void) {
 /* ── HUD ─────────────────────────────────────────────────────────────── */
 static void draw_hud(void) {
     /* Background */
-    display_rect(0, 0, SCR_W, 30, COL_HUD_BG);
-    display_hline(0, 30, SCR_W, COL_HUD_LINE);
+    display_rect(0, 0, SCR_W, HUD_H, COL_HUD_BG);
+    display_hline(0, HUD_H, SCR_W, COL_HUD_LINE);
 
     /* HP bar — monochrome: white fill, border flashes on low HP */
     uint16_t hp_col = COL_WHITE;
@@ -656,17 +658,17 @@ static void draw_hud(void) {
 
     /* Message bar */
     if (msg_timer > 0) {
-        display_rect(0, SCR_H-16, SCR_W, 16, COL_HUD_BG);
-        display_hline(0, SCR_H-17, SCR_W, COL_HUD_LINE);
-        display_text(4, SCR_H-13, msg_buf, msg_color);
+        display_rect(0, SCR_H-MSG_H, SCR_W, MSG_H, COL_HUD_BG);
+        display_hline(0, SCR_H-MSG_H-1, SCR_W, COL_HUD_LINE);
+        display_text(4, SCR_H-MSG_H+3, msg_buf, msg_color);
         msg_timer--;
     }
 
     /* Level-up flash border — alternates white/black for visibility */
     if (levelup_anim > 0) {
         uint16_t lc = (levelup_anim & 4) ? COL_WHITE : COL_BLACK;
-        display_rect_outline(0, 31, SCR_W, SCR_H-32, lc);
-        display_rect_outline(1, 32, SCR_W-2, SCR_H-34, lc);
+        display_rect_outline(0, HUD_H+1, SCR_W, SCR_H-HUD_H-2, lc);
+        display_rect_outline(1, HUD_H+2, SCR_W-2, SCR_H-HUD_H-4, lc);
         levelup_anim--;
     }
 }
@@ -678,19 +680,21 @@ static const char *menu_labels[] = { "Resume", "Restart", "Exit" };
 static int show_pause_menu(void) {
     int cur=0;
     int pu=1,pd=1,pa=1,ps=1;
+    int box_x = SCR_W*25/100, box_y = SCR_H*23/100;
+    int box_w = SCR_W*50/100, box_h = SCR_H*54/100;
     while (1) {
-        display_rounded_rect_fill(80, 55, 160, 130, 6, 0x000C);
-        display_rounded_rect(80, 55, 160, 130, 6, COL_HUD_LINE);
-        display_text_large(110, 65, "PAUSED", COL_FLOOR_HUD);
-        display_hline(88, 85, 144, COL_HUD_LINE);
+        display_rounded_rect_fill(box_x, box_y, box_w, box_h, 6, COL_BLACK);
+        display_rounded_rect(box_x, box_y, box_w, box_h, 6, COL_HUD_LINE);
+        display_text_large(box_x+30, box_y+10, "PAUSED", COL_FLOOR_HUD);
+        display_hline(box_x+8, box_y+30, box_w-16, COL_HUD_LINE);
         for (int i=0; i<MENU_COUNT; i++) {
             uint16_t cl = (i==cur) ? COL_WHITE : COL_MSG_INFO;
             if (i==cur) {
-                display_rect(90, 93+i*22, 140, 18, 0x0018);
-                display_rect_outline(90, 93+i*22, 140, 18, COL_FLOOR_HUD);
-                display_text(102, 97+i*22, menu_labels[i], COL_WHITE);
+                display_rect(box_x+10, box_y+38+i*22, box_w-20, 18, COL_WHITE);
+                display_rect_outline(box_x+10, box_y+38+i*22, box_w-20, 18, COL_FLOOR_HUD);
+                display_text(box_x+22, box_y+42+i*22, menu_labels[i], COL_BLACK);
             } else {
-                display_text(102, 97+i*22, menu_labels[i], cl);
+                display_text(box_x+22, box_y+42+i*22, menu_labels[i], cl);
             }
         }
         display_flush();
@@ -828,51 +832,57 @@ static void draw_title(void) {
     }
 
     /* Title */
-    display_text_large(72, 45, "PIXEL", COL_FLOOR_HUD);
-    display_text_large(36, 75, "DUNGEON", COL_LVL_HUD);
-    display_hline(20, 103, SCR_W-40, COL_HUD_LINE);
+    display_text_large(SCR_W*22/100, SCR_H*19/100, "PIXEL", COL_FLOOR_HUD);
+    display_text_large(SCR_W*11/100, SCR_H*31/100, "DUNGEON", COL_LVL_HUD);
+    display_hline(SCR_W*6/100, SCR_H*43/100, SCR_W*88/100, COL_HUD_LINE);
 
     /* Subtitle */
-    display_text(72, 115, "Explore  Fight  Survive", COL_MSG_INFO);
+    display_text(SCR_W*22/100, SCR_H*48/100, "Explore  Fight  Survive", COL_MSG_INFO);
 
     /* Controls hint */
-    display_text(50, 145, "DPAD:Move/Attack", COL_WHITE);
-    display_text(50, 160, "A:Stairs  B:Potion", COL_WHITE);
-    display_text(50, 175, "SETTINGS:Pause", COL_WHITE);
+    display_text(SCR_W*16/100, SCR_H*60/100, "DPAD:Move/Attack", COL_WHITE);
+    display_text(SCR_W*16/100, SCR_H*67/100, "A:Stairs  B:Potion", COL_WHITE);
+    display_text(SCR_W*16/100, SCR_H*73/100, "SETTINGS:Pause", COL_WHITE);
 
-    display_hline(20, 192, SCR_W-40, COL_HUD_LINE);
-    display_text(80, 200, "Press A to begin!", COL_FLOOR_HUD);
-    display_text(76, 215, "AkiraOS Edition", COL_MSG_INFO);
+    display_hline(SCR_W*6/100, SCR_H*80/100, SCR_W*88/100, COL_HUD_LINE);
+    display_text(SCR_W*25/100, SCR_H*83/100, "Press A to begin!", COL_FLOOR_HUD);
+    display_text(SCR_W*24/100, SCR_H*90/100, "AkiraOS Edition", COL_MSG_INFO);
     display_flush();
 }
 
 /* ── Death screen ────────────────────────────────────────────────────── */
 static void draw_death(void) {
     display_clear(COL_BG);
-    display_rect_outline(10, 10, SCR_W-20, SCR_H-20, 0xF800);
-    display_rect_outline(12, 12, SCR_W-24, SCR_H-24, 0xC000);
-    display_text_large(90, 35, "YOU", COL_MSG_DMG);
-    display_text_large(76, 65, "DIED", COL_MSG_DMG);
-    display_hline(30, 95, SCR_W-60, COL_HUD_LINE);
+    display_rect_outline(10, 10, SCR_W-20, SCR_H-20, COL_WHITE);
+    display_rect_outline(12, 12, SCR_W-24, SCR_H-24, COL_WHITE);
+    display_text_large(SCR_W*28/100, SCR_H*15/100, "YOU", COL_MSG_DMG);
+    display_text_large(SCR_W*24/100, SCR_H*27/100, "DIED", COL_MSG_DMG);
+    display_hline(SCR_W*9/100, SCR_H*40/100, SCR_W*82/100, COL_HUD_LINE);
 
-    display_text(80, 108, "Final Stats:", COL_WHITE);
-    display_text(80, 126, "Floor  :", COL_MSG_INFO);
-    display_number(160, 126, p_floor, COL_WHITE);
-    display_text(80, 142, "Level  :", COL_MSG_INFO);
-    display_number(160, 142, p_level, COL_LVL_HUD);
-    display_text(80, 158, "Gold   :", COL_MSG_INFO);
-    display_number(160, 158, p_gold, COL_GOLD_HUD);
-    display_text(80, 174, "Potions:", COL_MSG_INFO);
-    display_number(160, 174, p_potions, COL_POT_HUD);
+    display_text(SCR_W*25/100, SCR_H*45/100, "Final Stats:", COL_WHITE);
+    display_text(SCR_W*25/100, SCR_H*52/100, "Floor  :", COL_MSG_INFO);
+    display_number(SCR_W*50/100, SCR_H*52/100, p_floor, COL_WHITE);
+    display_text(SCR_W*25/100, SCR_H*59/100, "Level  :", COL_MSG_INFO);
+    display_number(SCR_W*50/100, SCR_H*59/100, p_level, COL_LVL_HUD);
+    display_text(SCR_W*25/100, SCR_H*66/100, "Gold   :", COL_MSG_INFO);
+    display_number(SCR_W*50/100, SCR_H*66/100, p_gold, COL_GOLD_HUD);
+    display_text(SCR_W*25/100, SCR_H*73/100, "Potions:", COL_MSG_INFO);
+    display_number(SCR_W*50/100, SCR_H*73/100, p_potions, COL_POT_HUD);
 
-    display_hline(30, 195, SCR_W-60, COL_HUD_LINE);
-    display_text(74, 204, "Press A to restart", COL_MSG_INFO);
+    display_hline(SCR_W*9/100, SCR_H*81/100, SCR_W*82/100, COL_HUD_LINE);
+    display_text(SCR_W*23/100, SCR_H*85/100, "Press A to restart", COL_MSG_INFO);
     display_flush();
 }
 
 /* ── Entry point ─────────────────────────────────────────────────────── */
 int main(void) {
     printf("AkiraOS Pixel Dungeon Remastered");
+
+    display_get_size(&SCR_W, &SCR_H);
+    HUD_H = SCR_H * 12 / 100;
+    MSG_H = SCR_H * 7 / 100;
+    MAP_OX = (SCR_W - MAP_W * TILE_W) / 2;
+    MAP_OY = HUD_H + 2;
 
     gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);

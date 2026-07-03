@@ -37,10 +37,10 @@
 #define STATE_INJECT    6
 #define STATE_DONE      7
 
-/* ── Display geometry ────────────────────────────────────────────────────── */
+/* ── Display geometry (fetched at startup via display_get_size) ───────────── */
 
-#define DW       320
-#define DH       240
+static int32_t DW = 320;
+static int32_t DH = 240;
 #define HDR_H    16
 #define ROW_H    14
 #define FOT_H    14
@@ -147,20 +147,23 @@ static char     g_done_msg[48];
 
 static void draw_hdr(const char *title)
 {
-    display_rect(0, 0, DW, HDR_H, COL_HDR);
+    display_rect(0, 0, DW, HDR_H, COL_BG);
     display_text(4, 3, title, COL_TXT);
 }
 
 static void draw_footer(const char *hint)
 {
-    display_rect(0, FOT_Y, DW, FOT_H, COL_HDR);
+    display_rect(0, FOT_Y, DW, FOT_H, COL_BG);
     display_text(4, FOT_Y + 2, hint, COL_DIM);
 }
 
+/* Any non-black color renders as solid white on the 1-bit panel, so the
+ * "done" fill and the track can't both be filled rects — track is an
+ * outline, done portion is a solid fill, giving real visible progress. */
 static void draw_bar(int y, int h, uint32_t done, uint32_t total, uint16_t col)
 {
     int w = total > 0 ? (int)((uint32_t)(DW - 8) * done / total) : 0;
-    display_rect(4, y, DW - 8, h, COL_SEP);
+    display_rect_outline(4, y, DW - 8, h, COL_TXT);
     if (w > 0) display_rect(4, y, w, h, col);
 }
 
@@ -205,7 +208,7 @@ static void draw_list(void)
         const akira_wifi_ap_t *ap = &g_aps[idx];
         int y   = HDR_H + i * ROW_H;
         int sel = (idx == g_sel);
-        display_rect(0, y, DW, ROW_H, sel ? COL_SEL : COL_BG);
+        display_rect(0, y, DW, ROW_H, sel ? COL_TXT : COL_BG);
 
         /* SSID (truncated to 20 chars) */
         char ssid[21];
@@ -213,7 +216,7 @@ static void draw_list(void)
         if (slen > 20) slen = 20;
         for (int j = 0; j < slen; j++) ssid[j] = (char)ap->ssid[j];
         ssid[slen] = '\0';
-        display_text(8, y + 3, ssid, sel ? COL_TXT : COL_DIM);
+        display_text(8, y + 3, ssid, sel ? COL_BG : COL_DIM);
 
         /* ch + RSSI + security — right-aligned */
         char info[24];
@@ -231,7 +234,7 @@ static void draw_list(void)
         const char *sl = sec_label(ap->security);
         for (int j = 0; sl[j]; j++) info[ip++] = sl[j];
         info[ip] = '\0';
-        display_text(DW - 112, y + 3, info, COL_DIM);
+        display_text(DW - 112, y + 3, info, sel ? COL_BG : COL_DIM);
     }
 
     draw_footer("[A]Select [B]Rescan [UP/DN]Nav");
@@ -254,13 +257,13 @@ static void draw_mode(void)
     display_text(8, y, "Target:", COL_DIM); y += ROW_H;
 
     /* Broadcast option */
-    uint16_t c0 = (g_mode_sel == 0) ? COL_TXT : COL_DIM;
-    display_rect(4, y, DW - 8, ROW_H, (g_mode_sel == 0) ? COL_SEL : COL_BG);
+    uint16_t c0 = (g_mode_sel == 0) ? COL_BG : COL_DIM;
+    display_rect(4, y, DW - 8, ROW_H, (g_mode_sel == 0) ? COL_TXT : COL_BG);
     display_text(12, y + 3, "Broadcast (all clients)", c0); y += ROW_H;
 
     /* Directed option */
-    uint16_t c1 = (g_mode_sel == 1) ? COL_TXT : COL_DIM;
-    display_rect(4, y, DW - 8, ROW_H, (g_mode_sel == 1) ? COL_SEL : COL_BG);
+    uint16_t c1 = (g_mode_sel == 1) ? COL_BG : COL_DIM;
+    display_rect(4, y, DW - 8, ROW_H, (g_mode_sel == 1) ? COL_TXT : COL_BG);
     display_text(12, y + 3, "Directed (enter MAC)", c1);
 
     draw_footer("[A]Select [B]Back [UP/DN]Nav");
@@ -352,21 +355,21 @@ static void draw_config(void)
 
     /* Count field */
     int sel0 = (g_config_field == 0);
-    display_rect(4, y, DW - 8, ROW_H, sel0 ? COL_SEL : COL_BG);
-    display_text(12, y + 3, "Frames:", sel0 ? COL_TXT : COL_DIM);
-    display_text(80, y + 3, count_str(), sel0 ? COL_ACC : COL_DIM);
+    display_rect(4, y, DW - 8, ROW_H, sel0 ? COL_TXT : COL_BG);
+    display_text(12, y + 3, "Frames:", sel0 ? COL_BG : COL_DIM);
+    display_text(80, y + 3, count_str(), sel0 ? COL_BG : COL_DIM);
     y += ROW_H;
 
     /* Interval field */
     int sel1 = (g_config_field == 1);
-    display_rect(4, y, DW - 8, ROW_H, sel1 ? COL_SEL : COL_BG);
-    display_text(12, y + 3, "Interval:", sel1 ? COL_TXT : COL_DIM);
+    display_rect(4, y, DW - 8, ROW_H, sel1 ? COL_TXT : COL_BG);
+    display_text(12, y + 3, "Interval:", sel1 ? COL_BG : COL_DIM);
     char intv[14];
     int ip = 0;
     const char *iv = interval_str();
     while (*iv) intv[ip++] = *iv++;
     intv[ip++]=' '; intv[ip++]='m'; intv[ip++]='s'; intv[ip]='\0';
-    display_text(80, y + 3, intv, sel1 ? COL_ACC : COL_DIM);
+    display_text(80, y + 3, intv, sel1 ? COL_BG : COL_DIM);
     y += ROW_H + 4;
 
     /* Estimated time */
@@ -529,6 +532,8 @@ static void do_scan(void)
 
 int main(void)
 {
+    display_get_size(&DW, &DH);
+
     int prev_btns = 0;
 
     /* Default client MAC = broadcast */

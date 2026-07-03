@@ -72,9 +72,11 @@
 #define AKIRA_BTN_ID_LEFT   4
 #define AKIRA_BTN_ID_RIGHT  5
 #define AKIRA_BTN_ID_A      6
-#define AKIRA_BTN_ID_B      7
-#define AKIRA_BTN_ID_X      8
-#define AKIRA_BTN_ID_Y      9
+/* Logical B/X/Y swapped relative to physical zephyr,code wiring:
+ * physical B (7) → logical X, physical X (8) → logical Y, physical Y (9) → logical B. */
+#define AKIRA_BTN_ID_B      9
+#define AKIRA_BTN_ID_X      7
+#define AKIRA_BTN_ID_Y      8
 
 /* Bitmasks — OR these against the value returned by input_get_buttons() */
 #define AKIRA_BTN_UP    (1U << AKIRA_BTN_ID_UP)

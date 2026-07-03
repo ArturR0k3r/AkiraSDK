@@ -18,8 +18,8 @@
 #include "akira_api.h"
 
 /* ── Display ──────────────────────────────────────────────────────────── */
-#define SCR_W  320
-#define SCR_H  240
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
 
 /* ── Buttons ──────────────────────────────────────────────────────────── */
 #define BTN_UP       4
@@ -30,15 +30,15 @@
 #define BTN_B        16
 #define BTN_SETTINGS 0
 
-/* ── Layout ───────────────────────────────────────────────────────────── */
-#define HUD_H      22   /* top status bar height */
-#define BORDER_H   10   /* top / bottom play-area border */
-#define PLAY_Y     (HUD_H + BORDER_H)
-#define PLAY_BOT   (SCR_H - BORDER_H)
-#define PLAY_H     (PLAY_BOT - PLAY_Y)
+/* ── Layout (computed from SCR_W/SCR_H in main) ───────────────────────── */
+static int32_t HUD_H;      /* top status bar height */
+static int32_t BORDER_H;   /* top / bottom play-area border */
+static int32_t PLAY_Y;
+static int32_t PLAY_BOT;
+static int32_t PLAY_H;
 
 /* ── Player ───────────────────────────────────────────────────────────── */
-#define P_X   48
+static int32_t P_X;
 #define P_R    9   /* radius */
 
 /* ── Physics ──────────────────────────────────────────────────────────── */
@@ -414,8 +414,8 @@ static void update(void) {
         int oh = obstacles[i].h;
 
         if (obstacles[i].type == OBS_WALL) {
-            int gap_y = PLAY_Y + PLAY_H / 2 - 30;
-            int gap_h = 60;
+            int gap_y = PLAY_Y + PLAY_H / 2 - PLAY_H * 15 / 100;
+            int gap_h = PLAY_H * 30 / 100;
             if (circle_hits_rect(cx, cy, P_R, ox, PLAY_Y, ow, gap_y - PLAY_Y))
                 game_over = 1;
             if (circle_hits_rect(cx, cy, P_R, ox, gap_y + gap_h,
@@ -558,8 +558,8 @@ static void draw_wall_section(int sx, int sy, int w, int h) {
 }
 
 static void draw_wall(int x, int w) {
-    int gap_y = PLAY_Y + PLAY_H / 2 - 30;
-    int gap_h = 60;
+    int gap_y = PLAY_Y + PLAY_H / 2 - PLAY_H * 15 / 100;
+    int gap_h = PLAY_H * 30 / 100;
     int sx    = x + shake_x;
 
     draw_wall_section(sx, PLAY_Y + shake_y,     w, gap_y - PLAY_Y);
@@ -622,11 +622,11 @@ static void draw_hud(void) {
     display_number(22, 4, score, WHT);
 
     /* Best */
-    display_text(SCR_W - 94, 4, "HI", WHT);
-    display_number(SCR_W - 76, 4, best_score, WHT);
+    display_text(SCR_W - SCR_W * 29 / 100, 4, "HI", WHT);
+    display_number(SCR_W - SCR_W * 24 / 100, 4, best_score, WHT);
 
     /* Speed bar: empty rect filled proportionally */
-    int bx = 142, by = 7, bw = 28, bh = 6;
+    int bx = SCR_W * 44 / 100, by = 7, bw = SCR_W * 9 / 100, bh = 6;
     display_rect_outline(bx, by, bw, bh, WHT);
     int fill_w = (scroll_speed - 3) * (bw - 2) / 6;
     if (fill_w > 0)
@@ -634,12 +634,12 @@ static void draw_hud(void) {
 
     /* Combo badge: shown only when active */
     if (combo > 1) {
-        display_text(182, 4, "x", WHT);
-        display_number(192, 4, combo, WHT);
+        display_text(SCR_W * 57 / 100, 4, "x", WHT);
+        display_number(SCR_W * 60 / 100, 4, combo, WHT);
     }
 
     /* Compact gravity direction icon in HUD */
-    int ix = 120, iy = 5;
+    int ix = SCR_W * 375 / 1000, iy = 5;
     if (grav_dir > 0) {
         display_triangle_fill(ix, iy + 2, ix + 8, iy + 2, ix + 4, iy + 11, WHT);
     } else {
@@ -655,23 +655,26 @@ static int show_pause_menu(void) {
     int cur = 0;
     int pu = 1, pd = 1, pa = 1, ps = 1;
 
-    while (1) {
-        display_rect(60, 48, 200, 148, BLK);
-        display_rect_outline(60, 48, 200, 148, WHT);
-        display_rect_outline(62, 50, 196, 144, WHT);
+    int box_w = SCR_W * 625 / 1000, box_h = SCR_H * 617 / 1000;
+    int box_x = (SCR_W - box_w) / 2, box_y = (SCR_H - box_h) / 2;
 
-        display_text_large(88, 60, "PAUSED", WHT);
-        display_hline(62, 82, 196, WHT);
+    while (1) {
+        display_rect(box_x, box_y, box_w, box_h, BLK);
+        display_rect_outline(box_x, box_y, box_w, box_h, WHT);
+        display_rect_outline(box_x + 2, box_y + 2, box_w - 4, box_h - 4, WHT);
+
+        display_text_large(box_x + 28, box_y + 12, "PAUSED", WHT);
+        display_hline(box_x + 2, box_y + 34, box_w - 4, WHT);
 
         for (int i = 0; i < MENU_N; i++) {
-            int row_y = 95 + i * 28;
+            int row_y = box_y + 47 + i * 28;
             if (i == cur) {
                 /* Selected item: inverted (black text on white bar) */
-                display_rect(64, row_y, 192, 22, WHT);
-                display_text(80, row_y + 6, menu_labels[i], BLK);
-                display_text(68, row_y + 6, ">", BLK);
+                display_rect(box_x + 4, row_y, box_w - 8, 22, WHT);
+                display_text(box_x + 20, row_y + 6, menu_labels[i], BLK);
+                display_text(box_x + 8, row_y + 6, ">", BLK);
             } else {
-                display_text(80, row_y + 6, menu_labels[i], WHT);
+                display_text(box_x + 20, row_y + 6, menu_labels[i], WHT);
             }
         }
 
@@ -713,25 +716,26 @@ static void show_title(void) {
         display_rect_outline(bw + 3, bw + 3, SCR_W - bw * 2 - 6, SCR_H - bw * 2 - 6, WHT);
 
         /* Big title */
-        display_text_large(82, 52, "gr4v", WHT);
-        display_hline(78, 90, 168, WHT);
+        display_text_large(SCR_W * 26 / 100, SCR_H * 22 / 100, "gr4v", WHT);
+        display_hline(SCR_W * 24 / 100, SCR_H * 375 / 1000, SCR_W * 525 / 1000, WHT);
 
-        display_text(68, 102, "GRAVITY ARCADE", WHT);
+        display_text(SCR_W * 21 / 100, SCR_H * 425 / 1000, "GRAVITY ARCADE", WHT);
 
         /* Controls */
-        display_text(40, 126, "A / UP   =   FLIP GRAVITY", WHT);
-        display_text(40, 142, "Dodge barriers, collect gems", WHT);
+        display_text(SCR_W * 125 / 1000, SCR_H * 525 / 1000, "A / UP   =   FLIP GRAVITY", WHT);
+        display_text(SCR_W * 125 / 1000, SCR_H * 591 / 1000, "Dodge barriers, collect gems", WHT);
 
         /* Animated demo player bouncing on the right side */
-        int dc_x = 248;
+        int dc_x = SCR_W * 775 / 1000;
         int phase = t % 40;
-        int dc_y  = 130 + (phase < 20 ? phase * 3 : (40 - phase) * 3);
+        int dc_y_base = SCR_H * 54 / 100;
+        int dc_y  = dc_y_base + (phase < 20 ? phase * 3 : (40 - phase) * 3);
         int rring = 12 + (t % 16 < 8 ? t % 8 : 7 - t % 8);
         display_circle(dc_x, dc_y, rring, WHT);
         display_circle_fill(dc_x, dc_y, 10, WHT);
         display_circle_fill(dc_x, dc_y,  3, BLK);
         /* Arrow indicating current demo gravity direction */
-        if (dc_y <= 130) {
+        if (dc_y <= dc_y_base) {
             display_triangle_fill(dc_x - 6, dc_y + 14, dc_x + 6, dc_y + 14,
                                   dc_x, dc_y + 22, WHT);
         } else {
@@ -741,7 +745,7 @@ static void show_title(void) {
 
         /* Blinking "PRESS A TO START" */
         if ((t / 20) % 2 == 0)
-            display_text(90, 198, "PRESS A TO START", WHT);
+            display_text(SCR_W * 28 / 100, SCR_H * 825 / 1000, "PRESS A TO START", WHT);
 
         display_flush();
         update_dots();
@@ -755,6 +759,14 @@ static void show_title(void) {
 /* ── Entry point ──────────────────────────────────────────────────────── */
 int main(void) {
     printf("gr4v v2 starting");
+
+    display_get_size(&SCR_W, &SCR_H);
+    HUD_H    = SCR_H * 9 / 100;
+    BORDER_H = SCR_H * 4 / 100;
+    PLAY_Y   = HUD_H + BORDER_H;
+    PLAY_BOT = SCR_H - BORDER_H;
+    PLAY_H   = PLAY_BOT - PLAY_Y;
+    P_X      = SCR_W * 15 / 100;
 
     gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
@@ -834,26 +846,26 @@ int main(void) {
             int bw = (f % 20 < 10) ? 2 : 3;
             display_rect_outline(bw, bw, SCR_W - bw * 2, SCR_H - bw * 2, WHT);
 
-            display_text_large(74, 38, "GAME OVER", WHT);
-            display_hline(68, 74, 184, WHT);
+            display_text_large(SCR_W * 23 / 100, SCR_H * 158 / 1000, "GAME OVER", WHT);
+            display_hline(SCR_W * 21 / 100, SCR_H * 308 / 1000, SCR_W * 575 / 1000, WHT);
 
             /* Score panel */
-            display_rect_outline(68, 84, 184, 64, WHT);
-            display_text(78, 92,  "SCORE", WHT);
-            display_number(136, 92, score,      WHT);
-            display_text(78, 110, "BEST",  WHT);
-            display_number(130, 110, best_score, WHT);
+            display_rect_outline(SCR_W * 21 / 100, SCR_H * 35 / 100, SCR_W * 575 / 1000, SCR_H * 267 / 1000, WHT);
+            display_text(SCR_W * 244 / 1000, SCR_H * 383 / 1000,  "SCORE", WHT);
+            display_number(SCR_W * 425 / 1000, SCR_H * 383 / 1000, score,      WHT);
+            display_text(SCR_W * 244 / 1000, SCR_H * 458 / 1000, "BEST",  WHT);
+            display_number(SCR_W * 406 / 1000, SCR_H * 458 / 1000, best_score, WHT);
 
             if (score >= best_score && score > 0) {
                 if ((f / 14) % 2 == 0) {
-                    display_text(82, 130, "** NEW BEST! **", WHT);
+                    display_text(SCR_W * 256 / 1000, SCR_H * 542 / 1000, "** NEW BEST! **", WHT);
                 }
             }
 
-            display_hline(68, 154, 184, WHT);
+            display_hline(SCR_W * 21 / 100, SCR_H * 642 / 1000, SCR_W * 575 / 1000, WHT);
 
             if ((f / 18) % 2 == 0)
-                display_text(42, 162, "A: RETRY   SETTINGS: EXIT", WHT);
+                display_text(SCR_W * 13 / 100, SCR_H * 675 / 1000, "A: RETRY   SETTINGS: EXIT", WHT);
 
             display_flush();
             update_dots();

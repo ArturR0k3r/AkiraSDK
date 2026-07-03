@@ -190,7 +190,7 @@ static void draw_signal_bars(int x, int y_row, int8_t rssi)
     static const uint8_t bar_h[5] = {4, 6, 9, 12, 15};
 
     for (int i = 0; i < 5; i++) {
-        uint32_t c = (i < bars) ? col : COL_SEP;
+        uint32_t c = (i < bars) ? col : COL_BG;
         int bh = bar_h[i];
         display_rect(x + i * 10, y_row + ROW_H - 2 - bh, 7, bh, c);
     }
@@ -462,7 +462,7 @@ static void render_detail(int idx)
     display_text(6, y, "Signal strength:", COL_DIM);
     display_progress_bar(6, y + 12, SCR_W - 12, 8,
                          strength_pct, 100,
-                         rssi_color(ap->rssi), COL_SEP);
+                         rssi_color(ap->rssi), COL_BG);
 
     draw_footer("B:back to list  Y:new scan");
     display_flush();

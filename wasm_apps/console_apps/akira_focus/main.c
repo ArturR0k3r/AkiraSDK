@@ -18,14 +18,14 @@
 #include "akira_api.h"
 
 /* ── Screen ──────────────────────────────────────────────────────────── */
-#define SCR_W  320
-#define SCR_H  240
-#define CX     160
-#define CY     115
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
+static int32_t CX;
+static int32_t CY;
 
 /* ── Ring geometry ───────────────────────────────────────────────────── */
-#define OUTER_R  80
-#define INNER_R  58
+static int32_t OUTER_R;
+static int32_t INNER_R;
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 #define BTN_A         15
@@ -145,7 +145,7 @@ static void draw_ring(uint32_t remaining_ms, uint32_t total_ms, uint32_t accent)
 
     int elapsed_segs = 60 - (int)fill_segs;
 
-    display_circle_fill(CX, CY, OUTER_R, COL_RING_DARK);
+    display_circle_fill(CX, CY, OUTER_R, COL_BG);
 
     for (int i = elapsed_segs; i < 60; i++) {
         int j  = (i + 1) % 60;
@@ -168,14 +168,16 @@ static void draw_ring(uint32_t remaining_ms, uint32_t total_ms, uint32_t accent)
 
 static void draw_dots(uint8_t count, uint32_t accent)
 {
-    /* 4 dots, 18 px apart, centered at CX, y = 208 */
-    int x0 = CX - 27;
+    /* 4 dots, spaced 5% of screen width apart, centered at CX */
+    int spacing = SCR_W * 5 / 100;
+    int y       = SCR_H * 86 / 100;
+    int x0      = CX - spacing * 3 / 2;
     for (int i = 0; i < 4; i++) {
-        int x = x0 + i * 18;
+        int x = x0 + i * spacing;
         if (i < (int)count) {
-            display_circle_fill(x, 208, 5, accent);
+            display_circle_fill(x, y, 5, accent);
         } else {
-            display_circle(x, 208, 5, COL_DIM);
+            display_circle(x, y, 5, COL_DIM);
         }
     }
 }
@@ -192,8 +194,8 @@ static void render(void)
     display_clear(COL_BG);
 
     /* Title bar */
-    display_text(CX - 42, 5, "AKIRA FOCUS", COL_DIM);
-    display_hline(0, 18, SCR_W, COL_RING_DARK);
+    display_text(CX - 42, SCR_H * 2 / 100, "AKIRA FOCUS", COL_DIM);
+    display_hline(0, SCR_H * 7 / 100, SCR_W, COL_RING_DARK);
 
     /* Progress ring */
     draw_ring(remaining_ms, g_total_ms, accent);
@@ -224,9 +226,10 @@ static void render(void)
     draw_dots(g_pom_count, accent);
 
     /* Hint bar */
-    display_text(8,           230, "A:Go/Pause", COL_DIM);
-    display_text(CX - 16,    230, "L:Reset",    COL_DIM);
-    display_text(SCR_W - 72, 230, "SET:Skip",   COL_DIM);
+    int hint_y = SCR_H * 95 / 100;
+    display_text(8,           hint_y, "A:Go/Pause", COL_DIM);
+    display_text(CX - 16,     hint_y, "L:Reset",    COL_DIM);
+    display_text(SCR_W - 72,  hint_y, "SET:Skip",   COL_DIM);
 
     display_flush();
 }
@@ -274,20 +277,22 @@ static void draw_splash(void)
 {
     display_clear(COL_BG);
 
+    int ring_cy = SCR_H * 41 / 100;
+
     /* Decorative rings */
-    display_circle(CX, 100, 72, COL_RING_DARK);
-    display_circle(CX, 100, 68, COL_FOCUS);
-    display_circle(CX, 100, 52, COL_RING_DARK);
+    display_circle(CX, ring_cy, SCR_H * 30 / 100, COL_RING_DARK);
+    display_circle(CX, ring_cy, SCR_H * 28 / 100, COL_FOCUS);
+    display_circle(CX, ring_cy, SCR_H * 21 / 100, COL_RING_DARK);
 
     /* App name */
-    display_text_large(CX - 30, 72, "AKIRA", COL_FOCUS);
-    display_text_large(CX - 30, 92, "FOCUS", COL_WHITE);
+    display_text_large(CX - 30, SCR_H * 30 / 100, "AKIRA", COL_FOCUS);
+    display_text_large(CX - 30, SCR_H * 38 / 100, "FOCUS", COL_WHITE);
 
     /* Info */
-    display_text(CX - 45, 152, "Pomodoro productivity", COL_DIM);
-    display_text(CX - 42, 166, "25 min / 5 min / 15 min", COL_DIM);
+    display_text(CX - 45, SCR_H * 63 / 100, "Pomodoro productivity", COL_DIM);
+    display_text(CX - 42, SCR_H * 69 / 100, "25 min / 5 min / 15 min", COL_DIM);
 
-    display_text(CX - 38, 210, "Press A to begin", COL_WHITE);
+    display_text(CX - 38, SCR_H * 87 / 100, "Press A to begin", COL_WHITE);
     display_flush();
 }
 
@@ -296,6 +301,12 @@ static void draw_splash(void)
 int main(void)
 {
     printf("AkiraFocus v1.0");
+
+    display_get_size(&SCR_W, &SCR_H);
+    CX = SCR_W / 2;
+    CY = SCR_H * 48 / 100;
+    OUTER_R = SCR_H * 33 / 100;
+    INNER_R = SCR_H * 24 / 100;
 
     gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);

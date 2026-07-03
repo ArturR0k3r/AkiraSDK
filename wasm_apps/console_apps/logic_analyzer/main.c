@@ -31,36 +31,36 @@ static const uint32_t CH_PIN[CH_COUNT] = { 42, 21, 20, 19 };
 #define BTN_B        16
 #define BTN_SETTINGS 0    /* BTN.OK = GPIO0, active-low pull-up */
 
-/* ── Display geometry (landscape 320×240) ────────────────────────────── *
- *   y:0-17   Header bar  (title + rate + status)
- *   y:18-217 Channels    (4 × 50px each)
- *   y:218-239 Footer     (controls hint)
- *   x:0-47   Label column  (channel name, level, pin)
- *   x:48-319 Waveform area (272px = 272 samples wide)
+/* ── Display geometry (set at startup via display_get_size) ──────────── *
+ *   Header bar   (title + rate + status)
+ *   Channels     (4 rows)
+ *   Footer       (controls hint)
+ *   Label column (channel name, level, pin)
+ *   Waveform area (remaining width, 1 sample per pixel column)
  * ─────────────────────────────────────────────────────────────────────── */
-#define SCR_W    320
-#define SCR_H    240
-#define HDR_H     18
-#define FTR_H     22
-#define LBL_W     48
-#define WAVE_X    LBL_W
-#define WAVE_W   (SCR_W - LBL_W)          /* 272 pixels           */
-#define WAVE_Y    HDR_H
-#define CHART_H  (SCR_H - HDR_H - FTR_H)  /* 200px                */
-#define CH_H     (CHART_H / CH_COUNT)      /* 50px per channel     */
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
+static int32_t HDR_H;
+static int32_t FTR_H;
+static int32_t LBL_W;
+static int32_t WAVE_X;
+static int32_t WAVE_W;
+static int32_t WAVE_Y;
+static int32_t CHART_H;
+static int32_t CH_H;
 
-/* y-offsets from the top of a CH_H row */
-#define Y_HI   10   /* top of HIGH signal bar  */
-#define Y_LO   38   /* top of LOW  signal bar  */
+/* y-offsets from the top of a CH_H row (fractions of row height) */
+static int32_t Y_HI;   /* top of HIGH signal bar  */
+static int32_t Y_LO;   /* top of LOW  signal bar  */
 #define BAR_T   2   /* signal bar thickness    */
-#define Y_MID  24   /* dotted centre reference */
+static int32_t Y_MID;  /* dotted centre reference */
 
 /* ── Colours ─────────────────────────────────────────────────────────── */
 #define COL_BG      0x0000
 #define COL_HDR     0x000F   /* navy                   */
 #define COL_FTR     0x0009   /* dark navy              */
 #define COL_TITLE   0x07FF   /* cyan                   */
-#define COL_LABEL   0x8410   /* dim grey               */
+#define COL_LABEL   COLOR_WHITE
 #define COL_VALUE   0xFFFF   /* white                  */
 #define COL_GRID    0x18C3   /* dark guide dots        */
 #define COL_SEP     0x2945   /* separator lines        */
@@ -69,23 +69,24 @@ static const uint32_t CH_PIN[CH_COUNT] = { 42, 21, 20, 19 };
 #define COL_HINT    0x4208   /* footer hint text       */
 
 static const uint16_t CH_COLOR[CH_COUNT] = {
-    0x07E0,  /* CH1 — green   */
-    0x07FF,  /* CH2 — cyan    */
-    0xFFE0,  /* CH3 — yellow  */
-    0xF81F,  /* CH4 — magenta */
+    COLOR_WHITE,
+    COLOR_WHITE,
+    COLOR_WHITE,
+    COLOR_WHITE,
 };
 
 /* ── Sample ring buffer ──────────────────────────────────────────────── *
- * One entry per screen pixel column (272 samples).
+ * One entry per screen pixel column (max buffer width, capped at wave_w).
  * wr  = index of the column that will receive the NEXT sample.
  * prv = last displayed level per channel (used for transition drawing).
  * ─────────────────────────────────────────────────────────────────────── */
-#define BUF_W  272   /* == WAVE_W; plain literal required for array decl */
+#define BUF_W  272   /* max samples; plain literal required for array decl */
 
 static uint8_t  smp[CH_COUNT][BUF_W];
 static uint8_t  prv[CH_COUNT];
-static int      wr     = 0;
-static int      paused = 0;
+static int      wr      = 0;
+static int      paused  = 0;
+static int32_t  wave_w  = BUF_W;   /* active columns, min(WAVE_W, BUF_W) */
 
 /* ── Sample rate ─────────────────────────────────────────────────────── */
 static const uint32_t RATE_US[] = {
@@ -153,10 +154,9 @@ static const char *ch_pin [CH_COUNT] = { "G42", "G21", "G20", "G19" };
 static void draw_label(int ch, int level) {
     int y = ch_y(ch);
     display_rect(0, y + 1, LBL_W - 2, CH_H - 2, COL_BG);
-    display_text(2, y +  5, ch_name[ch],         CH_COLOR[ch]);
-    display_text(2, y + 19, level ? " H" : " L",
-                             level ? CH_COLOR[ch] : COL_LABEL);
-    display_text(2, y + 33, ch_pin[ch],           COL_LABEL);
+    display_text(2, y + CH_H * 10 / 100, ch_name[ch],         CH_COLOR[ch]);
+    display_text(2, y + CH_H * 38 / 100, level ? " H" : " L", COL_LABEL);
+    display_text(2, y + CH_H * 66 / 100, ch_pin[ch],           COL_LABEL);
 }
 
 /* ── Waveform column ─────────────────────────────────────────────────── *
@@ -225,6 +225,22 @@ static void handle_buttons(void) {
 }
 
 /* ── Init ────────────────────────────────────────────────────────────── */
+static void init_geometry(void) {
+    HDR_H   = SCR_H * 8 / 100;
+    FTR_H   = SCR_H * 9 / 100;
+    LBL_W   = SCR_W * 15 / 100;
+    WAVE_X  = LBL_W;
+    WAVE_Y  = HDR_H;
+    CHART_H = SCR_H - HDR_H - FTR_H;
+    CH_H    = CHART_H / CH_COUNT;
+    WAVE_W  = SCR_W - LBL_W;
+    wave_w  = WAVE_W < BUF_W ? WAVE_W : BUF_W;
+
+    Y_HI  = CH_H * 20 / 100;
+    Y_LO  = CH_H * 76 / 100;
+    Y_MID = CH_H * 48 / 100;
+}
+
 static void init_gpio(void) {
     for (int ch = 0; ch < CH_COUNT; ch++)
         gpio_configure(CH_PIN[ch], GPIO_INPUT | GPIO_PULL_DOWN);
@@ -245,11 +261,11 @@ static void init_screen(void) {
     for (int ch = 0; ch < CH_COUNT; ch++) {
         prv[ch] = 0;
         draw_label(ch, 0);
-        for (int i = 0; i < BUF_W; i++) smp[ch][i] = 0;
+        for (int i = 0; i < wave_w; i++) smp[ch][i] = 0;
     }
 
     /* Draw initial flat LOW waveform */
-    for (int col = 0; col < BUF_W; col++)
+    for (int col = 0; col < wave_w; col++)
         draw_col(col, 0);
 
     /* Show cursor at write position 0 */
@@ -261,6 +277,8 @@ static void init_screen(void) {
 int main(void) {
     printf("AkiraOS Logic Analyzer v2.0");
 
+    display_get_size(&SCR_W, &SCR_H);
+    init_geometry();
     init_gpio();
     init_screen();
 
@@ -284,7 +302,7 @@ int main(void) {
             }
 
             /* 4. Advance write pointer */
-            wr = (wr + 1) % BUF_W;
+            wr = (wr + 1) % wave_w;
 
             /* 5. Mark next write position with cursor */
             draw_col(wr, 1);

@@ -1295,6 +1295,131 @@ extern int rf_raw_replay(const void *buf, uint32_t len,
 
 /*
  * =============================================================================
+ * MESH API (AkiraMesh — multi-hop AODV networking over the RF radio)
+ * =============================================================================
+ * Required capability: "mesh"
+ *
+ * Wraps the on-device AkiraMesh stack (route discovery, per-hop ACK/retransmit,
+ * duplicate suppression). Unlike the raw rf_* calls, the OS owns the radio and
+ * does the routing — the app only sends/receives application payloads.
+ *
+ * On this hardware the mesh binds to the LR2021 (LoRa). mesh_init() releases any
+ * rf_* ownership first, so do not mix rf_* and mesh_* in the same session.
+ */
+
+/** Node ID length in bytes (last byte is the human-facing short id). */
+#define AKIRA_MESH_NODE_ID_LEN   8
+/** Max length of a node's human-readable name (incl. NUL). */
+#define AKIRA_MESH_NAME_LEN      32
+/** Max application payload bytes per send/broadcast/recv. */
+#define AKIRA_MESH_MAX_PAYLOAD   200
+
+/* Node roles (must match akira_mesh_role_t on host). */
+#define AKIRA_MESH_ROLE_NODE         0
+#define AKIRA_MESH_ROLE_GATEWAY      1
+#define AKIRA_MESH_ROLE_PROVISIONER  2
+
+/**
+ * Discovered-node record returned by mesh_get_nodes().
+ * Layout mirrors akira_mesh_node_info_t on the host (52 bytes, LE).
+ */
+typedef struct {
+    uint8_t  node_id[AKIRA_MESH_NODE_ID_LEN];
+    char     name[AKIRA_MESH_NAME_LEN];
+    int32_t  role;
+    uint8_t  hop_count;
+    int8_t   rssi;
+    uint8_t  lqi;
+    uint32_t last_seen;   /**< ms timestamp of last packet from this node */
+} akira_mesh_node_t;
+
+/**
+ * Mesh counters returned by mesh_get_stats().
+ * Layout mirrors akira_mesh_stats_t on the host (24 bytes, LE).
+ */
+typedef struct {
+    uint32_t nodes_discovered;
+    uint32_t messages_sent;
+    uint32_t messages_received;
+    uint32_t messages_forwarded;
+    uint32_t routes_active;
+    uint32_t apps_distributed;
+} akira_mesh_stats_t;
+
+/**
+ * @brief Initialize the mesh with this node's identity and start discovery.
+ * Acquires the LoRa radio (releasing any rf_* ownership first).
+ * @param node_id  Short node id, 0..255 (last byte of the 8-byte id).
+ * @param name     Human-readable name, or NULL to auto-name "akira-XX".
+ * @param role     AKIRA_MESH_ROLE_*.
+ * @param beacon_interval_ms  Discovery-beacon period (0 = default 5000 ms).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_init(int node_id, const char *name, int role,
+                     uint32_t beacon_interval_ms);
+
+/** @brief Begin beaconing / listening. @return 0 or negative errno. */
+extern int mesh_start(void);
+
+/** @brief Stop the mesh and release the radio. @return 0 or negative errno. */
+extern int mesh_stop(void);
+
+/**
+ * @brief Reliably send a payload to one node (route-discovered, ACKed).
+ * @param dest_id  Pointer to an 8-byte node id in WASM memory.
+ * @param data     Payload buffer (≤ AKIRA_MESH_MAX_PAYLOAD bytes).
+ * @param len      Payload length.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_send(const void *dest_id, const void *data, uint32_t len);
+
+/**
+ * @brief Broadcast a payload to every node within @p max_hops.
+ * @param data      Payload buffer (≤ AKIRA_MESH_MAX_PAYLOAD bytes).
+ * @param len       Payload length.
+ * @param max_hops  Flood radius in hops.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_broadcast(const void *data, uint32_t len, int max_hops);
+
+/**
+ * @brief Pop one received payload from the mesh RX queue (non-blocking at t=0).
+ * @param src_id_out  Pointer to an 8-byte buffer; filled with the sender id.
+ * @param buf         Payload output buffer.
+ * @param max_len     Size of @p buf.
+ * @param timeout_ms  0 = non-blocking; else block up to this long.
+ * @return Bytes copied (≥ 0), or negative errno (-EAGAIN/-ENOMSG if empty).
+ */
+extern int mesh_recv_pop(void *src_id_out, void *buf, uint32_t max_len,
+                         uint32_t timeout_ms);
+
+/**
+ * @brief Copy the discovered-node table into @p buf.
+ * @param buf        Array of akira_mesh_node_t in WASM memory.
+ * @param max_nodes  Capacity of @p buf in records.
+ * @return Number of nodes written (≥ 0), or negative errno.
+ */
+extern int mesh_get_nodes(void *buf, uint32_t max_nodes);
+
+/**
+ * @brief Copy the mesh statistics into @p buf.
+ * @param buf  Pointer to an akira_mesh_stats_t in WASM memory.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_get_stats(void *buf);
+
+/**
+ * @brief Chunk and distribute a WASM app binary across the mesh.
+ * @param app_name  App name (null-terminated).
+ * @param data      App binary bytes.
+ * @param len       Binary length.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_distribute_app(const char *app_name, const void *data,
+                               uint32_t len);
+
+/*
+ * =============================================================================
  * TIMER API
  * =============================================================================
  * Required capability: timer

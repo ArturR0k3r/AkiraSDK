@@ -11,6 +11,9 @@
 
 #include "akira_api.h"
 
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
+
 /* ── Display layout ────────────────────────────────────────────────────────
  * Landscape 320×240.
  *   y:0-18   Header bar (title + level)
@@ -21,9 +24,9 @@
 #define BLOCK_SIZE     10
 #define BOARD_WIDTH    10
 #define BOARD_HEIGHT   20
-#define BOARD_X        110
-#define BOARD_Y        20
-#define SIDEBAR_X      218
+#define BOARD_X        (SCR_W * 34 / 100)
+#define BOARD_Y        (SCR_H * 8 / 100)
+#define SIDEBAR_X      (BOARD_X + BOARD_PX_W + 8)
 #define BOARD_PX_W     (BOARD_WIDTH  * BLOCK_SIZE)
 #define BOARD_PX_H     (BOARD_HEIGHT * BLOCK_SIZE)
 
@@ -176,18 +179,18 @@ static void redraw_board(void) {
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
 static void draw_sidebar_static(void) {
     int x = SIDEBAR_X;
-    display_text(x, 22,  "NEXT",  COL_LABEL);
-    display_text(x, 90,  "SCORE", COL_LABEL);
-    display_text(x, 130, "LINES", COL_LABEL);
-    display_text(x, 170, "LEVEL", COL_LABEL);
-    display_rect(x, 84,  100, 1, COL_BORDER);
-    display_rect(x, 124, 100, 1, COL_BORDER);
-    display_rect(x, 164, 100, 1, COL_BORDER);
+    display_text(x, BOARD_Y + 2,   "NEXT",  COL_LABEL);
+    display_text(x, BOARD_Y + 70,  "SCORE", COL_LABEL);
+    display_text(x, BOARD_Y + 110, "LINES", COL_LABEL);
+    display_text(x, BOARD_Y + 150, "LEVEL", COL_LABEL);
+    display_rect(x, BOARD_Y + 64,  100, 1, COL_BORDER);
+    display_rect(x, BOARD_Y + 104, 100, 1, COL_BORDER);
+    display_rect(x, BOARD_Y + 144, 100, 1, COL_BORDER);
 }
 
 static void draw_next(int force) {
     if (!force && g.next_piece == g.prev_next) return;
-    int ox = SIDEBAR_X, oy = 36;
+    int ox = SIDEBAR_X, oy = BOARD_Y + 16;
     display_rect(ox, oy, 44, 40, COL_BG);
     uint16_t s = SHAPES[g.next_piece][0];
     uint16_t c = PIECE_COLOR[g.next_piece];
@@ -206,33 +209,33 @@ static void draw_stats(int force) {
     int x = SIDEBAR_X;
     char buf[8];
     if (force || g.score != g.prev_score) {
-        display_rect(x, 104, 100, 14, COL_BG);
+        display_rect(x, BOARD_Y + 84, 100, 14, COL_BG);
         itoa_pad(g.score, buf, 6);
-        display_text(x, 104, buf, COL_VALUE);
+        display_text(x, BOARD_Y + 84, buf, COL_VALUE);
         g.prev_score = g.score;
     }
     if (force || g.lines != g.prev_lines) {
-        display_rect(x, 144, 100, 14, COL_BG);
+        display_rect(x, BOARD_Y + 124, 100, 14, COL_BG);
         itoa_pad(g.lines, buf, 4);
-        display_text(x, 144, buf, COL_VALUE);
+        display_text(x, BOARD_Y + 124, buf, COL_VALUE);
         g.prev_lines = g.lines;
     }
     if (force || g.level != g.prev_level) {
-        display_rect(x, 184, 100, 14, COL_BG);
+        display_rect(x, BOARD_Y + 164, 100, 14, COL_BG);
         itoa_pad(g.level, buf, 2);
-        display_text(x, 184, buf, COL_VALUE);
+        display_text(x, BOARD_Y + 164, buf, COL_VALUE);
         g.prev_level = g.level;
     }
 }
 
 /* ── Header bar ──────────────────────────────────────────────────────── */
 static void draw_header(void) {
-    display_rect(0, 0, 320, 18, COL_HEADER_BG);
+    display_rect(0, 0, SCR_W, BOARD_Y - 2, COL_HEADER_BG);
     display_text_large(6, 1, "TETRIS", COL_TITLE);
-    display_text(275, 3, "LV:", COL_LABEL);
+    display_text(SCR_W - 45, 3, "LV:", COL_LABEL);
     char buf[3];
     itoa_pad(g.level, buf, 2);
-    display_text(298, 3, buf, COL_VALUE);
+    display_text(SCR_W - 22, 3, buf, COL_VALUE);
     g.prev_level = g.level;
 }
 
@@ -291,10 +294,10 @@ static void update_display(void) {
 
     /* Update header level badge */
     if (g.level != g.prev_level) {
-        display_rect(298, 3, 20, 12, COL_HEADER_BG);
+        display_rect(SCR_W - 22, 3, 20, 12, COL_HEADER_BG);
         char buf[3];
         itoa_pad(g.level, buf, 2);
-        display_text(298, 3, buf, COL_VALUE);
+        display_text(SCR_W - 22, 3, buf, COL_VALUE);
     }
 
     draw_next(0);
@@ -602,6 +605,8 @@ int main(void)
 {
     printf("AkiraOS Tetris v2.0");
 
+    display_get_size(&SCR_W, &SCR_H);
+
     gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);
@@ -612,11 +617,11 @@ int main(void)
     gpio_configure(BTN_X,        GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_Y,        GPIO_INPUT | GPIO_PULL_DOWN);
 
-    /* Title screen — centred on 320×240 */
+    /* Title screen — centred on screen */
     display_clear(COL_BG);
-    display_text_large(124,  80, "TETRIS",         COL_TITLE);
-    display_text_large(118, 115, "AkiraOS",        COL_LABEL);
-    display_text(112,  170, "Press any button",   COL_VALUE);
+    display_text_large(SCR_W * 39 / 100, SCR_H * 33 / 100, "TETRIS",         COL_TITLE);
+    display_text_large(SCR_W * 37 / 100, SCR_H * 48 / 100, "AkiraOS",        COL_LABEL);
+    display_text(SCR_W * 35 / 100, SCR_H * 71 / 100, "Press any button",   COL_VALUE);
     display_flush();
 
     /* Wait for a button press — count frames for RNG seed (human reaction
@@ -657,15 +662,15 @@ int main(void)
 
     /* Game over screen */
     display_clear(COL_BG);
-    display_text_large(110,  60, "GAME",  COL_GAMEOVER_T);
-    display_text_large(110,  95, "OVER",  COL_GAMEOVER_T);
-    display_text(110,  145, "SCORE:",    COL_LABEL);
+    display_text_large(SCR_W * 34 / 100, SCR_H * 25 / 100, "GAME",  COL_GAMEOVER_T);
+    display_text_large(SCR_W * 34 / 100, SCR_H * 40 / 100, "OVER",  COL_GAMEOVER_T);
+    display_text(SCR_W * 34 / 100, SCR_H * 60 / 100, "SCORE:",    COL_LABEL);
     char buf[8];
     itoa_pad(g.score, buf, 7);
-    display_text(110,  160, buf,         COL_GAMEOVER_S);
-    display_text(110,  185, "LINES:",    COL_LABEL);
+    display_text(SCR_W * 34 / 100, SCR_H * 67 / 100, buf,         COL_GAMEOVER_S);
+    display_text(SCR_W * 34 / 100, SCR_H * 77 / 100, "LINES:",    COL_LABEL);
     itoa_pad(g.lines, buf, 4);
-    display_text(175,  185, buf,         COL_VALUE);
+    display_text(SCR_W * 55 / 100, SCR_H * 77 / 100, buf,         COL_VALUE);
     display_flush();
     delay(5000000);
 

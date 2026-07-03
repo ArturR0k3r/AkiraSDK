@@ -38,6 +38,7 @@
 #define MIN_BURST_SAMPLES    8          /* ignore bursts shorter than this      */
 #define ROLLING_DIFF_THRESH 10          /* # differing samples → rolling code   */
 #define CAPTURE_TIMEOUT  5000           /* ms waiting for first signal          */
+#define SAMPLE_RATE_HZ  38400u          /* OOK pulse-timing sample rate         */
 #define CAPTURES_DIR    "captures"
 
 /* ── States ───────────────────────────────────────────────────────────────── */
@@ -54,8 +55,8 @@
 
 /* ── Display ──────────────────────────────────────────────────────────────── */
 
-#define DW      320
-#define DH      240
+static int32_t DW = 320;
+static int32_t DH = 240;
 #define HDR_H    16
 #define ROW_H    14
 #define FOT_H    14
@@ -745,6 +746,8 @@ static void draw_done(void)
 
 int main(void)
 {
+    display_get_size(&DW, &DH);
+
     if (rf_select(AKIRA_RF_CHIP_CC1121) < 0) {
         display_clear(COL_BG);
         display_rect(0, 0, DW, HDR_H, COL_HDR);
@@ -833,7 +836,7 @@ int main(void)
             /* Capture */
             uint16_t *dst     = (g_capture_pass == 0) ? g_cap_buf : g_cmp_buf;
             int       *dst_n  = (g_capture_pass == 0) ? &g_cap_samples : &g_cmp_samples;
-            int n = rf_raw_capture(dst, CAP_BUF_SAMPLES, CAPTURE_TIMEOUT);
+            int n = rf_raw_capture(dst, CAP_BUF_SAMPLES, SAMPLE_RATE_HZ, CAPTURE_TIMEOUT);
 
             if (n > 0) {
                 *dst_n = n;
@@ -884,7 +887,7 @@ int main(void)
                     draw_replay();
                     display_flush();
                     rf_raw_replay(g_cap_buf, (uint32_t)g_cap_samples,
-                                  g_replay_repeat);
+                                  SAMPLE_RATE_HZ, g_replay_repeat);
                     g_state = STATE_DONE;
                 }
             }
@@ -973,7 +976,7 @@ int main(void)
                     g_cap_samples = n;
                     draw_replay();
                     display_flush();
-                    rf_raw_replay(g_cap_buf, (uint32_t)n, g_replay_repeat);
+                    rf_raw_replay(g_cap_buf, (uint32_t)n, SAMPLE_RATE_HZ, g_replay_repeat);
                     g_state = STATE_DONE;
                 } else if (rolling) {
                     /* Show rolling warning inline */

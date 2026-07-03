@@ -33,10 +33,8 @@ static int32_t DISPLAY_H = 240;
 
 /* ── Colours ────────────────────────────────────────────────────────────── */
 #define C_HEADER  0x2945
-#define C_IDLE    0x4228
-#define C_HIT     COLOR_GREEN
 #define C_LABEL   COLOR_WHITE
-#define C_DIM     COLOR_GRAY
+#define C_DIM     COLOR_WHITE
 
 /* ── Macro rows ─────────────────────────────────────────────────────────── */
 #define PAD_ROWS  5
@@ -83,10 +81,15 @@ static int buttons_edge(void)
 static void draw_row(int row, const char *label, const char *hint, int active)
 {
     int y = TITLE_H + row * ROW_H;
-    display_rect(0, y, DISPLAY_W, ROW_H - 2, active ? C_HIT : C_IDLE);
-    display_rect(0, y, 48, ROW_H - 2, active ? COLOR_ORANGE : 0x18C3);
-    display_text_large(6, y + 10, label, C_LABEL);
-    display_text(54, y + 4, hint, active ? COLOR_WHITE : C_DIM);
+    if (active) {
+        display_rect(0, y, DISPLAY_W, ROW_H - 2, COLOR_WHITE);
+        display_text_large(6, y + 10, label, COLOR_BLACK);
+        display_text(54, y + 4, hint, COLOR_BLACK);
+    } else {
+        display_rect_outline(0, y, DISPLAY_W, ROW_H - 2, COLOR_WHITE);
+        display_text_large(6, y + 10, label, C_LABEL);
+        display_text(54, y + 4, hint, C_DIM);
+    }
 }
 
 static void draw_all(int active_mask)

@@ -12,8 +12,8 @@
 #include "akira_api.h"
 
 /* ── Display ─────────────────────────────────────────────────────────── */
-#define SCR_W 320
-#define SCR_H 240
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
 
 /* ── Button pins ─────────────────────────────────────────────────────── */
 #define BTN_UP 4
@@ -42,7 +42,7 @@
 /* ── Game tuning ─────────────────────────────────────────────────────── */
 #define FRAME_US 20000 /* ~50 fps */
 
-#define SHIP_Y 222
+#define SHIP_Y (SCR_H * 92 / 100)
 #define SHIP_W 16
 #define SHIP_H 8
 #define SHIP_SPEED 3
@@ -70,7 +70,7 @@
 #define SHIELD_COUNT 4
 #define SHIELD_W 24
 #define SHIELD_H 12
-#define SHIELD_Y 200
+#define SHIELD_Y (SCR_H * 83 / 100)
 
 #define MYSTERY_W 16
 #define MYSTERY_H 6
@@ -592,20 +592,21 @@ static void update_explosions(void)
 /* ── Drawing ─────────────────────────────────────────────────────────── */
 static void draw_hud(void)
 {
+    int lives_x = SCR_W * 69 / 100;
     /* Score */
-    display_rect(0, 0, 160, 14, COL_BG);
+    display_rect(0, 0, SCR_W / 2, 14, COL_BG);
     display_text(4, 2, "SCORE", COL_LABEL);
     display_number(50, 2, score, COL_SCORE);
     /* Lives */
-    display_rect(220, 0, 100, 14, COL_BG);
-    display_text(220, 2, "LIVES", COL_LABEL);
+    display_rect(lives_x, 0, SCR_W - lives_x, 14, COL_BG);
+    display_text(lives_x, 2, "LIVES", COL_LABEL);
     for (int i = 0; i < lives; i++)
     {
-        display_rect(270 + i * 14, 3, 10, 8, COL_SHIP);
+        display_rect(lives_x + 50 + i * 14, 3, 10, 8, COL_SHIP);
     }
     /* Wave */
-    display_text(140, 2, "W", COL_LABEL);
-    display_number(152, 2, wave, COL_SCORE);
+    display_text(SCR_W * 44 / 100, 2, "W", COL_LABEL);
+    display_number(SCR_W * 44 / 100 + 12, 2, wave, COL_SCORE);
 }
 
 static void draw_ship(void)
@@ -660,7 +661,7 @@ static void draw_mystery(void)
         return;
     /* Mystery ship: a wider rectangle with "?" feel */
     display_rect(mystery_x, MYSTERY_Y, MYSTERY_W, MYSTERY_H, COL_ALIEN_3);
-    display_rect(mystery_x + 2, MYSTERY_Y + 1, MYSTERY_W - 4, 1, COL_GAMEOVER);
+    display_rect(mystery_x + 2, MYSTERY_Y + 1, MYSTERY_W - 4, 1, COL_BG);
 }
 
 static void draw_explosions(void)
@@ -697,18 +698,21 @@ static int show_pause_menu(void)
     int cur = 0;
     int prev_u = 1, prev_d = 1, prev_a = 1, prev_s = 1;
 
+    int mw = SCR_W / 2, mh = SCR_H / 2;
+    int mx = (SCR_W - mw) / 2, my = (SCR_H - mh) / 2;
+
     while (1)
     {
         /* Draw overlay */
-        display_rect(80, 60, 160, 120, 0x0000);
-        display_rect_outline(80, 60, 160, 120, COL_TITLE);
-        display_text(130, 70, "PAUSED", COL_TITLE);
+        display_rect(mx, my, mw, mh, 0x0000);
+        display_rect_outline(mx, my, mw, mh, COL_TITLE);
+        display_text(mx + 50, my + 10, "PAUSED", COL_TITLE);
         for (int i = 0; i < MENU_ITEMS; i++)
         {
             uint16_t c = (i == cur) ? COL_TITLE : COL_LABEL;
-            display_text(120, 95 + i * 18, menu_labels[i], c);
+            display_text(mx + 40, my + 35 + i * 18, menu_labels[i], c);
             if (i == cur)
-                display_text(108, 95 + i * 18, ">", c);
+                display_text(mx + 28, my + 35 + i * 18, ">", c);
         }
         display_flush();
 
@@ -821,6 +825,8 @@ int main(void)
 {
     printf("AkiraOS Space Invaders v1.0");
 
+    display_get_size(&SCR_W, &SCR_H);
+
     gpio_configure(BTN_UP, GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_DOWN, GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_LEFT, GPIO_INPUT | GPIO_PULL_DOWN);
@@ -831,10 +837,10 @@ int main(void)
 
     /* Title screen */
     display_clear(COL_BG);
-    display_text_large(68, 60, "SPACE", COL_TITLE);
-    display_text_large(44, 90, "INVADERS", COL_TITLE);
-    display_text(80, 150, "Press A to start", COL_SCORE);
-    display_text(72, 180, "AkiraOS Edition", COL_LABEL);
+    display_text_large(SCR_W * 21 / 100, SCR_H * 25 / 100, "SPACE", COL_TITLE);
+    display_text_large(SCR_W * 14 / 100, SCR_H * 38 / 100, "INVADERS", COL_TITLE);
+    display_text(SCR_W * 25 / 100, SCR_H * 63 / 100, "Press A to start", COL_SCORE);
+    display_text(SCR_W * 23 / 100, SCR_H * 75 / 100, "AkiraOS Edition", COL_LABEL);
     display_flush();
 
     /* Wait for button */
@@ -877,12 +883,12 @@ int main(void)
 
     /* Game over screen */
     display_clear(COL_BG);
-    display_text_large(68, 60, "GAME", COL_GAMEOVER);
-    display_text_large(68, 95, "OVER", COL_GAMEOVER);
-    display_text(100, 145, "SCORE:", COL_LABEL);
-    display_number(155, 145, score, COL_SCORE);
-    display_text(100, 165, "WAVE:", COL_LABEL);
-    display_number(150, 165, wave, COL_SCORE);
+    display_text_large(SCR_W * 21 / 100, SCR_H * 25 / 100, "GAME", COL_GAMEOVER);
+    display_text_large(SCR_W * 21 / 100, SCR_H * 40 / 100, "OVER", COL_GAMEOVER);
+    display_text(SCR_W * 31 / 100, SCR_H * 60 / 100, "SCORE:", COL_LABEL);
+    display_number(SCR_W * 31 / 100 + 55, SCR_H * 60 / 100, score, COL_SCORE);
+    display_text(SCR_W * 31 / 100, SCR_H * 69 / 100, "WAVE:", COL_LABEL);
+    display_number(SCR_W * 31 / 100 + 50, SCR_H * 69 / 100, wave, COL_SCORE);
     display_flush();
     delay(5000000);
 

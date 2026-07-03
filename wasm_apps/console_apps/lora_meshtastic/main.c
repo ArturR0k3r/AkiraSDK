@@ -325,7 +325,7 @@ static int mesh_ctr(const mesh_hdr_t *hdr, const uint8_t *in, int in_len, uint8_
 
 static uint32_t next_pkt_id(void) { return ++g_pkt_id_counter; }
 
-static int mesh_send(uint32_t to, const uint8_t *payload, int payload_len)
+static int pkt_send(uint32_t to, const uint8_t *payload, int payload_len)
 {
     if (payload_len <= 0 || payload_len > MESH_MAX_PAYLOAD) return -1;
 
@@ -356,7 +356,7 @@ static int mesh_send_data(uint32_t to, int portnum, const uint8_t *data, int dat
     int n = 0;
     n += enc_varint_field(pb + n, 1, (uint64_t)portnum);
     n += enc_bytes(pb + n, 2, data, data_len);
-    return mesh_send(to, pb, n);
+    return pkt_send(to, pb, n);
 }
 
 static int mesh_send_nodeinfo(void)
@@ -508,7 +508,6 @@ static int32_t DH = 240;
 #define COL_OK   CONSOLE_COLOR_OK
 #define COL_WARN CONSOLE_COLOR_WARN
 #define COL_ERR  CONSOLE_COLOR_ERR
-#define COL_SEL  CONSOLE_COLOR_SEL_BG
 
 static void draw_hdr(const char *title, int rx_count)
 {
@@ -566,15 +565,19 @@ static void draw_live(void)
         mesh_msg_t *msg = msg_get(i + g_scroll);
         if (!msg) break;
         int y = HDR_H + i * ROW_H;
-        uint16_t bg = (i + g_scroll == g_sel) ? COL_SEL : COL_BG;
-        display_rect(0, y, DW, ROW_H, bg);
+        int selected = (i + g_scroll == g_sel);
+        display_rect(0, y, DW, ROW_H, selected ? COL_TXT : COL_BG);
+        uint16_t fg = selected ? COL_BG : COL_ACC;
+        uint16_t fg_txt = selected ? COL_BG : COL_TXT;
+        uint16_t fg_dim = selected ? COL_BG : COL_DIM;
+        uint16_t fg_ok  = selected ? COL_BG : COL_OK;
 
         /* Port tag */
         const char *tag;
         if (msg->portnum == PORTNUM_TEXT)     tag = "TXT";
         else if (msg->portnum == PORTNUM_POSITION) tag = "POS";
         else                                   tag = "NFO";
-        display_text(2, y + 3, tag, COL_ACC);
+        display_text(2, y + 3, tag, fg);
 
         /* Short name from node table */
         char sname[6];
@@ -585,16 +588,16 @@ static void draw_live(void)
                 break;
             }
         }
-        display_text(34, y + 3, sname, COL_TXT);
+        display_text(34, y + 3, sname, fg_txt);
 
         /* Text preview (up to 24 chars) */
         char preview[26];
         int plen = 0;
         while (plen < 24 && msg->text[plen]) { preview[plen] = msg->text[plen]; plen++; }
         preview[plen] = '\0';
-        display_text(76, y + 3, preview, COL_DIM);
+        display_text(76, y + 3, preview, fg_dim);
 
-        display_text(DW - 40, y + 3, rssi_bars(msg->rssi), COL_OK);
+        display_text(DW - 40, y + 3, rssi_bars(msg->rssi), fg_ok);
     }
 
     draw_footer("[A]Detail [B]Nodes [Y]Send [X]NODEINFO");
@@ -683,17 +686,21 @@ static void draw_nodes(void)
     for (int i = 0; i < rows && (i + g_scroll) < g_node_count; i++) {
         mesh_node_t *n = &g_nodes[i + g_scroll];
         int y = HDR_H + i * ROW_H;
-        uint16_t bg = (i + g_scroll == g_sel) ? COL_SEL : COL_BG;
-        display_rect(0, y, DW, ROW_H, bg);
+        int selected = (i + g_scroll == g_sel);
+        display_rect(0, y, DW, ROW_H, selected ? COL_TXT : COL_BG);
+        uint16_t fg = selected ? COL_BG : COL_ACC;
+        uint16_t fg_txt = selected ? COL_BG : COL_TXT;
+        uint16_t fg_dim = selected ? COL_BG : COL_DIM;
+        uint16_t fg_ok  = selected ? COL_BG : COL_OK;
 
-        display_text(4, y + 3, n->short_name, COL_ACC);
+        display_text(4, y + 3, n->short_name, fg);
 
         if (n->long_name[0]) {
-            display_text(40, y + 3, n->long_name, COL_TXT);
+            display_text(40, y + 3, n->long_name, fg_txt);
         } else {
             char nid[10];
             fmt_nodeid(n->node_id, nid);
-            display_text(40, y + 3, nid, COL_DIM);
+            display_text(40, y + 3, nid, fg_dim);
         }
 
         uint32_t age_s = (now - n->last_seen_ms) / 1000;
@@ -708,8 +715,8 @@ static void draw_nodes(void)
             age[0] = '0' + (int)((age_s / 3600) % 10);
             age[1] = 'h'; age[2] = '\0';
         }
-        display_text(DW - 48, y + 3, age, COL_DIM);
-        display_text(DW - 28, y + 3, rssi_bars(n->rssi), COL_OK);
+        display_text(DW - 48, y + 3, age, fg_dim);
+        display_text(DW - 28, y + 3, rssi_bars(n->rssi), fg_ok);
     }
 
     draw_footer("[B]Back");

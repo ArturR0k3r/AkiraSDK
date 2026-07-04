@@ -60,8 +60,9 @@ PLATFORMS = {
         'sources': ['main.c', 'gb.c', 'cpu.c', 'ppu.c'],
         'stack_size': 8192,
         # Overhead: GB struct ~460KB (VRAM 16KB + WRAM 32KB + cart RAM 128KB +
-        #           OAM/HRAM + FB 46KB + I/O + code) + headroom
-        'extra_memory': 512 * 1024,
+        #           OAM/HRAM + FB 46KB + I/O + code) + the 192KB full-frame
+        #           upscale buffer (400x240 RGB565) + heap headroom.
+        'extra_memory': 768 * 1024,
         'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
         'description': 'Game Boy / Game Boy Color',
     },

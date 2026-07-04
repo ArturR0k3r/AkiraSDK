@@ -1,9 +1,0 @@
-{
-  "name": "air_mouse",
-  "display_name": "Air Mouse",
-  "version": "1.0.0",
-  "description": "Tilt-controlled HID air mouse — accelerometer moves the cursor, buttons click and scroll, over USB or BLE.",
-  "capabilities": ["display.write", "input.read", "sensor.read", "hid"],
-  "memory_quota": 65536,
-  "min_akiraos_version": "1.5.0"
-}

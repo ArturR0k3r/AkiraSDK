@@ -12,8 +12,8 @@
  *
  * Button mapping (akiraconsole GPIOs):
  *   D-pad Up/Down/Left/Right (4/5/6/7) → NES d-pad
- *   A (15) → NES A      B (16) → NES B
- *   Y (41) → NES Start  X (17) → NES Select
+ *   A (15) → NES A      physical Y (41) → NES B
+ *   physical X (17) → NES Start  physical B (16) → NES Select
  *   Settings (2) → Pause overlay (not sent to NES)
  *
  * @license Apache-2.0
@@ -47,10 +47,10 @@ static int g_nes_draw_w;  /* Pixels written per row                        */
 #define PIN_LEFT      6
 #define PIN_RIGHT     7
 #define PIN_A        15
-#define PIN_B        16
+#define PIN_B        41   /* physical Y — swapped to logical B */
 #define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
-#define PIN_X        17
-#define PIN_Y        41
+#define PIN_X        16   /* physical B — swapped to logical X */
+#define PIN_Y        17   /* physical X — swapped to logical Y */
 
 /* ── Colours (RGB565, byte-swapped for ST7789V SPI) ──────────────────── */
 #define C_BLACK   0x0000u
@@ -63,6 +63,26 @@ static int g_nes_draw_w;  /* Pixels written per row                        */
 #define ROW_H     26
 #define MENU_PAD  10
 #define HDR_H     22
+
+/* ── Debounced button edge-detect ─────────────────────────────────────────
+ * A single-sample "x && !prev" edge check re-fires on mechanical contact
+ * bounce: a real press/release can toggle the raw pin several times across
+ * consecutive ~16.7ms poll ticks, each toggle looking like a fresh press.
+ * deb_edge() requires REL_STABLE consecutive released reads before a button
+ * can re-arm, so bounce during release can't be seen as a second press. */
+#define REL_STABLE 2
+typedef struct { int held, rel_run; } debkey_t;
+static int deb_edge(debkey_t *k, int raw)
+{
+    if (raw) {
+        k->rel_run = 0;
+        if (!k->held) { k->held = 1; return 1; }
+        return 0;
+    }
+    if (k->rel_run < REL_STABLE) k->rel_run++;
+    if (k->rel_run >= REL_STABLE) k->held = 0;
+    return 0;
+}
 
 /* ── Pause-menu items ─────────────────────────────────────────────────── */
 #define PM_RESUME    0
@@ -313,7 +333,9 @@ static void show_settings_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
+    debkey_t ku={.held=gpio_read(PIN_UP)},   kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)},    kb={.held=gpio_read(PIN_B)};
+    debkey_t kl={.held=gpio_read(PIN_LEFT)}, kr={.held=gpio_read(PIN_RIGHT)};
 
     while (1) {
         if (dirty) {
@@ -332,24 +354,26 @@ static void show_settings_menu(void)
             display_flush();
             dirty = 0;
         }
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
-        int l=gpio_read(PIN_LEFT),r=gpio_read(PIN_RIGHT);
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int l=deb_edge(&kl, gpio_read(PIN_LEFT));
+        int r=deb_edge(&kr, gpio_read(PIN_RIGHT));
 
-        if (u&&!pu) { cur=(cur+SM_COUNT-1)%SM_COUNT; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%SM_COUNT;           dirty=1; }
-        if ((l&&!pl)||(r&&!pr)) {
-            int delta = (r&&!pr)?1:-1;
+        if (u) { cur=(cur+SM_COUNT-1)%SM_COUNT; dirty=1; }
+        if (d) { cur=(cur+1)%SM_COUNT;           dirty=1; }
+        if (l||r) {
+            int delta = r?1:-1;
             if (cur==SM_FRAMESKIP) { g_frameskip=(g_frameskip+delta+4)%4; save_int("nes/frameskip",g_frameskip); dirty=1; }
             if (cur==SM_OVERSCAN)  { g_overscan^=1; save_int("nes/overscan",g_overscan); dirty=1; }
         }
-        if (a&&!pa) {
+        if (a) {
             if (cur==SM_FRAMESKIP) { g_frameskip=(g_frameskip+1)%4; save_int("nes/frameskip",g_frameskip); dirty=1; }
             else if (cur==SM_OVERSCAN) { g_overscan^=1; save_int("nes/overscan",g_overscan); dirty=1; }
             else break;
         }
-        if (b&&!pb) break;
-        pu=u; pd=d; pa=a; pb=b; pl=l; pr=r;
+        if (b) break;
         delay(16667);
     }
 }
@@ -366,7 +390,9 @@ static int show_pause_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, ps=0;
+    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)},  kb={.held=gpio_read(PIN_B)};
+    debkey_t ks={.held=gpio_read(PIN_SETTINGS)};
 
     while (1) {
         if (dirty) {
@@ -386,19 +412,20 @@ static int show_pause_menu(void)
             }
             dirty = 0;
         }
-        int s=gpio_read(PIN_SETTINGS);
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
+        int s=deb_edge(&ks, gpio_read(PIN_SETTINGS));
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
 
-        if (s&&!ps) return PM_RESUME;
-        if (u&&!pu) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%PM_COUNT;           dirty=1; }
-        if (a&&!pa) {
+        if (s) return PM_RESUME;
+        if (u) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
+        if (d) { cur=(cur+1)%PM_COUNT;           dirty=1; }
+        if (a) {
             if (cur==PM_SETTINGS) { show_settings_menu(); dirty=1; continue; }
             return cur;
         }
-        if (b&&!pb) return PM_RESUME;
-        pu=u; pd=d; pa=a; pb=b; ps=s;
+        if (b) return PM_RESUME;
         delay(16667);
     }
 }
@@ -444,7 +471,7 @@ int main(void)
         display_rect(0, 0, g_disp_w, g_nes_dst_y, C_BLACK);
     display_flush();
 
-    int settings_held = 0;
+    debkey_t k_settings = { .held = gpio_read(PIN_SETTINGS) };
     int frame_count   = 0;
 
     while (1) {
@@ -460,9 +487,8 @@ int main(void)
         if (gpio_read(PIN_Y))      btns |= NES_BTN_START;
         nes_set_controller(&g_nes, 0, btns);
 
-        /* ── Settings button (rising edge) ───────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
+        /* ── Settings button (debounced rising edge) ──────────────── */
+        if (deb_edge(&k_settings, gpio_read(PIN_SETTINGS))) {
             /* Snapshot the current NES frame into the OS framebuffer so the
              * pause overlay has a correct freeze-frame background.         */
             /* Re-use render_nes_frame so the snapshot respects display geometry
@@ -497,10 +523,8 @@ int main(void)
                 display_flush();
                 frame_count = 0;
             }
-            settings_held = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Emulate one NES frame ────────────────────────────────── */
         int mod  = FS_MOD[g_frameskip];

@@ -277,6 +277,12 @@ void gb_write(GB *gb, uint16_t addr, uint8_t val)
                     gb->rom_bank &= 0x1Fu;
                 } else {
                     gb->ram_bank = 0;
+                    /* Recombine the upper 2 bits back into rom_bank — they
+                     * never left the physical register, mode only changes
+                     * how it's interpreted, so returning to ROM-banking
+                     * mode must restore the full bank number. */
+                    gb->rom_bank = (uint16_t)((gb->mbc1_hi << 5) |
+                                              (gb->rom_bank & 0x1Fu));
                 }
             }
             break;
@@ -552,7 +558,13 @@ void gb_step_frame(GB *gb)
 {
     gb->ppu.frame_ready = 0;
 
-    while (!gb->ppu.frame_ready) {
+    /* ppu_tick() never sets frame_ready while the LCD is disabled (no VBlank
+     * can occur), so relying on frame_ready alone can deadlock forever if
+     * the CPU is also HALTed waiting on an interrupt that needs VBlank.
+     * Real hardware still advances time with the LCD off — cap at one
+     * frame's worth of T-cycles so this always terminates. */
+    uint32_t total_cycles = 0;
+    while (!gb->ppu.frame_ready && total_cycles < GB_DOTS_FRAME) {
         int cycles = sm83_step(gb);
 
         /* In double-speed mode the CPU runs at 2× but sub-systems stay at 1× */
@@ -562,5 +574,6 @@ void gb_step_frame(GB *gb)
         serial_tick(gb, cycles);
         ppu_tick(gb, sys_cycles);
         dma_tick(gb, sys_cycles);
+        total_cycles += (uint32_t)sys_cycles;
     }
 }

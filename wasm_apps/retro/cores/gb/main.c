@@ -13,8 +13,8 @@
  *
  * Button mapping (akiraconsole GPIOs — identical to the NES core):
  *   D-pad U/D/L/R (4/5/6/7) → GB d-pad
- *   A (15) → GB A      B (16) → GB B
- *   X (17) → GB Select Y (41) → GB Start
+ *   A (15) → GB A      physical Y (41) → GB B
+ *   physical B (16) → GB Select   physical X (17) → GB Start
  *   OK (0, active-low) → pause overlay
  *
  * @license Apache-2.0
@@ -32,10 +32,10 @@ extern const uint32_t rom_size;
 #define PIN_LEFT      6
 #define PIN_RIGHT     7
 #define PIN_A        15
-#define PIN_B        16
+#define PIN_B        41   /* physical Y — swapped to logical B */
 #define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
-#define PIN_X        17
-#define PIN_Y        41
+#define PIN_X        16   /* physical B — swapped to logical X */
+#define PIN_Y        17   /* physical X — swapped to logical Y */
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BLACK   0x0000u
@@ -48,6 +48,26 @@ extern const uint32_t rom_size;
 #define ROW_H     26
 #define MENU_PAD  10
 #define HDR_H     22
+
+/* ── Debounced button edge-detect ─────────────────────────────────────────
+ * A single-sample "x && !prev" edge check re-fires on mechanical contact
+ * bounce: a real press/release can toggle the raw pin several times across
+ * consecutive ~16.7ms poll ticks, each toggle looking like a fresh press.
+ * deb_edge() requires REL_STABLE consecutive released reads before a button
+ * can re-arm, so bounce during release can't be seen as a second press. */
+#define REL_STABLE 2
+typedef struct { int held, rel_run; } debkey_t;
+static int deb_edge(debkey_t *k, int raw)
+{
+    if (raw) {
+        k->rel_run = 0;
+        if (!k->held) { k->held = 1; return 1; }
+        return 0;
+    }
+    if (k->rel_run < REL_STABLE) k->rel_run++;
+    if (k->rel_run >= REL_STABLE) k->held = 0;
+    return 0;
+}
 
 /* ── Display geometry (resolved at runtime) ──────────────────────────── */
 static int g_disp_w, g_disp_h;
@@ -91,6 +111,15 @@ static void sitoa(int v, char *b, int max)
     while (v>0 && ti<7) { t[ti++]='0'+v%10; v/=10; }
     while (ti-->0 && i<max-1) b[i++]=t[ti];
     b[i]='\0';
+}
+/* printf() only supports %d/%s (see akira_api.h) — no %x, so format a
+ * 16-bit value as 4 zero-padded hex digits ourselves. */
+static void hex4(uint16_t v, char *b)
+{
+    static const char *digits = "0123456789ABCDEF";
+    b[0]=digits[(v>>12)&0xF]; b[1]=digits[(v>>8)&0xF];
+    b[2]=digits[(v>>4)&0xF];  b[3]=digits[v&0xF];
+    b[4]='\0';
 }
 static void load_settings(void)
 {
@@ -184,23 +213,26 @@ static void draw_row(int x, int y, int w,
     if (val && val[0]) {
         int vx = x + w - 60;
         if (vx > x + 80)
-            display_text(vx, y + (ROW_H - 8) / 2, val, sel ? C_LGRAY : C_DIM);
+            display_text(vx, y + (ROW_H - 8) / 2, val, sel ? C_LGRAY : C_BLACK);
     }
     display_hline(x, y + ROW_H - 1, w, C_LGRAY);
 }
 
 /* ── Settings sub-menu ────────────────────────────────────────────────── */
+#define SETTINGS_HINT_H 18
 static void show_settings_menu(void)
 {
     static const char *FS_LABELS[4] = {
         "Off (60fps)", "Half (30fps)", "1/3 (20fps)", "1/4 (15fps)"
     };
-    const int OW = (g_disp_w >= 190) ? 180 : g_disp_w - 4;
-    const int OH = HDR_H + 2 * ROW_H;
+    const int OW = (g_disp_w >= 230) ? 220 : g_disp_w - 4;
+    const int OH = HDR_H + 2 * ROW_H + SETTINGS_HINT_H;
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
+    debkey_t ku={.held=gpio_read(PIN_UP)},   kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)},    kb={.held=gpio_read(PIN_B)};
+    debkey_t kl={.held=gpio_read(PIN_LEFT)}, kr={.held=gpio_read(PIN_RIGHT)};
 
     while (1) {
         if (dirty) {
@@ -209,29 +241,34 @@ static void show_settings_menu(void)
             draw_header(OX, OY, OW, "Settings");
             int ry = OY + HDR_H;
             draw_row(OX, ry, OW, "Frame Skip", FS_LABELS[g_frameskip], cur==0); ry += ROW_H;
-            draw_row(OX, ry, OW, "Back", "", cur==1);
+            draw_row(OX, ry, OW, "Back", "", cur==1); ry += ROW_H;
+            display_hline(OX, ry, OW, C_BLACK);
+            display_text(OX + MENU_PAD, ry + (SETTINGS_HINT_H - 8) / 2,
+                         "L/R:Change  A:OK  B:Back", C_BLACK);
             display_flush();
             dirty = 0;
         }
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
-        int l=gpio_read(PIN_LEFT),r=gpio_read(PIN_RIGHT);
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int l=deb_edge(&kl, gpio_read(PIN_LEFT));
+        int r=deb_edge(&kr, gpio_read(PIN_RIGHT));
 
-        if (u&&!pu) { cur=(cur+1)%2; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%2; dirty=1; }
-        if ((l&&!pl)||(r&&!pr)) {
+        if (u) { cur=(cur+1)%2; dirty=1; }
+        if (d) { cur=(cur+1)%2; dirty=1; }
+        if (l||r) {
             if (cur == 0) {
-                g_frameskip = (g_frameskip + ((r&&!pr)?1:3)) % 4;
+                g_frameskip = (g_frameskip + (r?1:3)) % 4;
                 save_int("gb/frameskip", g_frameskip);
                 dirty = 1;
             }
         }
-        if (a&&!pa) {
+        if (a) {
             if (cur==0) { g_frameskip=(g_frameskip+1)%4; save_int("gb/frameskip",g_frameskip); dirty=1; }
             else break;
         }
-        if (b&&!pb) break;
-        pu=u; pd=d; pa=a; pb=b; pl=l; pr=r;
+        if (b) break;
         delay(16667);
     }
 }
@@ -247,7 +284,9 @@ static int show_pause_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, ps=0;
+    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)},  kb={.held=gpio_read(PIN_B)};
+    debkey_t ks={.held=gpio_read(PIN_SETTINGS)};
 
     while (1) {
         if (dirty) {
@@ -266,19 +305,20 @@ static int show_pause_menu(void)
             }
             dirty = 0;
         }
-        int s=gpio_read(PIN_SETTINGS);
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
+        int s=deb_edge(&ks, gpio_read(PIN_SETTINGS));
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
 
-        if (s&&!ps) return PM_RESUME;
-        if (u&&!pu) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%PM_COUNT;           dirty=1; }
-        if (a&&!pa) {
+        if (s) return PM_RESUME;
+        if (u) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
+        if (d) { cur=(cur+1)%PM_COUNT;           dirty=1; }
+        if (a) {
             if (cur==PM_SETTINGS) { show_settings_menu(); dirty=1; continue; }
             return cur;
         }
-        if (b&&!pb) return PM_RESUME;
-        pu=u; pd=d; pa=a; pb=b; ps=s;
+        if (b) return PM_RESUME;
         delay(16667);
     }
 }
@@ -299,8 +339,9 @@ int main(void)
 
     draw_border();
 
-    int settings_held = 0;
+    debkey_t k_settings = { .held = gpio_read(PIN_SETTINGS) };
     int frame_count   = 0;
+    printf("[GB] boot OK, rom_size=%u\n", rom_size);
 
     while (1) {
         /* ── Buttons (identical mapping to the NES core) ──────────────── */
@@ -315,9 +356,8 @@ int main(void)
         if (gpio_read(PIN_Y))      btns |= GB_BTN_START;
         gb_set_buttons(&gb, btns);
 
-        /* ── Pause button (rising edge) ───────────────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
+        /* ── Pause button (debounced rising edge) ─────────────────────── */
+        if (deb_edge(&k_settings, gpio_read(PIN_SETTINGS))) {
             int choice = show_pause_menu();
             if (choice == PM_EXIT) {
                 display_clear(C_BLACK); display_flush();
@@ -327,12 +367,11 @@ int main(void)
             if (choice == PM_RESTART) {
                 gb_init(&gb, rom_data, rom_size);
                 frame_count = 0;
+                printf("[GB] restarted from pause menu\n");
             }
             draw_border();
-            settings_held = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Emulate one GB frame ─────────────────────────────────────── */
         int mod  = FS_MOD[g_frameskip];
@@ -340,6 +379,8 @@ int main(void)
         gb.ppu.skip_render = (uint8_t)skip;
         gb_step_frame(&gb);
         frame_count++;
+        { char pcbuf[5]; hex4(gb.cpu.pc, pcbuf);
+          printf("[GB] frame=%d pc=0x%s\n", frame_count, pcbuf); }
 
         if (!skip) {
             render_gb_frame();

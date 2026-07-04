@@ -18,8 +18,8 @@
  *   D-pad Left  (pin  6) → SMS Left
  *   D-pad Right (pin  7) → SMS Right
  *   A button    (pin 15) → SMS Button 1
- *   B button    (pin 16) → SMS Button 2
- *   Y button    (pin 41) → SMS Start / Pause (NMI)
+ *   physical Y  (pin 41) → SMS Button 2 (logical B)
+ *   physical X  (pin 17) → SMS Start / Pause (logical Y, NMI)
  *   Settings    (pin  2) → Emulator pause menu
  *
  * @license Apache-2.0
@@ -53,10 +53,10 @@ static int g_overscan  = 0;                  /* default: off    */
 #define PIN_LEFT      6
 #define PIN_RIGHT     7
 #define PIN_A        15
-#define PIN_B        16
+#define PIN_B        41   /* physical Y — swapped to logical B */
 #define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
-#define PIN_X        17
-#define PIN_Y        41
+#define PIN_X        16   /* physical B — swapped to logical X */
+#define PIN_Y        17   /* physical X — swapped to logical Y */
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BLACK   0x0000u
@@ -69,6 +69,26 @@ static int g_overscan  = 0;                  /* default: off    */
 #define ROW_H     26
 #define MENU_PAD  10
 #define HDR_H     22
+
+/* ── Debounced button edge-detect ─────────────────────────────────────────
+ * A single-sample "x && !prev" edge check re-fires on mechanical contact
+ * bounce: a real press/release can toggle the raw pin several times across
+ * consecutive ~16.7ms poll ticks, each toggle looking like a fresh press.
+ * deb_edge() requires REL_STABLE consecutive released reads before a button
+ * can re-arm, so bounce during release can't be seen as a second press. */
+#define REL_STABLE 2
+typedef struct { int held, rel_run; } debkey_t;
+static int deb_edge(debkey_t *k, int raw)
+{
+    if (raw) {
+        k->rel_run = 0;
+        if (!k->held) { k->held = 1; return 1; }
+        return 0;
+    }
+    if (k->rel_run < REL_STABLE) k->rel_run++;
+    if (k->rel_run >= REL_STABLE) k->held = 0;
+    return 0;
+}
 
 /* ── Pause menu ──────────────────────────────────────────────────────── */
 #define MENU_RESUME   0
@@ -160,7 +180,9 @@ static void show_settings_menu(void)
     const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
+    debkey_t ku={.held=gpio_read(PIN_UP)},   kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)},    kb={.held=gpio_read(PIN_B)};
+    debkey_t kl={.held=gpio_read(PIN_LEFT)}, kr={.held=gpio_read(PIN_RIGHT)};
 
     while (1) {
         if (dirty) {
@@ -174,24 +196,26 @@ static void show_settings_menu(void)
             display_flush();
             dirty = 0;
         }
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
-        int l=gpio_read(PIN_LEFT),r=gpio_read(PIN_RIGHT);
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int l=deb_edge(&kl, gpio_read(PIN_LEFT));
+        int r=deb_edge(&kr, gpio_read(PIN_RIGHT));
 
-        if (u&&!pu) { cur=(cur+2)%3; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%3; dirty=1; }
-        if ((l&&!pl)||(r&&!pr)) {
-            int delta = (r&&!pr) ? 1 : -1;
+        if (u) { cur=(cur+2)%3; dirty=1; }
+        if (d) { cur=(cur+1)%3; dirty=1; }
+        if (l||r) {
+            int delta = r ? 1 : -1;
             if (cur==0) { g_frameskip=(g_frameskip+delta+4)%4; save_int("sms/frameskip",g_frameskip); dirty=1; }
             if (cur==1) { g_overscan^=1; save_int("sms/overscan",g_overscan); dirty=1; }
         }
-        if (a&&!pa) {
+        if (a) {
             if (cur==0) { g_frameskip=(g_frameskip+1)%4; save_int("sms/frameskip",g_frameskip); dirty=1; }
             else if (cur==1) { g_overscan^=1; save_int("sms/overscan",g_overscan); dirty=1; }
             else break;
         }
-        if (b&&!pb) break;
-        pu=u; pd=d; pa=a; pb=b; pl=l; pr=r;
+        if (b) break;
         delay(20000);
     }
 }
@@ -207,7 +231,9 @@ static int show_pause_menu(void)
     const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, ps=0;
+    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)},  kb={.held=gpio_read(PIN_B)};
+    debkey_t ks={.held=gpio_read(PIN_SETTINGS)};
 
     while (1) {
         if (dirty) {
@@ -227,19 +253,20 @@ static int show_pause_menu(void)
             }
             dirty = 0;
         }
-        int s=gpio_read(PIN_SETTINGS);
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
+        int s=deb_edge(&ks, gpio_read(PIN_SETTINGS));
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
 
-        if (s&&!ps) return MENU_RESUME;
-        if (u&&!pu) { cur=(cur+MENU_COUNT-1)%MENU_COUNT; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%MENU_COUNT;             dirty=1; }
-        if (a&&!pa) {
+        if (s) return MENU_RESUME;
+        if (u) { cur=(cur+MENU_COUNT-1)%MENU_COUNT; dirty=1; }
+        if (d) { cur=(cur+1)%MENU_COUNT;             dirty=1; }
+        if (a) {
             if (cur==MENU_SETTINGS) { show_settings_menu(); dirty=1; continue; }
             return cur;
         }
-        if (b&&!pb) return MENU_RESUME;
-        pu=u; pd=d; pa=a; pb=b; ps=s;
+        if (b) return MENU_RESUME;
         delay(16667);
     }
 }
@@ -288,7 +315,7 @@ int main(void)
     draw_border();
     display_flush();
 
-    int settings_held = 0;
+    debkey_t k_settings = { .held = gpio_read(PIN_SETTINGS) };
     int frame_count = 0;
 
     printf("[SMS] Init OK — entering main loop\n");
@@ -308,9 +335,8 @@ int main(void)
 
         sms_set_buttons(&sms, 0, btns);
 
-        /* ── Pause menu ─────────────────────────────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
+        /* ── Pause menu (debounced rising edge) ───────────────────── */
+        if (deb_edge(&k_settings, gpio_read(PIN_SETTINGS))) {
             int choice = show_pause_menu();
             if (choice == MENU_EXIT) {
                 app_switch("supervisor");
@@ -323,10 +349,8 @@ int main(void)
                 frame_count = 0;
                 printf("[SMS] Restarted\n");
             }
-            settings_held = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Run one SMS frame + optional render skip ────────────────── */
         int mod  = FS_MOD[g_frameskip];

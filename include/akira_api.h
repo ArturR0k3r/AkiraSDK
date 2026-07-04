@@ -737,6 +737,80 @@ extern int ble_char_read(int32_t char_h, uint8_t *buf, uint32_t len);
  */
 extern int ble_event_pop(uint8_t *buf, uint32_t len);
 
+/* Sizing for akira_ble_scan_report_t. Must stay in sync with
+ * BLE_SCAN_ADDR_LEN / BLE_SCAN_NAME_LEN / BLE_SCAN_ADV_MAX_LEN in
+ * src/connectivity/bluetooth/bt_manager.h (two separate codebases/toolchains,
+ * so the values are duplicated deliberately here rather than shared). */
+#define AKIRA_BLE_SCAN_ADDR_LEN    6
+#define AKIRA_BLE_SCAN_NAME_LEN    20
+#define AKIRA_BLE_SCAN_ADV_MAX_LEN 31
+
+/**
+ * @brief One BLE advertisement report returned by ble_scan_pop().
+ */
+typedef struct {
+    uint8_t  addr[AKIRA_BLE_SCAN_ADDR_LEN];    /**< Advertiser MAC address */
+    int8_t   rssi;                             /**< Signal strength in dBm */
+    char     name[AKIRA_BLE_SCAN_NAME_LEN];    /**< NUL-terminated local name, empty if none advertised */
+    uint8_t  adv_len;                          /**< Bytes valid in adv_data */
+    uint8_t  adv_data[AKIRA_BLE_SCAN_ADV_MAX_LEN]; /**< Raw AD payload */
+} akira_ble_scan_report_t;
+
+/**
+ * @brief Start BLE observer scanning. Requires "ble.scan" capability.
+ * @param active  1 = active scan (requests names from advertisers), 0 = passive.
+ * @return 0 on success, -EACCES if capability missing, -EBUSY if radio busy
+ *         with another BLE mode.
+ */
+extern int ble_scan_start(int active);
+
+/**
+ * @brief Stop BLE observer scanning.
+ */
+extern int ble_scan_stop(void);
+
+/**
+ * @brief Pop one queued advertisement report (non-blocking).
+ * @param buf  Pointer to a buffer of at least sizeof(akira_ble_scan_report_t).
+ * @param len  Buffer size in bytes.
+ * @return 1 if a report was popped, 0 if queue empty, negative errno on error.
+ *
+ * Typical usage:
+ * @code
+ *   ble_scan_start(1);
+ *   akira_ble_scan_report_t rep;
+ *   while (1) {
+ *       int r = ble_scan_pop(&rep, sizeof(rep));
+ *       if (r == 1) { // rep.addr, rep.rssi, rep.name, rep.adv_len, rep.adv_data }
+ *   }
+ * @endcode
+ */
+extern int ble_scan_pop(void *buf, uint32_t len);
+
+/** BLE spam/spoof presets for ble_spam_start(). */
+#define BLE_SPAM_PRESET_APPLE     0  /**< Apple Continuity proximity-pair popup */
+#define BLE_SPAM_PRESET_FASTPAIR  1  /**< Google Fast Pair */
+#define BLE_SPAM_PRESET_SWIFTPAIR 2  /**< Microsoft Swift Pair */
+#define BLE_SPAM_PRESET_RANDOM    3  /**< Randomized manufacturer-data flood */
+#define BLE_SPAM_PRESET_COUNT     (BLE_SPAM_PRESET_RANDOM + 1)
+
+/**
+ * @brief Start BLE spam/spoof rotating-advertiser mode. Requires "ble.spam"
+ * capability (elevated — broadcasts affect nearby devices).
+ * @param preset  One of BLE_SPAM_PRESET_*.
+ */
+extern int ble_spam_start(int preset);
+
+/**
+ * @brief Stop BLE spam/spoof mode.
+ */
+extern int ble_spam_stop(void);
+
+/**
+ * @brief Number of advertisement payloads sent since the last ble_spam_start().
+ */
+extern int ble_spam_packet_count(void);
+
 /*
  * =============================================================================
  * HID API

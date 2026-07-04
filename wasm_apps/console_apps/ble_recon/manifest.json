@@ -1,0 +1,9 @@
+{
+  "name": "ble_recon",
+  "display_name": "BLE Recon",
+  "version": "1.0.0",
+  "description": "BLE scan and spam/spoof testing tool",
+  "capabilities": ["display.write", "input.read", "ble.scan", "ble.spam", "app.switch"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

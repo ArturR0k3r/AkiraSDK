@@ -1,0 +1,9 @@
+{
+  "name": "stalker_detector",
+  "display_name": "Stalker Detector",
+  "version": "1.0.0",
+  "description": "Scans BLE for Apple FindMy / AirTag trackers and flags any that stay near you over time — a personal anti-stalking tool.",
+  "capabilities": ["display.write", "input.read", "ble.scan"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "fox_hunt",
+  "display_name": "Fox Hunt",
+  "version": "1.0.0",
+  "description": "Sub-GHz signal direction finder — locks a frequency and turns RSSI into a geiger-style meter to walk-find a transmitter.",
+  "capabilities": ["display.write", "input.read", "rf.transceive"],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.6.0"
+}

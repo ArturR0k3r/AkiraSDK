@@ -289,6 +289,55 @@ static void init_gpio(void)
 /* ── SMS machine (static: avoids stack overflow) ─────────────────────── */
 static SMS sms;
 
+/* ── Animated boot screen ─────────────────────────────────────────────── */
+static void boot_animation(void)
+{
+    /* CRT warm-up: horizontal line expands from centre outward */
+    display_clear(0x0000);
+    display_flush();
+
+    int cy = DISP_H / 2;
+    for (int i = 1; i <= 10; i++) {
+        int half = (DISP_H / 2) * i / 10;
+        display_rect(0, cy - half, DISP_W, half * 2, 0x0000);
+        display_hline(0, cy - half,     DISP_W, 0xFFFF);
+        display_hline(0, cy + half - 1, DISP_W, 0xFFFF);
+        display_flush();
+        delay(15000);
+    }
+
+    /* Boot card */
+    display_clear(0x0000);
+    display_text_large(60, 100, "SMS", 0xFFFF);
+    display_text_large(120, 100, "EMULATOR", 0xFFFF);
+    display_hline(40, 130, DISP_W - 80, C_DGRAY);
+
+    /* Loading progress bar */
+    const int bx=40, by=140, bw=DISP_W-80, bh=10;
+    display_rect_outline(bx-1, by-1, bw+2, bh+2, C_DGRAY);
+    display_flush();
+
+    for (int p = 0; p < bw; p += bw / 24 + 1) {
+        int pw = p < bw ? p : bw;
+        display_rect(bx, by, pw, bh, 0xFFFF);
+        display_flush();
+        delay(10000);
+    }
+    display_rect(bx, by, bw, bh, 0xFFFF);
+    display_text(90, by + 20, "Loading ROM...", C_DIM);
+
+    /* Scanline wipe overlay */
+    display_flush();
+    delay(80000);
+    for (int y = 0; y < DISP_H; y += 10) {
+        display_hline(0, y, DISP_W, C_DGRAY);
+    }
+    display_flush();
+    delay(60000);
+    display_clear(0x0000);
+    display_flush();
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 int main(void)
 {
@@ -297,11 +346,7 @@ int main(void)
     init_gpio();
     load_settings();
 
-    display_clear(0x0000);
-    display_text_large(60, 100, "SMS", 0xFFFF);
-    display_text_large(120, 100, "EMULATOR", 0xFFFF);
-    display_text(90, 140, "Loading ROM...", 0xFFFF);
-    display_flush();
+    boot_animation();
 
     if (sms_init(&sms, rom_data, rom_size) != 0) {
         display_clear(0x0000);

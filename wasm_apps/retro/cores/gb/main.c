@@ -323,6 +323,54 @@ static int show_pause_menu(void)
     }
 }
 
+/* ── Animated boot screen ─────────────────────────────────────────────── */
+static void boot_animation(void)
+{
+    /* CRT warm-up: horizontal line expands from centre outward */
+    display_clear(C_BLACK);
+    display_flush();
+
+    int cy = g_disp_h / 2;
+    for (int i = 1; i <= 10; i++) {
+        int half = (g_disp_h / 2) * i / 10;
+        display_rect(0, cy - half, g_disp_w, half * 2, C_BLACK);
+        display_hline(0, cy - half,     g_disp_w, C_WHITE);
+        display_hline(0, cy + half - 1, g_disp_w, C_WHITE);
+        display_flush();
+        delay(15000);
+    }
+
+    /* Boot card */
+    display_clear(C_BLACK);
+    display_text_large(g_disp_w/2 - 40, g_disp_h/2 - 20, "GB", C_WHITE);
+    display_hline(40, g_disp_h/2 + 5, g_disp_w - 80, C_DGRAY);
+
+    /* Loading progress bar */
+    const int bx=40, by=g_disp_h/2 + 20, bw=g_disp_w-80, bh=10;
+    display_rect_outline(bx-1, by-1, bw+2, bh+2, C_DGRAY);
+    display_flush();
+
+    for (int p = 0; p < bw; p += bw / 24 + 1) {
+        int pw = p < bw ? p : bw;
+        display_rect(bx, by, pw, bh, C_WHITE);
+        display_flush();
+        delay(10000);
+    }
+    display_rect(bx, by, bw, bh, C_WHITE);
+    display_text(g_disp_w/2 - 44, by + 20, "Loading ROM...", C_DIM);
+
+    /* Scanline wipe overlay */
+    display_flush();
+    delay(80000);
+    for (int y = 0; y < g_disp_h; y += 10) {
+        display_hline(0, y, g_disp_w, C_DGRAY);
+    }
+    display_flush();
+    delay(60000);
+    display_clear(C_BLACK);
+    display_flush();
+}
+
 /* ── Main ─────────────────────────────────────────────────────────────── */
 int main(void)
 {
@@ -330,10 +378,7 @@ int main(void)
     load_settings();
     init_display_geometry();
 
-    display_clear(C_BLACK);
-    display_text_large(g_disp_w/2 - 40, g_disp_h/2 - 20, "GB", C_WHITE);
-    display_text(g_disp_w/2 - 44, g_disp_h/2 + 10, "Loading ROM...", C_DIM);
-    display_flush();
+    boot_animation();
 
     gb_init(&gb, rom_data, rom_size);
 
@@ -341,6 +386,7 @@ int main(void)
 
     debkey_t k_settings = { .held = gpio_read(PIN_SETTINGS) };
     int frame_count   = 0;
+    uint8_t prev_btns = 0;
     printf("[GB] boot OK, rom_size=%u\n", rom_size);
 
     while (1) {
@@ -355,6 +401,28 @@ int main(void)
         if (gpio_read(PIN_X))      btns |= GB_BTN_SELECT;
         if (gpio_read(PIN_Y))      btns |= GB_BTN_START;
         gb_set_buttons(&gb, btns);
+
+        /* ── Per-button diagnostic log (pin -> GB function) ───────────── */
+        if (btns != prev_btns) {
+            static const struct { uint8_t mask; int pin; const char *name; } BTN_LOG[] = {
+                { GB_BTN_RIGHT,  PIN_RIGHT, "RIGHT"  },
+                { GB_BTN_LEFT,   PIN_LEFT,  "LEFT"   },
+                { GB_BTN_UP,     PIN_UP,    "UP"     },
+                { GB_BTN_DOWN,   PIN_DOWN,  "DOWN"   },
+                { GB_BTN_A,      PIN_A,     "A"      },
+                { GB_BTN_B,      PIN_B,     "B"      },
+                { GB_BTN_SELECT, PIN_X,     "SELECT" },
+                { GB_BTN_START,  PIN_Y,     "START"  },
+            };
+            for (int i = 0; i < 8; i++) {
+                uint8_t m = BTN_LOG[i].mask;
+                if ((btns & m) && !(prev_btns & m))
+                    printf("[GB] btn %s down pin=%d\n", BTN_LOG[i].name, BTN_LOG[i].pin);
+                else if (!(btns & m) && (prev_btns & m))
+                    printf("[GB] btn %s up pin=%d\n", BTN_LOG[i].name, BTN_LOG[i].pin);
+            }
+            prev_btns = btns;
+        }
 
         /* ── Pause button (debounced rising edge) ─────────────────────── */
         if (deb_edge(&k_settings, gpio_read(PIN_SETTINGS))) {

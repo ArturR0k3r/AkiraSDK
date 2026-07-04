@@ -77,6 +77,8 @@ def find_wamrc():
     if sdk_root:
         search_root = os.path.dirname(sdk_root)
         wamrc_subpaths = (
+            os.path.join('wamr-compiler', 'build_xtensa_custom', 'wamrc-2.4.3'),
+            os.path.join('wamr-compiler', 'build_xtensa', 'wamrc-2.4.3'),
             os.path.join('wamr-compiler', 'build', 'wamrc'),
             os.path.join('wamr-compiler', 'wamrc'),
         )

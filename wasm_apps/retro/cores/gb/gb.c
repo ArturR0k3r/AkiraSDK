@@ -365,14 +365,14 @@ void gb_write(GB *gb, uint16_t addr, uint8_t val)
                 break;
             case IO_SC:
                 gb->io[IO_SC] = val;
-                if (val & 0x80u) {
-                    /* Transfer started. Internal clock runs at 8192 Hz, so a
-                     * full 8-bit byte takes 8 * (4194304/8192) = 4096 T-cycles
-                     * (bit 0 = 1).  With external clock (bit 0 = 0, no link
-                     * cable) we simulate a disconnected slave: complete after
-                     * 2048 T-cycles so the game doesn't hang waiting for a
-                     * partner that never comes. */
-                    gb->serial_timer = (val & 0x01u) ? 4096 : 2048;
+                if ((val & 0x80u) && (val & 0x01u)) {
+                    /* Internal clock runs at 8192 Hz, so a full 8-bit byte
+                     * takes 8 * (4194304/8192) = 4096 T-cycles. External
+                     * clock (bit 0 = 0) means the *other* device drives the
+                     * clock; with no link cable attached that clock never
+                     * arrives, so the transfer never completes and no
+                     * serial interrupt fires (matches real hardware). */
+                    gb->serial_timer = 4096;
                 }
                 break;
             case IO_DIV:

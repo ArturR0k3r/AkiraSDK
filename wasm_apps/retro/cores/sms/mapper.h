@@ -61,3 +61,10 @@ uint8_t mapper_read(const Mapper *m, uint16_t addr);
  * Handle a mapper register write ($FFFC–$FFFF in the RAM mirror).
  */
 void mapper_write(Mapper *m, uint16_t addr, uint8_t val);
+
+/**
+ * Recompute the pages[] pointer cache from bank[]/rom. Call after restoring
+ * a save state (see save_state.h): bank registers are restored, but the
+ * derived pointer cache is not part of the save format.
+ */
+void mapper_resync(Mapper *m);

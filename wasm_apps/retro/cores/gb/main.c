@@ -21,6 +21,14 @@
  */
 #include "akira_api.h"
 #include "gb.h"
+#include "save_state.h"
+
+#define SAVE_SLOT_COUNT 3
+static const char *save_slot_path(int slot)
+{
+    static const char *PATHS[SAVE_SLOT_COUNT] = { "save1.bin", "save2.bin", "save3.bin" };
+    return PATHS[slot];
+}
 
 /* ── ROM data injected by rom_to_wasm.py ─────────────────────────────── */
 extern const uint8_t  rom_data[];
@@ -84,13 +92,15 @@ static uint16_t s_frame[MAX_DST_W * MAX_DST_H];
 static GB gb;
 
 /* ── Pause menu ──────────────────────────────────────────────────────── */
-#define PM_RESUME    0
-#define PM_SETTINGS  1
-#define PM_RESTART   2
-#define PM_EXIT      3
-#define PM_COUNT     4
+#define PM_RESUME     0
+#define PM_SAVE_STATE 1
+#define PM_LOAD_STATE 2
+#define PM_SETTINGS   3
+#define PM_RESTART    4
+#define PM_EXIT       5
+#define PM_COUNT      6
 static const char *PM_LABELS[PM_COUNT] = {
-    "Resume", "Settings...", "Restart", "Exit to Menu"
+    "Resume", "Save State", "Load State", "Settings...", "Restart", "Exit to Menu"
 };
 
 /* ── Runtime settings ────────────────────────────────────────────────── */
@@ -273,6 +283,108 @@ static void show_settings_menu(void)
     }
 }
 
+/* Briefly shows a standalone status toast, then leaves it to the caller
+ * to redraw whatever was on screen (caller must set dirty=1 afterward). */
+static void show_pause_status(const char *msg)
+{
+    const int w = 120, h = ROW_H;
+    const int x = (g_disp_w - w) / 2, y = (g_disp_h - h) / 2;
+    display_rect(x-2, y-2, w+4, h+4, C_DGRAY);
+    display_rect(x,   y,   w,   h,   C_BLACK);
+    display_text(x + MENU_PAD, y + (h - 8) / 2, msg, C_WHITE);
+    display_flush();
+    delay(500000);
+}
+
+/* gb_state_{pack,unpack} only marshal to/from a flat header buffer
+ * (save_state.c can't include akira_api.h — see its header comment), so
+ * the actual storage_* I/O, and the separately-streamed cart_ram bytes,
+ * happen here. */
+static int do_save_state(int slot)
+{
+    gb_state_pack(&gb);
+    int fd = storage_open(save_slot_path(slot), STORAGE_O_WRITE);
+    if (fd < 0) return -1;
+    int ok = storage_write(fd, gb_state_header_buf(), gb_state_header_size())
+              == gb_state_header_size();
+    if (ok && gb.cart_ram_size)
+        ok = storage_write(fd, gb.cart_ram, (int)gb.cart_ram_size)
+              == (int)gb.cart_ram_size;
+    storage_close(fd);
+    return ok ? 0 : -1;
+}
+
+static int do_load_state(int slot)
+{
+    int fd = storage_open(save_slot_path(slot), STORAGE_O_READ);
+    if (fd < 0) return -1;
+    int ok = storage_read(fd, gb_state_header_buf(), gb_state_header_size())
+              == gb_state_header_size();
+    if (ok) ok = (gb_state_unpack(&gb) == 0);
+    if (ok && gb.cart_ram_size)
+        ok = storage_read(fd, gb.cart_ram, (int)gb.cart_ram_size)
+              == (int)gb.cart_ram_size;
+    storage_close(fd);
+    return ok ? 0 : -1;
+}
+
+static int save_slot_exists(int slot)
+{
+    int fd = storage_open(save_slot_path(slot), STORAGE_O_READ);
+    if (fd < 0) return 0;
+    storage_close(fd);
+    return 1;
+}
+
+/* Dedicated slot picker: shown when the user chooses Save/Load State from
+ * the pause menu, so slot selection is an explicit screen rather than an
+ * L/R-while-highlighted gesture the user has to discover. */
+static void show_slot_menu(int for_save)
+{
+    const int OW = (g_disp_w >= 175) ? 170 : g_disp_w - 4;
+    const int OH = HDR_H + (SAVE_SLOT_COUNT + 1) * ROW_H;
+    const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
+    const int back_row = SAVE_SLOT_COUNT;
+
+    int cur=0, dirty=1;
+    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
+    debkey_t ka={.held=gpio_read(PIN_A)}, kb={.held=gpio_read(PIN_B)};
+
+    while (1) {
+        if (dirty) {
+            display_rect(OX-2, OY-2, OW+4, OH+4, C_DGRAY);
+            display_rect(OX,   OY,   OW,   OH,   C_WHITE);
+            draw_header(OX, OY, OW, for_save ? "Save to Slot" : "Load from Slot");
+            int ry = OY + HDR_H;
+            char label[8] = "Slot 1";
+            for (int i = 0; i < SAVE_SLOT_COUNT; i++) {
+                label[5] = (char)('1' + i);
+                draw_row(OX, ry, OW, label, save_slot_exists(i) ? "Used" : "Empty", i==cur);
+                ry += ROW_H;
+            }
+            draw_row(OX, ry, OW, "Back", "", cur==back_row);
+            display_flush();
+            dirty = 0;
+        }
+        int u=deb_edge(&ku, gpio_read(PIN_UP));
+        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
+        int a=deb_edge(&ka, gpio_read(PIN_A));
+        int b=deb_edge(&kb, gpio_read(PIN_B));
+
+        if (u) { cur=(cur+SAVE_SLOT_COUNT+1-1)%(SAVE_SLOT_COUNT+1); dirty=1; }
+        if (d) { cur=(cur+1)%(SAVE_SLOT_COUNT+1);                   dirty=1; }
+        if (a) {
+            if (cur == back_row) return;
+            int rc = for_save ? do_save_state(cur) : do_load_state(cur);
+            show_pause_status(rc == 0 ? (for_save ? "Saved!" : "Loaded!")
+                                       : (for_save ? "Save failed" : "Load failed"));
+            return;
+        }
+        if (b) return;
+        delay(16667);
+    }
+}
+
 /* ── Pause overlay (identical structure to the NES core) ──────────────── */
 static int show_pause_menu(void)
 {
@@ -316,6 +428,8 @@ static int show_pause_menu(void)
         if (d) { cur=(cur+1)%PM_COUNT;           dirty=1; }
         if (a) {
             if (cur==PM_SETTINGS) { show_settings_menu(); dirty=1; continue; }
+            if (cur==PM_SAVE_STATE) { show_slot_menu(1); dirty=1; continue; }
+            if (cur==PM_LOAD_STATE) { show_slot_menu(0); dirty=1; continue; }
             return cur;
         }
         if (b) return PM_RESUME;

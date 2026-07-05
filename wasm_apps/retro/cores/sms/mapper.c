@@ -36,6 +36,13 @@ int mapper_init(Mapper *m, const uint8_t *rom, uint32_t rom_size)
     return 0;
 }
 
+void mapper_resync(Mapper *m)
+{
+    update_page(m, 0);
+    update_page(m, 1);
+    update_page(m, 2);
+}
+
 uint8_t mapper_read(const Mapper *m, uint16_t addr)
 {
     int slot = addr >> 14;   /* 0=slot0, 1=slot1, 2=slot2 */

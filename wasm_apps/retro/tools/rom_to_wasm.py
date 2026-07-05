@@ -46,10 +46,12 @@ PLATFORMS = {
         'magic': b'NES\x1a',
         'magic_offset': 0,
         'template_dir': 'nes',
-        'sources': ['main.c', 'nes.c', 'cpu6502.c', 'ppu.c', 'mapper.c'],
+        'sources': ['main.c', 'nes.c', 'cpu6502.c', 'ppu.c', 'mapper.c', 'save_state.c'],
         'stack_size': 8192,
-        'extra_memory': 200 * 1024,  # framebuffer + emulator state overhead
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        # framebuffer + emulator state overhead + ~21KB save-state buffer
+        'extra_memory': 224 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch',
+                          'storage.read', 'storage.write'],
         'description': 'Nintendo Entertainment System',
     },
     'gb': {
@@ -57,13 +59,16 @@ PLATFORMS = {
         'magic': b'Nintendo',
         'magic_offset': 0x134,
         'template_dir': 'gb',
-        'sources': ['main.c', 'gb.c', 'cpu.c', 'ppu.c'],
+        'sources': ['main.c', 'gb.c', 'cpu.c', 'ppu.c', 'save_state.c'],
         'stack_size': 8192,
         # Overhead: GB struct ~460KB (VRAM 16KB + WRAM 32KB + cart RAM 128KB +
         #           OAM/HRAM + FB 46KB + I/O + code) + the 192KB full-frame
-        #           upscale buffer (400x240 RGB565) + heap headroom.
-        'extra_memory': 768 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        #           upscale buffer (400x240 RGB565) + the ~50KB save-state
+        #           header buffer (cart_ram is streamed, not duplicated) +
+        #           heap headroom.
+        'extra_memory': 832 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch',
+                          'storage.read', 'storage.write'],
         'description': 'Game Boy / Game Boy Color',
     },
     'sms': {
@@ -74,14 +79,16 @@ PLATFORMS = {
         'magic': b'TMR SEGA',
         'magic_offset': 0x7FF0,
         'template_dir': 'sms',
-        'sources': ['main.c', 'sms.c', 'z80.c', 'vdp.c', 'mapper.c'],
+        'sources': ['main.c', 'sms.c', 'z80.c', 'vdp.c', 'mapper.c', 'save_state.c'],
         'stack_size': 8192,
         # Overhead breakdown:
         #   SMS machine struct: ~123 KB  (16 KB VRAM + 8 KB WRAM + 96 KB FB + state)
+        #   Save-state header:  ~25 KB   (VRAM/WRAM copy; cart has no extra RAM)
         #   Code + globals:     ~40 KB
         #   Headroom:           ~37 KB
-        'extra_memory': 200 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        'extra_memory': 225 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch',
+                          'storage.read', 'storage.write'],
         'description': 'Sega Master System / Game Gear',
     },
     'atari': {

@@ -20,7 +20,7 @@ WASM_MEMORY ?= 786432
 
 TARGET  = $(GAME).wasm
 
-SRCS    = main.c gb.c cpu.c ppu.c $(ROM_DATA)
+SRCS    = main.c gb.c cpu.c ppu.c save_state.c $(ROM_DATA)
 
 CFLAGS  = -O3 -flto -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes

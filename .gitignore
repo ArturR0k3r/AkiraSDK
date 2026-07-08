@@ -106,3 +106,5 @@ build_nrf53/
 
 # WebAssembly apps 
 *.wasm
+# MicroPython build output (stray gitlink caused recursive submodule checkout to fail)
+python/runtime/_build/

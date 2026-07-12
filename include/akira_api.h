@@ -2703,6 +2703,109 @@ extern int matter_poll(void *src_eui64, int *attr_id,
                        void *buf, int buf_len, int timeout_ms);
 
 
+/* =========================================================================
+ * Matter accessory API — expose THIS device's hardware as a Matter accessory
+ * that Home Assistant / Google Home / Alexa / Apple Home can adopt.
+ *
+ * Available only when the firmware is built with CONFIG_AKIRA_MATTER_ACCESSORY.
+ * All functions require manifest capability "matter".
+ *
+ * Standard Matter identifiers for use with these calls:
+ * ========================================================================= */
+
+/* Device type IDs (matter_endpoint_add) */
+#define MATTER_DEVTYPE_ONOFF_LIGHT     0x0100
+#define MATTER_DEVTYPE_DIMMABLE_LIGHT  0x0101
+#define MATTER_DEVTYPE_COLOR_LIGHT     0x0102
+#define MATTER_DEVTYPE_ONOFF_SWITCH    0x0103
+#define MATTER_DEVTYPE_PLUG            0x010A
+#define MATTER_DEVTYPE_TEMP_SENSOR     0x0302
+#define MATTER_DEVTYPE_OCCUPANCY       0x0107
+
+/* Cluster IDs */
+#define MATTER_CLUSTER_ONOFF           0x0006
+#define MATTER_CLUSTER_LEVEL_CONTROL   0x0008
+#define MATTER_CLUSTER_COLOR_CONTROL   0x0300
+#define MATTER_CLUSTER_TEMP_MEASUREMENT 0x0402
+#define MATTER_CLUSTER_OCCUPANCY       0x0406
+
+/* Common attribute / command IDs */
+#define MATTER_ATTR_ONOFF              0x0000  /* OnOff.OnOff (bool) */
+#define MATTER_ATTR_CURRENT_LEVEL      0x0000  /* LevelControl.CurrentLevel (u8) */
+#define MATTER_ATTR_MEASURED_VALUE     0x0000  /* Measurement clusters (i16, 0.01 units) */
+#define MATTER_CMD_OFF                 0x0000  /* OnOff.Off */
+#define MATTER_CMD_ON                  0x0001  /* OnOff.On */
+#define MATTER_CMD_TOGGLE              0x0002  /* OnOff.Toggle */
+#define MATTER_CMD_MOVE_TO_LEVEL       0x0000  /* LevelControl.MoveToLevel */
+
+/**
+ * @brief Register a local Matter endpoint (device type + server clusters).
+ *
+ * @param device_type  MATTER_DEVTYPE_* device type ID.
+ * @param clusters     Array of MATTER_CLUSTER_* server cluster IDs.
+ * @param n_clusters   Number of cluster IDs (max 8).
+ * @return Assigned endpoint ID (>= 0) on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_endpoint_add(int device_type, const unsigned int *clusters,
+                               int n_clusters);
+
+/**
+ * @brief Report a local attribute value outward to the fabric.
+ *
+ * @param endpoint  Local endpoint ID (from matter_endpoint_add).
+ * @param cluster   MATTER_CLUSTER_* ID.
+ * @param attr      Attribute ID.
+ * @param val       Value bytes.
+ * @param len       Value length (1..255).
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_report_attr(int endpoint, int cluster, int attr,
+                              const void *val, int len);
+
+/**
+ * @brief Poll for the next inbound command targeting a local endpoint (blocking).
+ *
+ * @param endpoint    Receives the target endpoint ID.
+ * @param cluster     Receives the cluster ID.
+ * @param cmd         Receives the command ID (MATTER_CMD_*).
+ * @param buf         Buffer to receive the command payload.
+ * @param buf_len     Size of buf in bytes.
+ * @param timeout_ms  Milliseconds to wait; -1 = wait forever.
+ * @return Number of payload bytes on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_cmd_poll(int *endpoint, int *cluster, int *cmd,
+                           void *buf, int buf_len, int timeout_ms);
+
+/**
+ * @brief Open this device's commissioning window so a controller can adopt it.
+ *
+ * @param timeout_sec  Window timeout in seconds (0 = firmware default).
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_open_pairing(int timeout_sec);
+
+/**
+ * @brief Fetch this device's onboarding payload (QR string + manual code).
+ *
+ * @param qr          Buffer for the "MT:..." QR string.
+ * @param qr_len      Size of qr buffer.
+ * @param manual      Buffer for the 11-digit manual pairing code.
+ * @param manual_len  Size of manual buffer.
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_get_pairing(char *qr, int qr_len, char *manual, int manual_len);
+
+
 #ifdef __cplusplus
 }
 #endif

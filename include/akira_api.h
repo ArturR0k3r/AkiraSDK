@@ -2806,6 +2806,90 @@ extern int matter_open_pairing(int timeout_sec);
 extern int matter_get_pairing(char *qr, int qr_len, char *manual, int manual_len);
 
 
+/* =========================================================================
+ * MQTT / Home Assistant (requires "mqtt" capability)
+ *
+ * Publish this device's hardware to Home Assistant over MQTT. The firmware
+ * owns the broker connection (configured via the `mqtt` shell command / NVS);
+ * apps publish/subscribe and declare Home Assistant entities.
+ *
+ * Fields present in a parsed HA light command (ha_light_poll return bitmask):
+ * ========================================================================= */
+#define HA_CMD_STATE       (1 << 0)
+#define HA_CMD_BRIGHTNESS  (1 << 1)
+#define HA_CMD_COLOR       (1 << 2)
+
+/**
+ * @brief Publish a raw MQTT message.
+ * @param topic   NUL-terminated topic.
+ * @param payload Payload bytes.
+ * @param len     Payload length.
+ * @param qos     0 or 1.
+ * @param retain  Non-zero to set the retain flag.
+ * @return 0 on success, negative errno on failure (e.g. -ENOTCONN).
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int mqtt_publish(const char *topic, const void *payload, int len,
+                        int qos, int retain);
+
+/**
+ * @brief Subscribe to a topic filter (QoS 0). Survives reconnects.
+ * Required manifest capability: "mqtt"
+ */
+extern int mqtt_subscribe(const char *topic);
+
+/**
+ * @brief Wait for the next inbound message.
+ * @param topic        Buffer receiving the NUL-terminated topic.
+ * @param topic_cap    Size of @p topic.
+ * @param payload      Buffer receiving the payload.
+ * @param payload_cap  Size of @p payload.
+ * @param timeout_ms   Milliseconds to wait; -1 = forever.
+ * @return Number of payload bytes on success, negative errno on failure.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int mqtt_poll(char *topic, int topic_cap, void *payload,
+                     int payload_cap, int timeout_ms);
+
+/** @brief 1 if connected to the broker, 0 otherwise. Cap: "mqtt". */
+extern int mqtt_connected(void);
+
+/**
+ * @brief Announce a Home Assistant light entity (MQTT discovery) and
+ *        subscribe to its command topic. RGB + brightness, JSON schema.
+ * @param object_id  Stable id (e.g. "rgb").
+ * @param name       Friendly name shown in HA.
+ * @return 0 on success, negative errno on failure.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int ha_light_register(const char *object_id, const char *name);
+
+/**
+ * @brief Publish the light's current state to Home Assistant (retained).
+ * @param on         Non-zero = ON.
+ * @param brightness 0..255.
+ * @param r,g,b      0..255.
+ * @return 0 on success, negative errno on failure.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int ha_light_report(const char *object_id, int on, int brightness,
+                           int r, int g, int b);
+
+/**
+ * @brief Wait for and decode the next command for this light.
+ * Fills only the fields present in the command.
+ * @return bitmask of HA_CMD_* (>0), 0 on timeout, negative errno on error.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int ha_light_poll(const char *object_id, int *on, int *brightness,
+                         int *r, int *g, int *b, int timeout_ms);
+
+
 #ifdef __cplusplus
 }
 #endif

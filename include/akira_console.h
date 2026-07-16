@@ -53,16 +53,17 @@
 
 /* ─── Button IDs (match zephyr,code in DTS overlay) ─────────────────────── */
 /*
- * Values mirror the `zephyr,code` properties in akiraconsole_esp32s3_procpu.overlay:
+ * Values mirror the `zephyr,code` properties in
+ * akiraconsole_prod_esp32s3_procpu.dts:
  *   gpio-keys {
  *     btn_up    { zephyr,code = <2>; };   // UP
  *     btn_down  { zephyr,code = <3>; };   // DOWN
  *     btn_left  { zephyr,code = <4>; };   // LEFT
  *     btn_right { zephyr,code = <5>; };   // RIGHT
  *     btn_a     { zephyr,code = <6>; };   // A (confirm / select)
- *     btn_b     { zephyr,code = <7>; };   // B (back / cancel)
- *     btn_x     { zephyr,code = <8>; };   // X (info / detail)
- *     btn_y     { zephyr,code = <9>; };   // Y (quick action)
+ *     btn_b     { zephyr,code = <8>; };   // B (back / cancel)
+ *     btn_x     { zephyr,code = <9>; };   // X (info / detail)
+ *     btn_y     { zephyr,code = <7>; };   // Y (quick action)
  *   };
  *
  * input_get_buttons() returns a bitmask where bit N = (1 << zephyr,code).
@@ -72,11 +73,11 @@
 #define AKIRA_BTN_ID_LEFT   4
 #define AKIRA_BTN_ID_RIGHT  5
 #define AKIRA_BTN_ID_A      6
-/* Logical B/X/Y swapped relative to physical zephyr,code wiring:
- * physical B (7) → logical X, physical X (8) → logical Y, physical Y (9) → logical B. */
-#define AKIRA_BTN_ID_B      9
-#define AKIRA_BTN_ID_X      7
-#define AKIRA_BTN_ID_Y      8
+/* Matches akiraconsole_prod_esp32s3_procpu.dts zephyr,code assignments
+ * (btn_b=8, btn_x=9, btn_y=7) directly — no logical/physical swap. */
+#define AKIRA_BTN_ID_B      8
+#define AKIRA_BTN_ID_X      9
+#define AKIRA_BTN_ID_Y      7
 
 /* Bitmasks — OR these against the value returned by input_get_buttons() */
 #define AKIRA_BTN_UP    (1U << AKIRA_BTN_ID_UP)

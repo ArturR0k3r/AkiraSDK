@@ -2468,6 +2468,34 @@ extern int crypto_ed25519_sign(const uint8_t *seed,
                                 uint8_t *sig_out);
 
 /**
+ * @brief Generate a new P-256 (secp256r1) key pair from hardware entropy.
+ *
+ * Goes through PSA Crypto properly (P-256 is a supported curve, unlike
+ * Ed25519). Requires CONFIG_AKIRA_WASM_CRYPTO_ECDSA_P256=y on the host.
+ *
+ * @param priv_out  32-byte output: private key scalar (keep secret).
+ * @param pub_out   65-byte output: uncompressed EC point (0x04 || X || Y).
+ * @return 0 on success, -ENOTSUP if not compiled in, -EIO on PSA error.
+ */
+extern int crypto_p256_keygen(uint8_t *priv_out, uint8_t *pub_out);
+
+/**
+ * @brief Sign a message with a P-256 private key (ECDSA/SHA-256).
+ *
+ * Output is raw r||s (32+32 bytes), NOT DER-encoded — DER-encode yourself
+ * for CTAP2/U2F wire format.
+ *
+ * @param priv    32-byte private key scalar.
+ * @param msg     Message bytes to sign (hashed internally with SHA-256).
+ * @param msg_len Message length.
+ * @param sig_out 64-byte signature output (raw r ∥ s).
+ * @return 0 on success, -ENOTSUP if not compiled in, -EIO on error.
+ */
+extern int crypto_p256_sign(const uint8_t *priv,
+                             const void *msg, uint32_t msg_len,
+                             uint8_t *sig_out);
+
+/**
  * @brief AES-256-CTR encrypt/decrypt (CTR is its own inverse).
  *
  * Meshtastic channel encryption uses AES-256-CTR with:

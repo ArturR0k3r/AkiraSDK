@@ -146,7 +146,7 @@ static const int CARD_CX[3] = { CARD_CX0, CARD_CX1, CARD_CX2 };
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define FIDO_MAX_CREDS  8
 #define FIDO_RPID_MAX  64
-#define FIDO_UID_MAX   32
+#define FIDO_UID_MAX   65  /* WebAuthn userHandle: opaque bytes, spec max 64 */
 #define FIDO_UNM_MAX   32
 #define FIDO_VROWS      6
 #define FIDO_ROW_H     22
@@ -162,10 +162,22 @@ extern int hid_fido_send(const void *buf, uint32_t len);
 #define CTAPHID_PING      0x01u
 #define CTAPHID_MSG       0x03u
 #define CTAPHID_INIT      0x06u
+#define CTAPHID_CBOR      0x10u
 #define CTAPHID_CANCEL    0x11u
 #define CTAPHID_ERROR     0x3Fu
+#define CTAPHID_KEEPALIVE 0x3Bu
 #define CTAPHID_CMD_BIT   0x80u
 #define CTAPHID_BROADCAST 0xFFFFFFFFUL
+
+/* CTAPHID_KEEPALIVE status byte */
+#define CTAP_KEEPALIVE_UP_NEEDED 0x02u
+
+/* Platforms (Windows Hello incl.) time out a pending CTAP2 transaction if
+ * no packet arrives on the channel for a few seconds while waiting for
+ * user presence. Re-send a keepalive at this cadence while the approve
+ * screen is up so the host knows we're still alive and waiting on the
+ * user, not hung. */
+#define FIDO_KEEPALIVE_INTERVAL_MS 100u
 
 /* CTAPHID error codes */
 #define CTAP1_ERR_INVALID_CMD 0x01u
@@ -254,7 +266,8 @@ static char     g_s_fp[52];                        /* "SHA256:..." */
 
 /* FIDO2 */
 static char     g_frpid[FIDO_MAX_CREDS][FIDO_RPID_MAX];
-static char     g_fuid [FIDO_MAX_CREDS][FIDO_UID_MAX];
+static char     g_fuid [FIDO_MAX_CREDS][FIDO_UID_MAX]; /* opaque bytes, NOT text */
+static uint8_t  g_fuid_len[FIDO_MAX_CREDS];
 static char     g_funm [FIDO_MAX_CREDS][FIDO_UNM_MAX];
 static uint8_t  g_fpk  [FIDO_MAX_CREDS][32];
 static uint8_t  g_fe   [FIDO_MAX_CREDS][32];
@@ -268,10 +281,21 @@ static int      g_f_scroll;
 static uint8_t  g_f_req_type;   /* 1=makeCredential, 2=getAssertion */
 static char     g_f_p_rpid[FIDO_RPID_MAX];
 static char     g_f_p_unm [FIDO_UNM_MAX];
-static char     g_f_p_uid [FIDO_UID_MAX];   /* stored as text until CTAP2 lands */
+static char     g_f_p_uid [FIDO_UID_MAX];   /* opaque bytes, NOT text */
+static uint8_t  g_f_p_uid_len;
 static uint8_t  g_f_p_hash[32];
 static int      g_f_p_key_idx;
 static uint32_t g_f_req_t;
+static uint32_t g_f_last_keepalive;   /* last CTAPHID_KEEPALIVE send, ms */
+
+/* U2F (CTAP1) — stateless: keyHandle IS the wrapped private key, no NVS
+ * credential entry, no on-device list. g_f_req_type 3=register, 4=authenticate. */
+#define U2F_KEYHANDLE_LEN 56u  /* iv(16) + AES-CBC(seed)(32) + HMAC tag(8) */
+static uint8_t  g_u2f_mk[32];              /* master wrap key, generated once, NVS */
+static uint32_t g_u2f_counter;             /* global monotonic counter, NVS-persisted */
+static uint8_t  g_u2f_challenge[32];
+static uint8_t  g_u2f_appid[32];
+static uint8_t  g_u2f_keyhandle[U2F_KEYHANDLE_LEN]; /* pending (authenticate) */
 
 /* CTAP2 HID transport state */
 static uint32_t g_ctap_cid;           /* allocated channel (0 = none) */
@@ -281,8 +305,9 @@ static uint16_t g_ctap_rx_total;
 static uint16_t g_ctap_rx_len;
 static uint8_t  g_ctap_rx_seq;
 static uint8_t  g_ctap_rx_buf[1024];  /* reassembled CTAP2 payload */
-static uint8_t  g_ctap_cbor_buf[512]; /* response scratch buffer */
+static uint8_t  g_ctap_cbor_buf[700]; /* response scratch buffer (U2F register resp ~480B) */
 static uint32_t g_ctap_pending_cid;   /* channel awaiting user approval */
+static uint8_t  g_ctap_pending_cmd;   /* framing cmd (MSG/CBOR) of pending request */
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * String helpers  (no stdlib)
@@ -511,10 +536,11 @@ static void fido_nk(char *buf, int idx, const char *f)
 }
 static void fido_save_cred(int idx)
 {
-    char key[28],hex[65];
+    char key[28],hex[FIDO_UID_MAX*2+1];
     char cnt[4]; int_to_str(cnt,g_f_count); settings_set(FIDO_NVS_COUNT,cnt);
     fido_nk(key,idx,"rp");   settings_set(key,g_frpid[idx]);
-    fido_nk(key,idx,"uid");  settings_set(key,g_fuid[idx]);
+    fido_nk(key,idx,"uid");  bin_to_hex(hex,(const uint8_t*)g_fuid[idx],g_fuid_len[idx]);
+                              settings_set(key,hex);
     fido_nk(key,idx,"unm");  settings_set(key,g_funm[idx]);
     fido_nk(key,idx,"wk");   bin_to_hex(hex,g_fwk[idx],32); settings_set(key,hex);
     fido_nk(key,idx,"iv");   bin_to_hex(hex,g_fiv[idx],16); hex[32]='\0'; settings_set(key,hex);
@@ -522,15 +548,21 @@ static void fido_save_cred(int idx)
     fido_nk(key,idx,"pub");  bin_to_hex(hex,g_fpk[idx],32); settings_set(key,hex);
     char sc[12]; int_to_str(sc,(int)g_fsc[idx]);
     fido_nk(key,idx,"sc");   settings_set(key,sc);
+    char ul[4]; int_to_str(ul,(int)g_fuid_len[idx]);
+    fido_nk(key,idx,"uidlen"); settings_set(key,ul);
 }
 static void fido_load(void)
 {
-    char buf[65],key[28]; g_f_count=0;
+    char buf[FIDO_UID_MAX*2+1],key[28]; g_f_count=0;
     if(settings_get(FIDO_NVS_COUNT,buf,(int32_t)sizeof(buf))!=0) return;
     int n=str_to_int(buf); if(n<0||n>FIDO_MAX_CREDS) return;
     for(int i=0;i<n;i++){
         fido_nk(key,i,"rp");  if(settings_get(key,g_frpid[i],FIDO_RPID_MAX)!=0) continue;
-        fido_nk(key,i,"uid"); if(settings_get(key,g_fuid[i],FIDO_UID_MAX)!=0) continue;
+        fido_nk(key,i,"uidlen"); g_fuid_len[i]=0;
+        if(settings_get(key,buf,(int32_t)sizeof(buf))==0) g_fuid_len[i]=(uint8_t)str_to_int(buf);
+        fido_nk(key,i,"uid");
+        if(settings_get(key,buf,(int32_t)sizeof(buf))!=0) continue;
+        hex_to_bin((uint8_t*)g_fuid[i],buf,g_fuid_len[i]);
         fido_nk(key,i,"unm"); if(settings_get(key,g_funm[i],FIDO_UNM_MAX)!=0) continue;
         fido_nk(key,i,"wk");  if(settings_get(key,buf,(int32_t)sizeof(buf))!=0) continue;
         hex_to_bin(g_fwk[i],buf,32);
@@ -544,6 +576,29 @@ static void fido_load(void)
         else g_fsc[i]=(uint32_t)str_to_int(buf);
         g_f_count++;
     }
+}
+
+/* U2F master wrap key — generated once, persisted, never leaves the device
+ * (never appears in a keyHandle, unlike per-credential CTAP2 wrap keys). */
+static void u2f_load_or_init(void)
+{
+    char buf[65];
+    if(settings_get("vault/u2f/mk",buf,(int32_t)sizeof(buf))==0){
+        hex_to_bin(g_u2f_mk,buf,32);
+    } else {
+        crypto_random(g_u2f_mk,32);
+        bin_to_hex(buf,g_u2f_mk,32);
+        settings_set("vault/u2f/mk",buf);
+    }
+    if(settings_get("vault/u2f/ctr",buf,(int32_t)sizeof(buf))==0)
+        g_u2f_counter=(uint32_t)str_to_int(buf);
+    else
+        g_u2f_counter=0;
+}
+static void u2f_save_counter(void)
+{
+    char buf[12]; int_to_str(buf,(int)g_u2f_counter);
+    settings_set("vault/u2f/ctr",buf);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -711,17 +766,22 @@ static void ssh_compute_fingerprint(int idx)
  * FIDO2 — credential generation & deletion  (CTAP channel is kernel-gated)
  * ═══════════════════════════════════════════════════════════════════════════ */
 static int fido_generate_cred(int idx, const char *rpid,
-                               const char *uid, const char *unm)
+                               const char *uid, uint8_t uid_len, const char *unm)
 {
     uint8_t seed[32];
-    if(crypto_ed25519_keygen(seed,g_fpk[idx])!=0) return -1;
+    int kg=crypto_ed25519_keygen(seed,g_fpk[idx]);
+    printf("ctap: ed25519_keygen ret=%d idx=%d",kg,idx);
+    if(kg!=0) return -1;
     crypto_random(g_fwk[idx],32); crypto_random(g_fiv[idx],16);
-    if(crypto_aes256_encrypt(g_fwk[idx],g_fiv[idx],seed,32,g_fe[idx])!=0){
+    int enc=crypto_aes256_encrypt(g_fwk[idx],g_fiv[idx],seed,32,g_fe[idx]);
+    printf("ctap: aes256_encrypt ret=%d",enc);
+    if(enc!=0){
         for(int i=0;i<32;i++) seed[i]=0; return -1;
     }
     for(int i=0;i<32;i++) seed[i]=0;
     sncopy(g_frpid[idx],rpid,FIDO_RPID_MAX);
-    sncopy(g_fuid [idx],uid, FIDO_UID_MAX);
+    for(int i=0;i<FIDO_UID_MAX;i++) g_fuid[idx][i]=(i<uid_len)?uid[i]:0;
+    g_fuid_len[idx]=uid_len;
     sncopy(g_funm [idx],unm, FIDO_UNM_MAX);
     g_fsc[idx]=0;
     if(idx>=g_f_count) g_f_count=idx+1;
@@ -737,9 +797,11 @@ static void fido_delete_cred(int idx)
     fido_nk(key,idx,"unm");settings_delete(key); fido_nk(key,idx,"wk"); settings_delete(key);
     fido_nk(key,idx,"iv"); settings_delete(key); fido_nk(key,idx,"enc");settings_delete(key);
     fido_nk(key,idx,"pub");settings_delete(key); fido_nk(key,idx,"sc"); settings_delete(key);
+    fido_nk(key,idx,"uidlen"); settings_delete(key);
     for(int i=idx;i<g_f_count-1;i++){
         sncopy(g_frpid[i],g_frpid[i+1],FIDO_RPID_MAX);
-        sncopy(g_fuid [i],g_fuid [i+1],FIDO_UID_MAX);
+        for(int j=0;j<FIDO_UID_MAX;j++) g_fuid[i][j]=g_fuid[i+1][j];
+        g_fuid_len[i]=g_fuid_len[i+1];
         sncopy(g_funm [i],g_funm [i+1],FIDO_UNM_MAX);
         for(int j=0;j<32;j++){g_fpk[i][j]=g_fpk[i+1][j];g_fe[i][j]=g_fe[i+1][j];
                                g_fwk[i][j]=g_fwk[i+1][j];}
@@ -757,6 +819,7 @@ static void fido_delete_cred(int idx)
     fido_nk(key,g_f_count,"enc");settings_delete(key);
     fido_nk(key,g_f_count,"pub");settings_delete(key);
     fido_nk(key,g_f_count,"sc"); settings_delete(key);
+    fido_nk(key,g_f_count,"uidlen"); settings_delete(key);
     if(g_f_cursor>=g_f_count&&g_f_cursor>0) g_f_cursor--;
 }
 
@@ -929,6 +992,7 @@ static void ctap_hid_send(uint32_t cid, uint8_t cmd,
                            const uint8_t *data, uint16_t len)
 {
     uint8_t pkt[64];
+    printf("ctap: send cmd=%d len=%d",cmd,len);
     pkt[0]=(uint8_t)(cid>>24); pkt[1]=(uint8_t)(cid>>16);
     pkt[2]=(uint8_t)(cid>>8);  pkt[3]=(uint8_t)cid;
     pkt[4]=(uint8_t)(cmd|CTAPHID_CMD_BIT);
@@ -936,7 +1000,7 @@ static void ctap_hid_send(uint32_t cid, uint8_t cmd,
     uint16_t pos=0, chunk=(len<57u)?len:57u;
     for(int i=0;i<57;i++) pkt[7+i]=(i<(int)chunk)?data[pos+i]:0u;
     pos+=chunk;
-    hid_fido_send(pkt,64);
+    { int r=hid_fido_send(pkt,64); printf("ctap: send init ret=%d",r); }
     uint8_t seq=0;
     while(pos<len){
         pkt[0]=(uint8_t)(cid>>24); pkt[1]=(uint8_t)(cid>>16);
@@ -945,28 +1009,30 @@ static void ctap_hid_send(uint32_t cid, uint8_t cmd,
         uint16_t rem=len-pos; chunk=(rem<59u)?rem:59u;
         for(int i=0;i<59;i++) pkt[5+i]=(i<(int)chunk)?data[pos+i]:0u;
         pos+=chunk;
-        hid_fido_send(pkt,64);
+        { int r=hid_fido_send(pkt,64); printf("ctap: send cont ret=%d",r); }
     }
 }
 static void ctap_hid_error(uint32_t cid, uint8_t err)
 { ctap_hid_send(cid, CTAPHID_ERROR, &err, 1); }
 
-/* CTAP2 MSG response: [status_byte][CBOR...] */
-static void ctap2_respond(uint32_t cid, uint8_t status,
+/* CTAP2 response: [status_byte][CBOR...] — framed with the SAME cmd
+ * (CTAPHID_MSG or CTAPHID_CBOR) the triggering request used; echoing the
+ * wrong framing type is silently rejected by real CTAP2 clients. */
+static void ctap2_respond(uint32_t cid, uint8_t cmd, uint8_t status,
                            const uint8_t *cbor, uint16_t clen)
 {
     uint8_t resp[513]; resp[0]=status;
     uint16_t n=(clen<512u)?clen:512u;
     for(uint16_t i=0;i<n;i++) resp[1+i]=cbor[i];
-    ctap_hid_send(cid, CTAPHID_MSG, resp, 1u+n);
+    ctap_hid_send(cid, cmd, resp, 1u+n);
 }
-static void ctap2_error(uint32_t cid, uint8_t err)
-{ ctap_hid_send(cid, CTAPHID_MSG, &err, 1); }
+static void ctap2_error(uint32_t cid, uint8_t cmd, uint8_t err)
+{ ctap_hid_send(cid, cmd, &err, 1); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * CTAP2 — authenticatorGetInfo
  * ═══════════════════════════════════════════════════════════════════════════ */
-static void ctap2_get_info(uint32_t cid)
+static void ctap2_get_info(uint32_t cid, uint8_t cmd)
 {
     cbor_t c; c.buf=g_ctap_cbor_buf; c.cap=512; c.len=0;
     /* CTAP 2.0 GetInfo — 4 keys: versions(0x01), aaguid(0x03),
@@ -977,20 +1043,26 @@ static void ctap2_get_info(uint32_t cid)
     cb_map(&c,4);
     cb_uint(&c,1); cb_array(&c,1); cb_text(&c,"FIDO_2_0");  /* versions */
     cb_uint(&c,3); cb_bytes(&c,FIDO_AAGUID,16);             /* aaguid */
-    cb_uint(&c,4); cb_map(&c,2);                            /* options */
+    cb_uint(&c,4); cb_map(&c,3);                            /* options */
       cb_text(&c,"rk"); cb_bool(&c,1);
       cb_text(&c,"up"); cb_bool(&c,1);
+      /* uv:true — on-device button approve/deny IS user verification.
+       * Without this, Windows treats rk:true credentials as needing UV it
+       * can't get from us and falls back to prompting for a device PIN
+       * (which we don't implement at all). */
+      cb_text(&c,"uv"); cb_bool(&c,1);
     cb_uint(&c,5); cb_uint(&c,1200u);                       /* maxMsgSize */
-    ctap2_respond(cid, CTAP2_OK, c.buf, c.len);
+    ctap2_respond(cid, cmd, CTAP2_OK, c.buf, c.len);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * CTAP2 — authenticatorMakeCredential  (parse → show approval screen)
  * ═══════════════════════════════════════════════════════════════════════════ */
-static void ctap2_make_credential(uint32_t cid, const uint8_t *req, uint16_t rlen)
+static void ctap2_make_credential(uint32_t cid, uint8_t cmd, const uint8_t *req, uint16_t rlen)
 {
-    if(g_state==ST_FIDO_APPROVE){ ctap2_error(cid,CTAP2_ERR_DENIED); return; }
-    if(g_f_count>=FIDO_MAX_CREDS){ ctap2_error(cid,CTAP2_ERR_NO_CREDS); return; }
+    printf("ctap: make_credential cid=%d rlen=%d",(int)cid,(int)rlen);
+    if(g_state==ST_FIDO_APPROVE){ ctap2_error(cid,cmd,CTAP2_ERR_DENIED); return; }
+    if(g_f_count>=FIDO_MAX_CREDS){ ctap2_error(cid,cmd,CTAP2_ERR_NO_CREDS); return; }
     cbd_t r; r.p=req; r.rem=rlen;
     cbd_t val;
     /* 0x01: clientDataHash */
@@ -1003,12 +1075,15 @@ static void ctap2_make_credential(uint32_t cid, const uint8_t *req, uint16_t rle
           goto bad;
     }
     /* 0x03: user{name?, id?} */
-    g_f_p_unm[0]='\0'; g_f_p_uid[0]='\0';
+    g_f_p_unm[0]='\0'; g_f_p_uid_len=0;
     if(cbd_map_uint(&r,3,&val)){
         cbd_t uv;
         if(cbd_map_text(&val,"name",&uv))        cbd_text(&uv,g_f_p_unm,FIDO_UNM_MAX);
         if(cbd_map_text(&val,"displayName",&uv)) { if(!g_f_p_unm[0]) cbd_text(&uv,g_f_p_unm,FIDO_UNM_MAX); }
-        if(cbd_map_text(&val,"id",&uv))          cbd_text(&uv,g_f_p_uid,FIDO_UID_MAX);
+        /* WebAuthn user.id is opaque BYTES (CBOR byte string), not text —
+         * a real RP's userHandle is typically random binary, not printable. */
+        if(cbd_map_text(&val,"id",&uv))
+            g_f_p_uid_len=(uint8_t)cbd_bytes(&uv,(uint8_t*)g_f_p_uid,FIDO_UID_MAX-1);
     }
     /* 0x04: pubKeyCredParams — must contain EdDSA alg -8 (only alg we support) */
     { int alg_ok=0;
@@ -1027,23 +1102,30 @@ static void ctap2_make_credential(uint32_t cid, const uint8_t *req, uint16_t rle
               }
           }
       }
-      if(!alg_ok){ ctap2_error(cid,CTAP2_ERR_NO_ALG); return; }
+      if(!alg_ok){ printf("ctap: make_credential no supported alg (need -8/EdDSA)");
+                   ctap2_error(cid,cmd,CTAP2_ERR_NO_ALG); return; }
     }
     g_ctap_pending_cid = cid;
+    g_ctap_pending_cmd = cmd;
     g_f_req_type = 1;
     g_f_req_t    = (uint32_t)rtc_get_uptime_ms();
+    g_f_last_keepalive = g_f_req_t;
     g_state      = ST_FIDO_APPROVE;
+    printf("ctap: make_credential -> ST_FIDO_APPROVE");
     return;
 bad:
-    ctap2_error(cid, CTAP2_ERR_CBOR);
+    printf("ctap: make_credential CBOR parse failed");
+    ctap2_error(cid, cmd, CTAP2_ERR_CBOR);
 }
+
+static void ctap2_execute_approved(void);
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * CTAP2 — authenticatorGetAssertion  (parse → show approval screen)
  * ═══════════════════════════════════════════════════════════════════════════ */
-static void ctap2_get_assertion(uint32_t cid, const uint8_t *req, uint16_t rlen)
+static void ctap2_get_assertion(uint32_t cid, uint8_t cmd, const uint8_t *req, uint16_t rlen)
 {
-    if(g_state==ST_FIDO_APPROVE){ ctap2_error(cid,CTAP2_ERR_DENIED); return; }
+    if(g_state==ST_FIDO_APPROVE){ ctap2_error(cid,cmd,CTAP2_ERR_DENIED); return; }
     cbd_t r; r.p=req; r.rem=rlen;
     cbd_t val;
     char rpid[FIDO_RPID_MAX];
@@ -1087,16 +1169,338 @@ static void ctap2_get_assertion(uint32_t cid, const uint8_t *req, uint16_t rlen)
             if(ok){ g_f_p_key_idx=k; break; }
         }
     }
-    if(g_f_p_key_idx<0){ ctap2_error(cid,CTAP2_ERR_NO_CREDS); return; }
+    if(g_f_p_key_idx<0){ ctap2_error(cid,cmd,CTAP2_ERR_NO_CREDS); return; }
+    /* 0x05: options (optional) — up:false is a silent presence-less probe
+     * (Windows Hello sends this to discover/confirm the credential before
+     * the real, UP-required GetAssertion). Must NOT prompt for a button
+     * press here, or the user has to approve twice per login. */
+    int up_flag=1;
+    if(cbd_map_uint(&r,5,&val)){
+        cbd_t optv;
+        if(cbd_map_text(&val,"up",&optv)){
+            uint64_t bv; int bm=cbd_head(&optv,&bv);
+            if(bm==7&&bv==20u) up_flag=0;
+        }
+    }
     sncopy(g_f_p_rpid, rpid, FIDO_RPID_MAX);
     sncopy(g_f_p_unm,  g_funm[g_f_p_key_idx], FIDO_UNM_MAX);
     g_ctap_pending_cid = cid;
+    g_ctap_pending_cmd = cmd;
     g_f_req_type = 2;
+    if(!up_flag){
+        ctap2_execute_approved();
+        return;
+    }
     g_f_req_t    = (uint32_t)rtc_get_uptime_ms();
+    g_f_last_keepalive = g_f_req_t;
     g_state      = ST_FIDO_APPROVE;
     return;
 bad:
-    ctap2_error(cid, CTAP2_ERR_CBOR);
+    ctap2_error(cid, cmd, CTAP2_ERR_CBOR);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * U2F (CTAP1) — legacy protocol, ISO7816 APDU over CTAPHID_MSG.
+ * Stateless: keyHandle IS the wrapped private key (u2f_wrap/u2f_unwrap),
+ * so there is no NVS credential entry and nothing shows in the vault list.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+#define U2F_INS_REGISTER      0x01u
+#define U2F_INS_AUTHENTICATE  0x02u
+#define U2F_INS_VERSION       0x03u
+#define U2F_P1_CHECK_ONLY     0x07u
+
+#define U2F_SW_NO_ERROR                  0x9000u
+#define U2F_SW_CONDITIONS_NOT_SATISFIED  0x6985u
+#define U2F_SW_WRONG_DATA                0x6A80u
+#define U2F_SW_WRONG_LENGTH              0x6700u
+#define U2F_SW_INS_NOT_SUPPORTED         0x6D00u
+
+static void u2f_send_sw(uint32_t cid, uint16_t sw)
+{ uint8_t b[2]={(uint8_t)(sw>>8),(uint8_t)sw}; ctap_hid_send(cid,CTAPHID_MSG,b,2); }
+
+/* Sends data||SW1SW2. data is copied into g_ctap_cbor_buf first (safe even
+ * when data==g_ctap_cbor_buf already, as the register/authenticate builders
+ * do — self-copy of identical ranges is a no-op). */
+static void u2f_send_data_sw(uint32_t cid, const uint8_t *data, uint16_t len, uint16_t sw)
+{
+    uint16_t n=(len<sizeof(g_ctap_cbor_buf)-2u)?len:(uint16_t)(sizeof(g_ctap_cbor_buf)-2u);
+    if(data!=g_ctap_cbor_buf) for(uint16_t i=0;i<n;i++) g_ctap_cbor_buf[i]=data[i];
+    g_ctap_cbor_buf[n]=(uint8_t)(sw>>8); g_ctap_cbor_buf[n+1]=(uint8_t)sw;
+    ctap_hid_send(cid,CTAPHID_MSG,g_ctap_cbor_buf,(uint16_t)(n+2));
+}
+
+/* Shared deny/timeout/cancel path (used by both CTAP2 and U2F pending
+ * requests) — picks the right wire format by which transport is pending. */
+static void ctap_deny_generic(uint32_t cid, uint8_t cmd, uint8_t ctap2_err)
+{
+    if(cmd==CTAPHID_MSG) u2f_send_sw(cid,U2F_SW_CONDITIONS_NOT_SATISFIED);
+    else ctap2_error(cid,cmd,ctap2_err);
+}
+
+/* ── keyHandle wrap/unwrap: iv(16) || AES-256-CBC(mk,iv,priv)(32) || HMAC-tag(8) ──
+ * appId is bound into the HMAC so a keyHandle issued for one RP can't be
+ * replayed as valid for another. */
+static int u2f_wrap(const uint8_t priv[32], const uint8_t appid[32],
+                     uint8_t out[U2F_KEYHANDLE_LEN])
+{
+    uint8_t iv[16]; crypto_random(iv,16);
+    uint8_t ct[32];
+    if(crypto_aes256_encrypt(g_u2f_mk,iv,priv,32,ct)!=0) return -1;
+    uint8_t hmac_in[16+32+32];
+    for(int i=0;i<16;i++) hmac_in[i]=iv[i];
+    for(int i=0;i<32;i++) hmac_in[16+i]=appid[i];
+    for(int i=0;i<32;i++) hmac_in[48+i]=ct[i];
+    uint8_t tag[32];
+    if(crypto_hmac_sha256(g_u2f_mk,32,hmac_in,sizeof(hmac_in),tag)!=0) return -1;
+    for(int i=0;i<16;i++) out[i]=iv[i];
+    for(int i=0;i<32;i++) out[16+i]=ct[i];
+    for(int i=0;i<8;i++) out[48+i]=tag[i];
+    return 0;
+}
+static int u2f_unwrap(const uint8_t handle[U2F_KEYHANDLE_LEN], const uint8_t appid[32],
+                       uint8_t priv_out[32])
+{
+    const uint8_t *iv=handle,*ct=handle+16,*tag=handle+48;
+    uint8_t hmac_in[16+32+32];
+    for(int i=0;i<16;i++) hmac_in[i]=iv[i];
+    for(int i=0;i<32;i++) hmac_in[16+i]=appid[i];
+    for(int i=0;i<32;i++) hmac_in[48+i]=ct[i];
+    uint8_t tagchk[32];
+    if(crypto_hmac_sha256(g_u2f_mk,32,hmac_in,sizeof(hmac_in),tagchk)!=0) return -1;
+    int mism=0; for(int i=0;i<8;i++) if(tagchk[i]!=tag[i]) mism=1;
+    if(mism) return -1;
+    if(crypto_aes256_decrypt(g_u2f_mk,iv,ct,32,priv_out)!=0) return -1;
+    return 0;
+}
+
+/* ── Minimal DER (ASN.1) writer — "write content, then wrap with a tag+
+ * length header" so no length is ever hand-counted. ── */
+typedef struct { uint8_t *buf; uint16_t len; uint16_t cap; } der_t;
+static void der_byte(der_t *d, uint8_t b){ if(d->len<d->cap) d->buf[d->len++]=b; }
+static void der_raw(der_t *d, const uint8_t *p, uint16_t n)
+{ for(uint16_t i=0;i<n;i++) der_byte(d,p[i]); }
+static void der_wrap(der_t *d, uint8_t tag, uint16_t content_len)
+{
+    uint8_t hdr[4]; int hlen=0;
+    hdr[hlen++]=tag;
+    if(content_len<128u){ hdr[hlen++]=(uint8_t)content_len; }
+    else if(content_len<256u){ hdr[hlen++]=0x81u; hdr[hlen++]=(uint8_t)content_len; }
+    else { hdr[hlen++]=0x82u; hdr[hlen++]=(uint8_t)(content_len>>8); hdr[hlen++]=(uint8_t)content_len; }
+    uint16_t content_start=(uint16_t)(d->len-content_len);
+    if((uint32_t)d->len+(uint32_t)hlen>d->cap) return;
+    for(uint16_t i=d->len; i>content_start; i--) d->buf[i-1+hlen]=d->buf[i-1];
+    for(int i=0;i<hlen;i++) d->buf[content_start+i]=hdr[i];
+    d->len=(uint16_t)(d->len+hlen);
+}
+/* DER INTEGER from a 32-byte unsigned big-endian value (ECDSA r or s). */
+static void der_int_u32be(der_t *d, const uint8_t v[32])
+{
+    int start=0; while(start<31 && v[start]==0) start++;
+    int pad=(v[start]&0x80u)!=0;
+    if(pad) der_byte(d,0x00u);
+    der_raw(d,v+start,(uint16_t)(32-start));
+    der_wrap(d,0x02u,(uint16_t)((32-start)+(pad?1:0)));
+}
+/* raw r||s (64B, PSA convention) -> DER SEQUENCE{INTEGER r, INTEGER s}. Returns length. */
+static uint16_t der_ecdsa_sig(const uint8_t rs[64], uint8_t *out, uint16_t cap)
+{
+    der_t d={out,0,cap};
+    der_int_u32be(&d,rs);
+    der_int_u32be(&d,rs+32);
+    der_wrap(&d,0x30u,d.len);
+    return d.len;
+}
+
+/* Self-signed X.509 attestation cert template — verified byte-for-byte
+ * against Python's `cryptography` library (two certs, different keys,
+ * diffed to confirm everything except the 65-byte pubkey slot is fixed).
+ * CN=AkiraConsole, self-signed, validity 2025-01-01..2049-12-31, ECDSA/P-256. */
+static const uint8_t U2F_CERT_TBS_TEMPLATE[196] = {
+    0x30,0x81,0xc1,0xa0,0x03,0x02,0x01,0x02,0x02,0x01,0x01,0x30,0x0a,0x06,0x08,0x2a,
+    0x86,0x48,0xce,0x3d,0x04,0x03,0x02,0x30,0x17,0x31,0x15,0x30,0x13,0x06,0x03,0x55,
+    0x04,0x03,0x0c,0x0c,0x41,0x6b,0x69,0x72,0x61,0x43,0x6f,0x6e,0x73,0x6f,0x6c,0x65,
+    0x30,0x1e,0x17,0x0d,0x32,0x35,0x30,0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,
+    0x5a,0x17,0x0d,0x34,0x39,0x31,0x32,0x33,0x31,0x32,0x33,0x35,0x39,0x35,0x39,0x5a,
+    0x30,0x17,0x31,0x15,0x30,0x13,0x06,0x03,0x55,0x04,0x03,0x0c,0x0c,0x41,0x6b,0x69,
+    0x72,0x61,0x43,0x6f,0x6e,0x73,0x6f,0x6c,0x65,0x30,0x59,0x30,0x13,0x06,0x07,0x2a,
+    0x86,0x48,0xce,0x3d,0x02,0x01,0x06,0x08,0x2a,0x86,0x48,0xce,0x3d,0x03,0x01,0x07,
+    0x03,0x42,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,
+};
+#define U2F_CERT_TBS_PUBKEY_OFFSET 131u
+static const uint8_t U2F_CERT_SIGALG_FIXED[12] = {
+    0x30,0x0a,0x06,0x08,0x2a,0x86,0x48,0xce,0x3d,0x04,0x03,0x02,
+};
+
+/* Self-signed (same keypair signs its own cert — no baked-in batch cert/key):
+ * builds TBS with pubkey embedded, signs it with the SAME priv key,
+ * assembles the final DER certificate. */
+static uint16_t u2f_build_cert(const uint8_t priv[32], const uint8_t pub[65],
+                                uint8_t *out, uint16_t cap)
+{
+    uint8_t tbs[196];
+    for(int i=0;i<196;i++) tbs[i]=U2F_CERT_TBS_TEMPLATE[i];
+    for(int i=0;i<65;i++) tbs[U2F_CERT_TBS_PUBKEY_OFFSET+i]=pub[i];
+
+    uint8_t sig_rs[64];
+    if(crypto_p256_sign(priv,tbs,sizeof(tbs),sig_rs)!=0) return 0;
+    uint8_t sig_der[80];
+    uint16_t sig_der_len=der_ecdsa_sig(sig_rs,sig_der,sizeof(sig_der));
+    if(!sig_der_len) return 0;
+
+    der_t d={out,0,cap};
+    der_raw(&d,tbs,sizeof(tbs));
+    der_raw(&d,U2F_CERT_SIGALG_FIXED,sizeof(U2F_CERT_SIGALG_FIXED));
+    der_byte(&d,0x00u);              /* BIT STRING unused-bits byte */
+    der_raw(&d,sig_der,sig_der_len);
+    /* wrap unused-bits byte + sig into the BIT STRING (content = 1+sig_der_len,
+     * but it's already appended above — wrap the last 1+sig_der_len bytes) */
+    der_wrap(&d,0x03u,(uint16_t)(1u+sig_der_len));
+    der_wrap(&d,0x30u,d.len);
+    return d.len;
+}
+
+/* ── U2F_REGISTER / U2F_AUTHENTICATE — deferred to execute-after-approve,
+ * mirroring the CTAP2 flow (crypto only runs after the physical button
+ * press; the wrapped/decrypted key never sits in memory during the wait). ── */
+static void u2f_execute_register(void)
+{
+    uint8_t priv[32], pub[65];
+    if(crypto_p256_keygen(priv,pub)!=0){
+        u2f_send_sw(g_ctap_pending_cid,U2F_SW_WRONG_DATA); return;
+    }
+    uint8_t kh[U2F_KEYHANDLE_LEN];
+    if(u2f_wrap(priv,g_u2f_appid,kh)!=0){
+        for(int i=0;i<32;i++) priv[i]=0;
+        u2f_send_sw(g_ctap_pending_cid,U2F_SW_WRONG_DATA); return;
+    }
+    uint8_t cert[300];
+    uint16_t cert_len=u2f_build_cert(priv,pub,cert,sizeof(cert));
+    if(!cert_len){
+        for(int i=0;i<32;i++) priv[i]=0;
+        u2f_send_sw(g_ctap_pending_cid,U2F_SW_WRONG_DATA); return;
+    }
+    /* Registration signature over: 0x00 || appId || challenge || keyHandle || pubkey */
+    uint8_t to_sign[1+32+32+U2F_KEYHANDLE_LEN+65];
+    uint16_t p=0;
+    to_sign[p++]=0x00u;
+    for(int i=0;i<32;i++) to_sign[p++]=g_u2f_appid[i];
+    for(int i=0;i<32;i++) to_sign[p++]=g_u2f_challenge[i];
+    for(int i=0;i<U2F_KEYHANDLE_LEN;i++) to_sign[p++]=kh[i];
+    for(int i=0;i<65;i++) to_sign[p++]=pub[i];
+    uint8_t sig_rs[64];
+    int sr=crypto_p256_sign(priv,to_sign,p,sig_rs);
+    for(int i=0;i<32;i++) priv[i]=0;
+    if(sr!=0){ u2f_send_sw(g_ctap_pending_cid,U2F_SW_WRONG_DATA); return; }
+    uint8_t sig_der[80];
+    uint16_t sig_der_len=der_ecdsa_sig(sig_rs,sig_der,sizeof(sig_der));
+
+    uint16_t n=0;
+    g_ctap_cbor_buf[n++]=0x05u;                                  /* reserved */
+    for(int i=0;i<65;i++) g_ctap_cbor_buf[n++]=pub[i];
+    g_ctap_cbor_buf[n++]=U2F_KEYHANDLE_LEN;
+    for(int i=0;i<U2F_KEYHANDLE_LEN;i++) g_ctap_cbor_buf[n++]=kh[i];
+    for(uint16_t i=0;i<cert_len;i++) g_ctap_cbor_buf[n++]=cert[i];
+    for(uint16_t i=0;i<sig_der_len;i++) g_ctap_cbor_buf[n++]=sig_der[i];
+    u2f_send_data_sw(g_ctap_pending_cid,g_ctap_cbor_buf,n,U2F_SW_NO_ERROR);
+}
+static void u2f_execute_authenticate(void)
+{
+    uint8_t priv[32];
+    if(u2f_unwrap(g_u2f_keyhandle,g_u2f_appid,priv)!=0){
+        u2f_send_sw(g_ctap_pending_cid,U2F_SW_WRONG_DATA); return;
+    }
+    g_u2f_counter++; u2f_save_counter();
+    uint8_t flags=0x01u; /* UP asserted — button approval satisfies presence */
+    uint8_t authdata[1+4];
+    authdata[0]=flags;
+    authdata[1]=(uint8_t)(g_u2f_counter>>24); authdata[2]=(uint8_t)(g_u2f_counter>>16);
+    authdata[3]=(uint8_t)(g_u2f_counter>>8);  authdata[4]=(uint8_t)g_u2f_counter;
+    /* Signature over: appId || flags || counter || challenge */
+    uint8_t to_sign[32+5+32];
+    uint16_t p=0;
+    for(int i=0;i<32;i++) to_sign[p++]=g_u2f_appid[i];
+    for(int i=0;i<5;i++)  to_sign[p++]=authdata[i];
+    for(int i=0;i<32;i++) to_sign[p++]=g_u2f_challenge[i];
+    uint8_t sig_rs[64];
+    int sr=crypto_p256_sign(priv,to_sign,p,sig_rs);
+    for(int i=0;i<32;i++) priv[i]=0;
+    if(sr!=0){ u2f_send_sw(g_ctap_pending_cid,U2F_SW_WRONG_DATA); return; }
+    uint8_t sig_der[80];
+    uint16_t sig_der_len=der_ecdsa_sig(sig_rs,sig_der,sizeof(sig_der));
+
+    uint16_t n=0;
+    for(int i=0;i<5;i++) g_ctap_cbor_buf[n++]=authdata[i];
+    for(uint16_t i=0;i<sig_der_len;i++) g_ctap_cbor_buf[n++]=sig_der[i];
+    u2f_send_data_sw(g_ctap_pending_cid,g_ctap_cbor_buf,n,U2F_SW_NO_ERROR);
+}
+
+/* ── APDU parse (extended-length only, which is all any real CTAPHID U2F
+ * client sends) → either respond immediately (VERSION, errors, check-only)
+ * or park in ST_FIDO_APPROVE and defer to u2f_execute_* above. ── */
+static void u2f_dispatch_apdu(uint32_t cid, const uint8_t *apdu, uint16_t alen)
+{
+    if(g_state==ST_FIDO_APPROVE){ u2f_send_sw(cid,U2F_SW_CONDITIONS_NOT_SATISFIED); return; }
+    if(alen<4){ u2f_send_sw(cid,U2F_SW_WRONG_LENGTH); return; }
+    uint8_t ins=apdu[1], p1=apdu[2];
+    uint16_t pos=4;
+    uint32_t lc=0;
+    if(alen>pos){
+        if(alen<pos+3u){ u2f_send_sw(cid,U2F_SW_WRONG_LENGTH); return; }
+        if(apdu[pos]!=0x00u){ u2f_send_sw(cid,U2F_SW_WRONG_LENGTH); return; } /* short-form APDU unsupported */
+        lc=((uint32_t)apdu[pos+1]<<8)|apdu[pos+2];
+        pos+=3;
+    }
+    if((uint32_t)pos+lc>alen){ u2f_send_sw(cid,U2F_SW_WRONG_LENGTH); return; }
+    const uint8_t *data=apdu+pos;
+
+    if(ins==U2F_INS_VERSION){
+        static const uint8_t v[]={'U','2','F','_','V','2'};
+        u2f_send_data_sw(cid,v,sizeof(v),U2F_SW_NO_ERROR);
+        return;
+    }
+    if(ins==U2F_INS_REGISTER){
+        if(lc!=64u){ u2f_send_sw(cid,U2F_SW_WRONG_LENGTH); return; }
+        for(int i=0;i<32;i++) g_u2f_challenge[i]=data[i];
+        for(int i=0;i<32;i++) g_u2f_appid[i]=data[32+i];
+        g_ctap_pending_cid=cid; g_ctap_pending_cmd=CTAPHID_MSG;
+        g_f_req_type=3;
+        g_f_req_t=(uint32_t)rtc_get_uptime_ms(); g_f_last_keepalive=g_f_req_t;
+        g_state=ST_FIDO_APPROVE;
+        return;
+    }
+    if(ins==U2F_INS_AUTHENTICATE){
+        if(lc<65u){ u2f_send_sw(cid,U2F_SW_WRONG_LENGTH); return; }
+        uint8_t khlen=data[64];
+        if(lc!=(uint32_t)65+khlen || khlen!=U2F_KEYHANDLE_LEN){
+            u2f_send_sw(cid,U2F_SW_WRONG_DATA); return;
+        }
+        uint8_t challenge[32],appid[32],kh[U2F_KEYHANDLE_LEN];
+        for(int i=0;i<32;i++) challenge[i]=data[i];
+        for(int i=0;i<32;i++) appid[i]=data[32+i];
+        for(int i=0;i<U2F_KEYHANDLE_LEN;i++) kh[i]=data[65+i];
+        uint8_t priv_chk[32];
+        int valid=(u2f_unwrap(kh,appid,priv_chk)==0);
+        for(int i=0;i<32;i++) priv_chk[i]=0;
+        if(!valid){ u2f_send_sw(cid,U2F_SW_WRONG_DATA); return; }
+        if(p1==U2F_P1_CHECK_ONLY){
+            /* Valid keyHandle for this device — spec requires "already
+             * registered" be signalled via this SW without prompting. */
+            u2f_send_sw(cid,U2F_SW_CONDITIONS_NOT_SATISFIED); return;
+        }
+        for(int i=0;i<32;i++) g_u2f_challenge[i]=challenge[i];
+        for(int i=0;i<32;i++) g_u2f_appid[i]=appid[i];
+        for(int i=0;i<U2F_KEYHANDLE_LEN;i++) g_u2f_keyhandle[i]=kh[i];
+        g_ctap_pending_cid=cid; g_ctap_pending_cmd=CTAPHID_MSG;
+        g_f_req_type=4;
+        g_f_req_t=(uint32_t)rtc_get_uptime_ms(); g_f_last_keepalive=g_f_req_t;
+        g_state=ST_FIDO_APPROVE;
+        return;
+    }
+    u2f_send_sw(cid,U2F_SW_INS_NOT_SUPPORTED);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1104,54 +1508,65 @@ bad:
  * ═══════════════════════════════════════════════════════════════════════════ */
 static void ctap2_execute_approved(void)
 {
+    printf("ctap: execute_approved req_type=%d",g_f_req_type);
     uint8_t authdata[300];
     if(g_f_req_type==1){
         /* makeCredential */
         int idx=g_f_count;
-        if(fido_generate_cred(idx,g_f_p_rpid,(const char*)g_f_p_uid,g_f_p_unm)!=0){
-            ctap2_error(g_ctap_pending_cid, CTAP2_ERR_DENIED);
+        int gc=fido_generate_cred(idx,g_f_p_rpid,(const char*)g_f_p_uid,g_f_p_uid_len,g_f_p_unm);
+        printf("ctap: fido_generate_cred ret=%d",gc);
+        if(gc!=0){
+            ctap2_error(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_ERR_DENIED);
             g_state=ST_FIDO_LIST; return;
         }
+        /* flags: UP(0x01) | UV(0x04) | AT(0x40) — button approval satisfies
+         * both presence and verification (see uv:true in GetInfo options). */
         uint16_t adlen=ctap_build_authdata(authdata,sizeof(authdata),
-                                            g_f_p_rpid,0x41u,0u,idx);
+                                            g_f_p_rpid,0x45u,0u,idx);
         cbor_t c; c.buf=g_ctap_cbor_buf; c.cap=512; c.len=0;
         cb_map(&c,3);
         cb_uint(&c,1); cb_text(&c,"none");           /* fmt */
         cb_uint(&c,2); cb_bytes(&c,authdata,adlen);  /* authData */
         cb_uint(&c,3); cb_map(&c,0);                 /* attStmt: {} */
-        ctap2_respond(g_ctap_pending_cid, CTAP2_OK, c.buf, c.len);
+        ctap2_respond(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_OK, c.buf, c.len);
+    } else if(g_f_req_type==3){
+        u2f_execute_register();
+    } else if(g_f_req_type==4){
+        u2f_execute_authenticate();
     } else {
         /* getAssertion */
         int idx=g_f_p_key_idx;
         g_fsc[idx]++;
         fido_save_cred(idx);
+        /* flags: UP(0x01) | UV(0x04) — button approval satisfies both. */
         uint16_t adlen=ctap_build_authdata(authdata,sizeof(authdata),
-                                            g_frpid[idx],0x01u,g_fsc[idx],-1);
+                                            g_frpid[idx],0x05u,g_fsc[idx],-1);
         /* sign authData || clientDataHash */
         uint8_t to_sign[37+32];
         for(uint16_t i=0;i<adlen&&i<sizeof(to_sign);i++) to_sign[i]=authdata[i];
         for(int i=0;i<32;i++) to_sign[adlen+i]=g_f_p_hash[i];
         uint8_t seed[32];
         if(crypto_aes256_decrypt(g_fwk[idx],g_fiv[idx],g_fe[idx],32,seed)!=0){
-            ctap2_error(g_ctap_pending_cid, CTAP2_ERR_DENIED);
+            ctap2_error(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_ERR_DENIED);
             g_state=ST_FIDO_LIST; return;
         }
         uint8_t sig[64];
         int r=crypto_ed25519_sign(seed,to_sign,(uint32_t)(adlen+32u),sig);
         for(int i=0;i<32;i++) seed[i]=0;
-        if(r!=0){ ctap2_error(g_ctap_pending_cid,CTAP2_ERR_DENIED);
+        if(r!=0){ ctap2_error(g_ctap_pending_cid,g_ctap_pending_cmd,CTAP2_ERR_DENIED);
                   g_state=ST_FIDO_LIST; return; }
         uint8_t cred_id[32]; crypto_sha256(g_fpk[idx],32,cred_id);
         cbor_t c; c.buf=g_ctap_cbor_buf; c.cap=512; c.len=0;
         cb_map(&c,4);
         cb_uint(&c,1); cb_map(&c,2);                       /* credential */
-          cb_text(&c,"type"); cb_text(&c,"public-key");
           cb_text(&c,"id");   cb_bytes(&c,cred_id,32);
+          cb_text(&c,"type"); cb_text(&c,"public-key");
         cb_uint(&c,2); cb_bytes(&c,authdata,adlen);         /* authData */
         cb_uint(&c,3); cb_bytes(&c,sig,64);                 /* signature */
-        cb_uint(&c,4); cb_bytes(&c,                         /* userHandle */
-            (const uint8_t*)g_fuid[idx],(uint16_t)slen(g_fuid[idx]));
-        ctap2_respond(g_ctap_pending_cid, CTAP2_OK, c.buf, c.len);
+        cb_uint(&c,4); cb_map(&c,1);                        /* user */
+          cb_text(&c,"id"); cb_bytes(&c,
+              (const uint8_t*)g_fuid[idx],g_fuid_len[idx]);
+        ctap2_respond(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_OK, c.buf, c.len);
     }
     g_state=ST_FIDO_LIST;
 }
@@ -1159,14 +1574,15 @@ static void ctap2_execute_approved(void)
 /* ═══════════════════════════════════════════════════════════════════════════
  * CTAP2 — dispatch decoded message
  * ═══════════════════════════════════════════════════════════════════════════ */
-static void ctap2_dispatch(uint32_t cid, const uint8_t *msg, uint16_t mlen)
+static void ctap2_dispatch(uint32_t cid, uint8_t cmd, const uint8_t *msg, uint16_t mlen)
 {
+    if(cmd==CTAPHID_MSG){ u2f_dispatch_apdu(cid,msg,mlen); return; }
     if(!mlen){ ctap_hid_error(cid,CTAP1_ERR_INVALID_LEN); return; }
     switch(msg[0]){
-    case CTAP2_CMD_GET_INFO:   ctap2_get_info(cid);                       break;
-    case CTAP2_CMD_MAKE_CRED:  ctap2_make_credential(cid,msg+1,mlen-1);  break;
-    case CTAP2_CMD_GET_ASSERT: ctap2_get_assertion(cid,msg+1,mlen-1);    break;
-    default: ctap2_error(cid, CTAP1_ERR_INVALID_CMD); break;
+    case CTAP2_CMD_GET_INFO:   ctap2_get_info(cid,cmd);                       break;
+    case CTAP2_CMD_MAKE_CRED:  ctap2_make_credential(cid,cmd,msg+1,mlen-1);  break;
+    case CTAP2_CMD_GET_ASSERT: ctap2_get_assertion(cid,cmd,msg+1,mlen-1);    break;
+    default: ctap2_error(cid, cmd, CTAP1_ERR_INVALID_CMD); break;
     }
 }
 
@@ -1176,7 +1592,10 @@ static void ctap2_dispatch(uint32_t cid, const uint8_t *msg, uint16_t mlen)
 static void poll_ctap_hid(void)
 {
     uint8_t pkt[64];
-    if(hid_fido_recv(pkt,64)<4) return;
+    int n=hid_fido_recv(pkt,64);
+    if(n<4) return;
+    printf("ctap: recv n=%d pkt0=%d pkt1=%d pkt2=%d pkt3=%d pkt4=%d",
+           n,pkt[0],pkt[1],pkt[2],pkt[3],pkt[4]);
 
     uint32_t cid=((uint32_t)pkt[0]<<24)|((uint32_t)pkt[1]<<16)|
                  ((uint32_t)pkt[2]<<8)|(uint32_t)pkt[3];
@@ -1185,6 +1604,7 @@ static void poll_ctap_hid(void)
         /* ── Init packet (new message) ── */
         uint8_t cmd=(uint8_t)(pkt[4]&~CTAPHID_CMD_BIT);
         uint16_t total=((uint16_t)pkt[5]<<8)|(uint16_t)pkt[6];
+        printf("ctap: cmd=%d total=%d",cmd,total);
 
         if(cmd==CTAPHID_INIT){
             if(cid==CTAPHID_BROADCAST){
@@ -1207,13 +1627,15 @@ static void poll_ctap_hid(void)
         }
         if(cmd==CTAPHID_CANCEL){
             if(g_state==ST_FIDO_APPROVE&&g_ctap_pending_cid==cid){
-                ctap2_error(cid, CTAP2_ERR_CANCEL);
+                ctap_deny_generic(cid, g_ctap_pending_cmd, CTAP2_ERR_CANCEL);
                 g_state=ST_FIDO_LIST;
             }
             return;
         }
         if(cid!=g_ctap_cid){ ctap_hid_error(cid,CTAP1_ERR_INVALID_CMD); return; }
-        if(cmd!=CTAPHID_MSG){ ctap_hid_error(cid,CTAP1_ERR_INVALID_CMD); return; }
+        /* CTAPHID_MSG = legacy U2F (ISO7816 APDU, routed to u2f_dispatch_apdu
+         * in ctap2_dispatch). CTAPHID_CBOR = CTAP2. Same reassembly either way. */
+        if(cmd!=CTAPHID_MSG&&cmd!=CTAPHID_CBOR){ ctap_hid_error(cid,CTAP1_ERR_INVALID_CMD); return; }
         if(total>sizeof(g_ctap_rx_buf)){ ctap_hid_error(cid,CTAP1_ERR_INVALID_LEN); return; }
         /* start reassembly */
         g_ctap_rx_cid=cid; g_ctap_rx_cmd=cmd;
@@ -1222,7 +1644,7 @@ static void poll_ctap_hid(void)
         for(uint16_t i=0;i<chunk;i++) g_ctap_rx_buf[i]=pkt[7+i];
         g_ctap_rx_len=chunk;
         if(g_ctap_rx_len>=g_ctap_rx_total)
-            ctap2_dispatch(cid, g_ctap_rx_buf, g_ctap_rx_total);
+            ctap2_dispatch(cid, cmd, g_ctap_rx_buf, g_ctap_rx_total);
     } else {
         /* ── Continuation packet ── */
         uint8_t seq=pkt[4];
@@ -1235,7 +1657,7 @@ static void poll_ctap_hid(void)
         for(uint16_t i=0;i<chunk&&g_ctap_rx_len<sizeof(g_ctap_rx_buf);i++)
             g_ctap_rx_buf[g_ctap_rx_len++]=pkt[5+i];
         if(g_ctap_rx_len>=g_ctap_rx_total)
-            ctap2_dispatch(g_ctap_rx_cid, g_ctap_rx_buf, g_ctap_rx_total);
+            ctap2_dispatch(g_ctap_rx_cid, g_ctap_rx_cmd, g_ctap_rx_buf, g_ctap_rx_total);
     }
 }
 
@@ -1761,11 +2183,18 @@ static void render_fido_approve(void)
     uint32_t elapsed=(uint32_t)rtc_get_uptime_ms()-g_f_req_t;
     int sl=(int)((FIDO_APPROVE_TIMEOUT_MS-elapsed)/1000); if(sl<0)sl=0;
     display_clear(M_BG);
-    draw_header((g_f_req_type==1)?"CREATE PASSKEY":"SIGN IN WITH PASSKEY",NULL,M_FG);
+    draw_header((g_f_req_type==1)?"CREATE PASSKEY":(g_f_req_type==2)?"SIGN IN WITH PASSKEY":
+                (g_f_req_type==3)?"U2F REGISTER":"U2F SIGN IN",NULL,M_FG);
     /* Shield icon */
     icon_shield(SCR_W/2,48,14,M_FG);
-    display_text(6,70,"Site:",C_DIM);  display_text(46,70,g_f_p_rpid,C_TXT);
-    display_text(6,86,"User:",C_DIM);  display_text(46,86,g_f_p_unm,C_TXT);
+    if(g_f_req_type==3||g_f_req_type==4){
+        display_text(6,70,"App ID:",C_DIM);
+        char hex[17]; bin_to_hex(hex,g_u2f_appid,8);
+        display_text(46,70,hex,C_TXT);
+    } else {
+        display_text(6,70,"Site:",C_DIM);  display_text(46,70,g_f_p_rpid,C_TXT);
+        display_text(6,86,"User:",C_DIM);  display_text(46,86,g_f_p_unm,C_TXT);
+    }
     if(g_f_req_type==2){
         display_hline(6,100,SCR_W-12,C_SEP);
         display_text(6,104,"Challenge hash:",C_DIM);
@@ -1792,7 +2221,9 @@ static void render_fido_detail(int idx)
     int y=28;
     display_text(6,y,"Site (RP)",C_DIM); display_text(80,y,g_frpid[idx],C_TXT); y+=16;
     display_text(6,y,"User",C_DIM);      display_text(80,y,g_funm[idx],C_TXT);  y+=16;
-    display_text(6,y,"User ID",C_DIM);   display_text(80,y,g_fuid[idx],C_DIM);  y+=16;
+    { char uidhex[FIDO_UID_MAX*2+1];
+      bin_to_hex(uidhex,(const uint8_t*)g_fuid[idx],g_fuid_len[idx]);
+      display_text(6,y,"User ID",C_DIM); display_text(80,y,uidhex,C_DIM); y+=16; }
     char sc2[12]; int_to_str(sc2,(int)g_fsc[idx]);
     display_text(6,y,"Sign count",C_DIM); display_text(80,y,sc2,C_TXT); y+=16;
     display_hline(6,y,SCR_W-12,C_SEP); y+=8;
@@ -1946,12 +2377,18 @@ static void handle_input(int secs_left)
     if(g_state==ST_FIDO_APPROVE){
         uint32_t elapsed=(uint32_t)rtc_get_uptime_ms()-g_f_req_t;
         if(elapsed>=FIDO_APPROVE_TIMEOUT_MS){
-            ctap2_error(g_ctap_pending_cid, CTAP2_ERR_DENIED);
+            printf("ctap: approve TIMEOUT elapsed=%d",(int)elapsed);
+            ctap_deny_generic(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_ERR_DENIED);
             g_state=ST_FIDO_LIST; return;
+        }
+        if(edge){
+            printf("ctap: approve edge=%d A=%d B=%d",(int)edge,
+                   (edge&AKIRA_BTN_A)?1:0,(edge&AKIRA_BTN_B)?1:0);
         }
         if(edge&AKIRA_BTN_A){ ctap2_execute_approved(); return; }
         if(edge&AKIRA_BTN_B){
-            ctap2_error(g_ctap_pending_cid, CTAP2_ERR_DENIED);
+            printf("ctap: approve DENIED via BTN_B");
+            ctap_deny_generic(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_ERR_DENIED);
             g_state=ST_FIDO_LIST;
         }
         return;
@@ -1994,6 +2431,15 @@ int main(void)
     totp_load();
     ssh_load();
     fido_load();
+    u2f_load_or_init();
+
+    /* Wire up USB HID transport — required for hid_fido_recv/hid_fido_send
+     * to receive anything: usb_hid_fido_set_handler() is only registered
+     * inside hid_init(), so without this call incoming CTAPHID reports are
+     * silently dropped and Windows/browsers hang waiting for a response.
+     * HID_DEVICE_KEYBOARD is required by usb_hid_transport_init_fn() even
+     * though vault doesn't send keyboard reports. */
+    hid_init(HID_TRANSPORT_USB, HID_DEVICE_KEYBOARD);
 
     /* Open SSH agent UART (non-fatal if not available) */
     g_s_uart = uart_open(0, 115200);
@@ -2032,10 +2478,17 @@ int main(void)
             if(el>=SSH_SIGN_TIMEOUT_MS){ ssh_send_failure(); g_state=ST_SSH_LIST; }
         }
 
-        /* ── FIDO timeout ── */
+        /* ── FIDO timeout / keepalive ── */
         if(g_state==ST_FIDO_APPROVE){
-            uint32_t el=(uint32_t)rtc_get_uptime_ms()-g_f_req_t;
-            if(el>=FIDO_APPROVE_TIMEOUT_MS) g_state=ST_FIDO_LIST;
+            uint32_t now=(uint32_t)rtc_get_uptime_ms();
+            uint32_t el=now-g_f_req_t;
+            if(el>=FIDO_APPROVE_TIMEOUT_MS){
+                g_state=ST_FIDO_LIST;
+            } else if(now-g_f_last_keepalive>=FIDO_KEEPALIVE_INTERVAL_MS){
+                uint8_t st=CTAP_KEEPALIVE_UP_NEEDED;
+                ctap_hid_send(g_ctap_pending_cid, CTAPHID_KEEPALIVE, &st, 1);
+                g_f_last_keepalive=now;
+            }
         }
 
         /* ── Input ── */

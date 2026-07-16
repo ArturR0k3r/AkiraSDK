@@ -1251,7 +1251,7 @@ extern int rf_get_rssi(void);
  * @param len Length of payload in bytes
  * @return 0 on success, negative error code on failure
  */
-extern int rf_send(uint32_t payload_ptr, uint32_t len);
+extern int rf_send(const uint8_t *payload, uint32_t len);
 
 /**
  * @brief Select active RF chip.
@@ -1306,6 +1306,13 @@ extern int rf_set_bandwidth(uint32_t bw_hz);
  */
 extern int rf_set_coding_rate(int cr);
 
+/**
+ * @brief Set FSK/GFSK bitrate.
+ * @param bps Bitrate in bits per second (e.g., 1200, 9600).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_bitrate(int bps);
+
 /* RF chip identifiers */
 #define AKIRA_RF_CHIP_NONE   0
 #define AKIRA_RF_CHIP_NRF24  1
@@ -1313,13 +1320,52 @@ extern int rf_set_coding_rate(int cr);
 #define AKIRA_RF_CHIP_LR1121 3
 #define AKIRA_RF_CHIP_CC1121 4
 #define AKIRA_RF_CHIP_LR2021 5
+#define AKIRA_RF_CHIP_ESP32S3      6
 
 /* Radio modulation modes (must match radio_modulation_t enum on host) */
-#define RADIO_MOD_FSK   1
-#define RADIO_MOD_GFSK  2
-#define RADIO_MOD_OOK   3
-#define RADIO_MOD_MSK   4
-#define RADIO_MOD_LORA  5
+#define RADIO_MOD_FSK      1
+#define RADIO_MOD_GFSK     2
+#define RADIO_MOD_OOK      3
+#define RADIO_MOD_MSK      4
+#define RADIO_MOD_LORA     5
+#define RADIO_MOD_BLE_PHY  8
+
+/*
+ * Continuous-wave (CW) TX — keys a pure carrier at the current frequency
+ * and power.  Use for jamming, range testing, and spectral analysis.
+ * Required manifest capability: "rf.transceive"
+ * Supported chips: LR2021 (returns -ENOTSUP on others).
+ */
+
+/**
+ * @brief Start a continuous-wave (CW) carrier.
+ *
+ * The RF chip must already be selected (rf_select) and frequency+power
+ * configured (rf_set_frequency, rf_set_power).  The carrier stays on
+ * until rf_tx_cw_stop() is called.
+ *
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_tx_cw_start(void);
+
+/**
+ * @brief Stop a continuous-wave carrier and return chip to standby.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_tx_cw_stop(void);
+
+/**
+ * @brief Fast frequency hop while CW is active — PLL lock only, no CalibFe.
+ *
+ * Stops CW briefly, sets the new frequency (~1ms), and restarts CW.
+ * Use this after the initial rf_tx_cw_start() to hop channels at
+ * nRF24-like speeds.  The initial rf_set_frequency() (with CalibFe)
+ * must be called first to configure the band and PA.
+ *
+ * @param freq_hz  New frequency in Hz.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_tx_cw_set_freq(uint32_t freq_hz);
 
 /*
  * Raw OOK/ASK signal capture and replay (CC1121 byte-stream mode).

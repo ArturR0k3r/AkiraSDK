@@ -1529,14 +1529,15 @@ extern int mesh_get_nodes(void *buf, uint32_t max_nodes);
 extern int mesh_get_stats(void *buf);
 
 /**
- * @brief Chunk and distribute a WASM app binary across the mesh.
+ * @brief Chunk and reliably distribute a WASM app binary to one mesh node.
+ * @param dest_id   Pointer to an 8-byte node id in WASM memory.
  * @param app_name  App name (null-terminated).
  * @param data      App binary bytes.
  * @param len       Binary length.
  * @return 0 on success, negative errno on failure.
  */
-extern int mesh_distribute_app(const char *app_name, const void *data,
-                               uint32_t len);
+extern int mesh_distribute_app(const void *dest_id, const char *app_name,
+                               const void *data, uint32_t len);
 
 /*
  * =============================================================================

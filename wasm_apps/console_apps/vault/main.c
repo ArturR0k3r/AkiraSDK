@@ -152,6 +152,9 @@ static const int CARD_CX[3] = { CARD_CX0, CARD_CX1, CARD_CX2 };
 #define FIDO_ROW_H     22
 #define FIDO_APPROVE_TIMEOUT_MS 30000
 #define FIDO_NVS_COUNT "vault/fido/count"
+#define FIDO_ALG_EDDSA 0u  /* COSE alg -8 */
+#define FIDO_ALG_ES256 1u  /* COSE alg -7 */
+#define FIDO_PK_MAX    65  /* P-256 uncompressed point; Ed25519 uses first 32 */
 
 /* ── CTAP2 / HID transport ── */
 /* AkiraOS kernel exports — registered in akira_export_api.c */
@@ -269,11 +272,12 @@ static char     g_frpid[FIDO_MAX_CREDS][FIDO_RPID_MAX];
 static char     g_fuid [FIDO_MAX_CREDS][FIDO_UID_MAX]; /* opaque bytes, NOT text */
 static uint8_t  g_fuid_len[FIDO_MAX_CREDS];
 static char     g_funm [FIDO_MAX_CREDS][FIDO_UNM_MAX];
-static uint8_t  g_fpk  [FIDO_MAX_CREDS][32];
+static uint8_t  g_fpk  [FIDO_MAX_CREDS][FIDO_PK_MAX];
 static uint8_t  g_fe   [FIDO_MAX_CREDS][32];
 static uint8_t  g_fwk  [FIDO_MAX_CREDS][32];
 static uint8_t  g_fiv  [FIDO_MAX_CREDS][16];
 static uint32_t g_fsc  [FIDO_MAX_CREDS];           /* sign counter */
+static uint8_t  g_falg [FIDO_MAX_CREDS];           /* FIDO_ALG_* */
 static int      g_f_count;
 static int      g_f_cursor;
 static int      g_f_scroll;
@@ -284,6 +288,7 @@ static char     g_f_p_unm [FIDO_UNM_MAX];
 static char     g_f_p_uid [FIDO_UID_MAX];   /* opaque bytes, NOT text */
 static uint8_t  g_f_p_uid_len;
 static uint8_t  g_f_p_hash[32];
+static uint8_t  g_f_p_alg;      /* FIDO_ALG_* chosen for pending makeCredential */
 static int      g_f_p_key_idx;
 static uint32_t g_f_req_t;
 static uint32_t g_f_last_keepalive;   /* last CTAPHID_KEEPALIVE send, ms */
@@ -545,7 +550,10 @@ static void fido_save_cred(int idx)
     fido_nk(key,idx,"wk");   bin_to_hex(hex,g_fwk[idx],32); settings_set(key,hex);
     fido_nk(key,idx,"iv");   bin_to_hex(hex,g_fiv[idx],16); hex[32]='\0'; settings_set(key,hex);
     fido_nk(key,idx,"enc");  bin_to_hex(hex,g_fe[idx],32);  settings_set(key,hex);
-    fido_nk(key,idx,"pub");  bin_to_hex(hex,g_fpk[idx],32); settings_set(key,hex);
+    { uint16_t pklen=(g_falg[idx]==FIDO_ALG_ES256)?65u:32u;
+      fido_nk(key,idx,"pub"); bin_to_hex(hex,g_fpk[idx],pklen); settings_set(key,hex); }
+    { char a[2]; a[0]=(char)('0'+g_falg[idx]); a[1]='\0';
+      fido_nk(key,idx,"alg"); settings_set(key,a); }
     char sc[12]; int_to_str(sc,(int)g_fsc[idx]);
     fido_nk(key,idx,"sc");   settings_set(key,sc);
     char ul[4]; int_to_str(ul,(int)g_fuid_len[idx]);
@@ -570,8 +578,11 @@ static void fido_load(void)
         hex_to_bin(g_fiv[i],buf,16);
         fido_nk(key,i,"enc"); if(settings_get(key,buf,(int32_t)sizeof(buf))!=0) continue;
         hex_to_bin(g_fe[i],buf,32);
-        fido_nk(key,i,"pub"); if(settings_get(key,buf,(int32_t)sizeof(buf))!=0) continue;
-        hex_to_bin(g_fpk[i],buf,32);
+        fido_nk(key,i,"alg"); /* missing = pre-ES256 record = EdDSA */
+        g_falg[i]=(settings_get(key,buf,(int32_t)sizeof(buf))==0)?(uint8_t)str_to_int(buf):FIDO_ALG_EDDSA;
+        { uint16_t pklen=(g_falg[i]==FIDO_ALG_ES256)?65u:32u;
+          fido_nk(key,i,"pub"); if(settings_get(key,buf,(int32_t)sizeof(buf))!=0) continue;
+          hex_to_bin(g_fpk[i],buf,pklen); }
         fido_nk(key,i,"sc");  if(settings_get(key,buf,(int32_t)sizeof(buf))!=0){g_fsc[i]=0;}
         else g_fsc[i]=(uint32_t)str_to_int(buf);
         g_f_count++;
@@ -766,11 +777,13 @@ static void ssh_compute_fingerprint(int idx)
  * FIDO2 — credential generation & deletion  (CTAP channel is kernel-gated)
  * ═══════════════════════════════════════════════════════════════════════════ */
 static int fido_generate_cred(int idx, const char *rpid,
-                               const char *uid, uint8_t uid_len, const char *unm)
+                               const char *uid, uint8_t uid_len, const char *unm,
+                               uint8_t alg)
 {
     uint8_t seed[32];
-    int kg=crypto_ed25519_keygen(seed,g_fpk[idx]);
-    printf("ctap: ed25519_keygen ret=%d idx=%d",kg,idx);
+    int kg=(alg==FIDO_ALG_ES256)?crypto_p256_keygen(seed,g_fpk[idx])
+                                 :crypto_ed25519_keygen(seed,g_fpk[idx]);
+    printf("ctap: keygen alg=%d ret=%d idx=%d",(int)alg,kg,idx);
     if(kg!=0) return -1;
     crypto_random(g_fwk[idx],32); crypto_random(g_fiv[idx],16);
     int enc=crypto_aes256_encrypt(g_fwk[idx],g_fiv[idx],seed,32,g_fe[idx]);
@@ -784,6 +797,7 @@ static int fido_generate_cred(int idx, const char *rpid,
     g_fuid_len[idx]=uid_len;
     sncopy(g_funm [idx],unm, FIDO_UNM_MAX);
     g_fsc[idx]=0;
+    g_falg[idx]=alg;
     if(idx>=g_f_count) g_f_count=idx+1;
     fido_save_cred(idx); return 0;
 }
@@ -791,22 +805,24 @@ static int fido_generate_cred(int idx, const char *rpid,
 static void fido_delete_cred(int idx)
 {
     char key[28];
-    for(int i=0;i<32;i++){g_fpk[idx][i]=0;g_fe[idx][i]=0;g_fwk[idx][i]=0;}
+    for(int i=0;i<FIDO_PK_MAX;i++) g_fpk[idx][i]=0;
+    for(int i=0;i<32;i++){g_fe[idx][i]=0;g_fwk[idx][i]=0;}
     for(int i=0;i<16;i++) g_fiv[idx][i]=0;
     fido_nk(key,idx,"rp"); settings_delete(key); fido_nk(key,idx,"uid");settings_delete(key);
     fido_nk(key,idx,"unm");settings_delete(key); fido_nk(key,idx,"wk"); settings_delete(key);
     fido_nk(key,idx,"iv"); settings_delete(key); fido_nk(key,idx,"enc");settings_delete(key);
     fido_nk(key,idx,"pub");settings_delete(key); fido_nk(key,idx,"sc"); settings_delete(key);
-    fido_nk(key,idx,"uidlen"); settings_delete(key);
+    fido_nk(key,idx,"uidlen"); settings_delete(key); fido_nk(key,idx,"alg"); settings_delete(key);
     for(int i=idx;i<g_f_count-1;i++){
         sncopy(g_frpid[i],g_frpid[i+1],FIDO_RPID_MAX);
         for(int j=0;j<FIDO_UID_MAX;j++) g_fuid[i][j]=g_fuid[i+1][j];
         g_fuid_len[i]=g_fuid_len[i+1];
         sncopy(g_funm [i],g_funm [i+1],FIDO_UNM_MAX);
-        for(int j=0;j<32;j++){g_fpk[i][j]=g_fpk[i+1][j];g_fe[i][j]=g_fe[i+1][j];
-                               g_fwk[i][j]=g_fwk[i+1][j];}
+        for(int j=0;j<FIDO_PK_MAX;j++) g_fpk[i][j]=g_fpk[i+1][j];
+        for(int j=0;j<32;j++){g_fe[i][j]=g_fe[i+1][j];g_fwk[i][j]=g_fwk[i+1][j];}
         for(int j=0;j<16;j++) g_fiv[i][j]=g_fiv[i+1][j];
         g_fsc[i]=g_fsc[i+1];
+        g_falg[i]=g_falg[i+1];
         fido_save_cred(i);
     }
     g_f_count--;
@@ -967,20 +983,31 @@ static uint16_t ctap_build_authdata(uint8_t *out, uint16_t outsz,
     out[pos++]=(uint8_t)(sign_cnt>>24); out[pos++]=(uint8_t)(sign_cnt>>16);
     out[pos++]=(uint8_t)(sign_cnt>>8);  out[pos++]=(uint8_t)sign_cnt;
     if(!(flags&0x40u)||key_idx<0) return pos;
-    if(outsz < pos+18u+34u) return 0;
+    uint8_t alg=g_falg[key_idx];
+    uint16_t pklen=(alg==FIDO_ALG_ES256)?65u:32u;
+    if(outsz < pos+18u+80u) return 0;
     /* AAGUID (16 bytes) */
     for(int i=0;i<16;i++) out[pos++]=FIDO_AAGUID[i];
     /* credentialIdLength (2 bytes BE) = 32 */
     out[pos++]=0; out[pos++]=32;
     /* credentialId = SHA256(pubkey) */
-    crypto_sha256(g_fpk[key_idx],32, out+pos); pos+=32;
-    /* COSE key: {1:1, 3:-8, -1:6, -2:pubkey} */
+    crypto_sha256(g_fpk[key_idx],pklen, out+pos); pos+=32;
+    /* COSE key */
     cbor_t c; c.buf=out+pos; c.cap=(uint16_t)(outsz-pos); c.len=0;
-    cb_map(&c,4);
-    cb_uint(&c,1);  cb_uint(&c,1);               /* kty: OKP */
-    cb_uint(&c,3);  cb_neg (&c,7u);              /* alg: -8 (EdDSA) */
-    cb_neg (&c,0u); cb_uint(&c,6);               /* crv(-1): Ed25519 */
-    cb_neg (&c,1u); cb_bytes(&c,g_fpk[key_idx],32); /* x(-2): pubkey */
+    if(alg==FIDO_ALG_ES256){
+        cb_map(&c,5);                                    /* EC2 key */
+        cb_uint(&c,1);  cb_uint(&c,2);                   /* kty: EC2 */
+        cb_uint(&c,3);  cb_neg (&c,6u);                  /* alg: -7 (ES256) */
+        cb_neg (&c,0u); cb_uint(&c,1);                   /* crv(-1): P-256 */
+        cb_neg (&c,1u); cb_bytes(&c,g_fpk[key_idx]+1,32);  /* x(-2) */
+        cb_neg (&c,2u); cb_bytes(&c,g_fpk[key_idx]+33,32); /* y(-3) */
+    } else {
+        cb_map(&c,4);                                    /* OKP key */
+        cb_uint(&c,1);  cb_uint(&c,1);                   /* kty: OKP */
+        cb_uint(&c,3);  cb_neg (&c,7u);                  /* alg: -8 (EdDSA) */
+        cb_neg (&c,0u); cb_uint(&c,6);                   /* crv(-1): Ed25519 */
+        cb_neg (&c,1u); cb_bytes(&c,g_fpk[key_idx],32);    /* x(-2): pubkey */
+    }
     pos+=(uint16_t)c.len;
     return pos;
 }
@@ -1085,7 +1112,8 @@ static void ctap2_make_credential(uint32_t cid, uint8_t cmd, const uint8_t *req,
         if(cbd_map_text(&val,"id",&uv))
             g_f_p_uid_len=(uint8_t)cbd_bytes(&uv,(uint8_t*)g_f_p_uid,FIDO_UID_MAX-1);
     }
-    /* 0x04: pubKeyCredParams — must contain EdDSA alg -8 (only alg we support) */
+    /* 0x04: pubKeyCredParams — need ES256(-7) or EdDSA(-8); first entry in
+     * the RP's list (its preference order) that we support wins. */
     { int alg_ok=0;
       if(cbd_map_uint(&r,4,&val)){
           cbd_t params=val; uint64_t cnt;
@@ -1096,13 +1124,14 @@ static void ctap2_make_credential(uint32_t cid, uint8_t cmd, const uint8_t *req,
                   if(cbd_map_text(&params,"alg",&alg_pos)){
                       uint64_t v; int m=cbd_head(&alg_pos,&v);
                       int64_t alg=(m==0)?(int64_t)v:-(int64_t)v-1;
-                      if(alg==-8) alg_ok=1;
+                      if(alg==-7){ alg_ok=1; g_f_p_alg=FIDO_ALG_ES256; }
+                      else if(alg==-8){ alg_ok=1; g_f_p_alg=FIDO_ALG_EDDSA; }
                   }
                   cbd_skip(&params); /* advance past this descriptor */
               }
           }
       }
-      if(!alg_ok){ printf("ctap: make_credential no supported alg (need -8/EdDSA)");
+      if(!alg_ok){ printf("ctap: make_credential no supported alg (need -7/ES256 or -8/EdDSA)");
                    ctap2_error(cid,cmd,CTAP2_ERR_NO_ALG); return; }
     }
     g_ctap_pending_cid = cid;
@@ -1150,7 +1179,7 @@ static void ctap2_get_assertion(uint32_t cid, uint8_t cmd, const uint8_t *req, u
                             for(int m=0;rpmatch&&m<slen(rpid);m++)
                                 if(g_frpid[k][m]!=rpid[m]) rpmatch=0;
                             if(!rpmatch) continue;
-                            crypto_sha256(g_fpk[k],32,h);
+                            crypto_sha256(g_fpk[k],(g_falg[k]==FIDO_ALG_ES256)?65u:32u,h);
                             int match=1;
                             for(int m=0;m<32;m++) if(h[m]!=cred_id[m]){match=0;break;}
                             if(match) g_f_p_key_idx=k;
@@ -1513,7 +1542,7 @@ static void ctap2_execute_approved(void)
     if(g_f_req_type==1){
         /* makeCredential */
         int idx=g_f_count;
-        int gc=fido_generate_cred(idx,g_f_p_rpid,(const char*)g_f_p_uid,g_f_p_uid_len,g_f_p_unm);
+        int gc=fido_generate_cred(idx,g_f_p_rpid,(const char*)g_f_p_uid,g_f_p_uid_len,g_f_p_unm,g_f_p_alg);
         printf("ctap: fido_generate_cred ret=%d",gc);
         if(gc!=0){
             ctap2_error(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_ERR_DENIED);
@@ -1550,19 +1579,30 @@ static void ctap2_execute_approved(void)
             ctap2_error(g_ctap_pending_cid, g_ctap_pending_cmd, CTAP2_ERR_DENIED);
             g_state=ST_FIDO_LIST; return;
         }
-        uint8_t sig[64];
-        int r=crypto_ed25519_sign(seed,to_sign,(uint32_t)(adlen+32u),sig);
-        for(int i=0;i<32;i++) seed[i]=0;
-        if(r!=0){ ctap2_error(g_ctap_pending_cid,g_ctap_pending_cmd,CTAP2_ERR_DENIED);
-                  g_state=ST_FIDO_LIST; return; }
-        uint8_t cred_id[32]; crypto_sha256(g_fpk[idx],32,cred_id);
+        uint8_t sig[80]; uint16_t siglen;
+        if(g_falg[idx]==FIDO_ALG_ES256){
+            uint8_t sig_rs[64];
+            int r=crypto_p256_sign(seed,to_sign,(uint32_t)(adlen+32u),sig_rs);
+            for(int i=0;i<32;i++) seed[i]=0;
+            if(r!=0){ ctap2_error(g_ctap_pending_cid,g_ctap_pending_cmd,CTAP2_ERR_DENIED);
+                      g_state=ST_FIDO_LIST; return; }
+            siglen=der_ecdsa_sig(sig_rs,sig,sizeof(sig));
+        } else {
+            int r=crypto_ed25519_sign(seed,to_sign,(uint32_t)(adlen+32u),sig);
+            for(int i=0;i<32;i++) seed[i]=0;
+            if(r!=0){ ctap2_error(g_ctap_pending_cid,g_ctap_pending_cmd,CTAP2_ERR_DENIED);
+                      g_state=ST_FIDO_LIST; return; }
+            siglen=64;
+        }
+        uint16_t pklen=(g_falg[idx]==FIDO_ALG_ES256)?65u:32u;
+        uint8_t cred_id[32]; crypto_sha256(g_fpk[idx],pklen,cred_id);
         cbor_t c; c.buf=g_ctap_cbor_buf; c.cap=512; c.len=0;
         cb_map(&c,4);
         cb_uint(&c,1); cb_map(&c,2);                       /* credential */
           cb_text(&c,"id");   cb_bytes(&c,cred_id,32);
           cb_text(&c,"type"); cb_text(&c,"public-key");
         cb_uint(&c,2); cb_bytes(&c,authdata,adlen);         /* authData */
-        cb_uint(&c,3); cb_bytes(&c,sig,64);                 /* signature */
+        cb_uint(&c,3); cb_bytes(&c,sig,siglen);             /* signature */
         cb_uint(&c,4); cb_map(&c,1);                        /* user */
           cb_text(&c,"id"); cb_bytes(&c,
               (const uint8_t*)g_fuid[idx],g_fuid_len[idx]);
@@ -2227,7 +2267,8 @@ static void render_fido_detail(int idx)
     char sc2[12]; int_to_str(sc2,(int)g_fsc[idx]);
     display_text(6,y,"Sign count",C_DIM); display_text(80,y,sc2,C_TXT); y+=16;
     display_hline(6,y,SCR_W-12,C_SEP); y+=8;
-    display_text(6,y,"Algorithm",C_DIM); display_text(80,y,"Ed25519  (alg -8)",C_ACC); y+=16;
+    display_text(6,y,"Algorithm",C_DIM);
+    display_text(80,y,(g_falg[idx]==FIDO_ALG_ES256)?"ES256  (alg -7)":"Ed25519  (alg -8)",C_ACC); y+=16;
     display_text(6,y,"Type",C_DIM);      display_text(80,y,"Discoverable (rk)",C_DIM); y+=16;
     display_hline(6,y,SCR_W-12,C_SEP); y+=8;
     display_text(6,y,"Public key (first 16B)",C_DIM); y+=12;

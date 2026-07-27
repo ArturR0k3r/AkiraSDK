@@ -984,6 +984,18 @@ extern int hid_gamepad_set_dpad(int32_t direction);
 /** @brief Zero all gamepad state. */
 extern int hid_gamepad_reset(void);
 
+/**
+ * @brief Send buttons + hat + all 6 axes in a single BLE notify.
+ * Prefer this over calling hid_gamepad_set_axis()/set_dpad() several times
+ * per frame — each of those sends its own notify, and enough of them per
+ * frame can congest the BLE notification queue.
+ * @param a0-a3  Left X/Y, Right X/Y (-32768..32767)
+ * @param a4,a5  Left/Right trigger (-32768..32767)
+ */
+extern int hid_gamepad_send_report(int32_t buttons, int32_t hat,
+                                   int32_t a0, int32_t a1, int32_t a2,
+                                   int32_t a3, int32_t a4, int32_t a5);
+
 /** @brief Move mouse by relative dx/dy (-127..127). */
 extern int hid_mouse_move(int32_t dx, int32_t dy);
 
@@ -1150,6 +1162,28 @@ extern int app_stop(const char *name);
  * @return 0 on success (caller must return from main), negative on error
  */
 extern int app_switch(const char *name);
+
+/**
+ * @brief Check whether a newer version of this app is available.
+ *
+ * Requires capability: "app.control"
+ * Reads cached state only — does not itself trigger a network check.
+ *
+ * @param ver_buf  Output buffer for the available version string
+ * @param buf_len  Buffer capacity
+ * @return 1 update available (ver_buf filled), 0 up to date, negative errno
+ */
+extern int app_check_update(uint8_t *ver_buf, uint32_t buf_len);
+
+/**
+ * @brief Trigger download+install of this app's own newer version.
+ *
+ * Requires capability: "app.control"
+ * Fire-and-forget — expect to be stopped and reinstalled once it lands.
+ *
+ * @return 0 queued, negative errno (no update available, no connectivity)
+ */
+extern int app_request_update(void);
 
 /**
  * @brief Lifecycle event payload published on "akira.lifecycle" IPC topic.

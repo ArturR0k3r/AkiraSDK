@@ -119,7 +119,7 @@ int main(void)
 
         int roll = 0, pitch = 0;
         if (imu_ok) {
-            roll  = accel_to_axis(-(ax - ax_zero)); /* tilt left/right  → roll */
+            roll  = accel_to_axis(ax - ax_zero); /* tilt left/right  → roll */
             pitch = accel_to_axis(ay - ay_zero);   /* tilt forward/back → pitch */
         }
 

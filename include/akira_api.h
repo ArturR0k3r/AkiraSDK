@@ -1901,6 +1901,42 @@ extern int wifi_deauth(const uint8_t *bssid, const uint8_t *client_mac,
 #define WIFI_DEAUTH_REASON_INACTIVITY       4
 #define WIFI_DEAUTH_REASON_CLASS3_NONASSOC  7  /**< Default: Class-3 from non-assoc STA */
 
+/** @brief 4-way handshake capture result — filled by wifi_capture_pmkid().
+ *
+ *  Format for hashcat mode 22000:
+ *    WPA*01*APMAC*STAMAC*SSID*ANONCE*SNONCE*MIC*EAPOLFRAME
+ */
+typedef struct {
+    uint8_t  ap_mac[6];        /**< AP BSSID */
+    uint8_t  sta_mac[6];       /**< Client MAC */
+    uint8_t  anonce[32];       /**< ANonce from EAPOL-Key M1 */
+    uint8_t  snonce[32];       /**< SNonce from EAPOL-Key M2 */
+    uint8_t  mic[16];          /**< MIC from EAPOL-Key M2 */
+    uint8_t  eapol_frame[256]; /**< raw EAPOL frame (M2) for hashcat */
+    uint16_t eapol_len;        /**< length of eapol_frame */
+    char     ssid[33];         /**< AP SSID (null-terminated) */
+    int32_t  found;            /**< 1 = handshake complete, 0 = timeout */
+} handshake_capture_result_t;
+
+/**
+ * @brief Deauth a client, then capture the 4-way handshake (M1 + M2)
+ *        triggered by reconnection.
+ *
+ * Result contains ANonce (M1), SNonce + MIC (M2) for hashcat mode 22000.
+ *
+ * @param bssid        6-byte AP BSSID.
+ * @param client_mac   6-byte client MAC to deauth (use WIFI_MAC_BROADCAST).
+ * @param channel      2.4 GHz channel (1–14).
+ * @param ssid         AP SSID.
+ * @param result       Output buffer (handshake_capture_result_t).
+ * @param timeout_ms   Max wait in ms (recommended: 12000).
+ * @return 1 if handshake complete, 0 on timeout, negative errno on error.
+ */
+extern int wifi_capture_pmkid(const uint8_t *bssid, const uint8_t *client_mac,
+                               int32_t channel, const char *ssid,
+                               handshake_capture_result_t *result,
+                               int32_t timeout_ms);
+
 /*
  * =============================================================================
  * STORAGE API

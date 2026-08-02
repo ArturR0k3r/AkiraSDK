@@ -8,6 +8,7 @@
 
 pub const NET_TYPE_TCP: i32 = 0;
 pub const NET_TYPE_UDP: i32 = 1;
+pub const NET_TYPE_TLS: i32 = 2;
 
 pub const NET_EVT_NONE:         i32 = 0;
 pub const NET_EVT_CONNECTED:    i32 = 1;

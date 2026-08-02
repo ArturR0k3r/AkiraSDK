@@ -2040,6 +2040,8 @@ extern int storage_list(const char *path, char *buf, int len);
 #define NET_TYPE_TCP  0
 /** @brief Socket type: UDP datagram */
 #define NET_TYPE_UDP  1
+/** @brief Socket type: TLS stream over TCP (requires firmware CONFIG_AKIRA_WASM_NET_TLS) */
+#define NET_TYPE_TLS  2
 
 /** @brief Event: no events in queue */
 #define NET_EVT_NONE         0
@@ -2145,7 +2147,7 @@ static inline int net_ring_read(uint8_t *ring_buf, int buf_size,
 
 /**
  * @brief Open a new TCP or UDP socket.
- * @param type  NET_TYPE_TCP or NET_TYPE_UDP.
+ * @param type  NET_TYPE_TCP, NET_TYPE_UDP, or NET_TYPE_TLS.
  * @return Stream handle (>=0) on success; negative errno on failure.
  */
 extern int net_open(int32_t type);

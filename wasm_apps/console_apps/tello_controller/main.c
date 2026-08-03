@@ -21,7 +21,7 @@ static int32_t SCR_H = 240;
 
 #define ONE_G      9810
 #define AXIS_MAX   32767
-#define AXIS_DEAD  5000   /* accel deadzone */
+#define AXIS_DEAD  2500   /* accel deadzone */
 
 #define CAL_SAMPLES 8   /* startup IMU zero-calibration samples */
 
@@ -119,7 +119,7 @@ int main(void)
 
         int roll = 0, pitch = 0;
         if (imu_ok) {
-            roll  = accel_to_axis(ax - ax_zero); /* tilt left/right  → roll */
+            roll  = -accel_to_axis(ax - ax_zero); /* tilt left/right  → roll */
             pitch = accel_to_axis(ay - ay_zero);   /* tilt forward/back → pitch */
         }
 
@@ -150,7 +150,7 @@ int main(void)
          * Tello follows RC Mode 2: left stick (axis0/1) = yaw+throttle,
          * right stick (axis2/3) = roll+pitch — confirmed empirically now
          * that the HID transport itself is verified correct. */
-        hid_gamepad_send_report(buttons, dpad, yaw, throttle, roll, pitch, 0, rt_axis);
+        hid_gamepad_send_report(buttons, dpad, yaw, throttle, roll, pitch, -32768, rt_axis);
 
         /* ── Draw HUD ── */
         int32_t hdr_h = SCR_H / 8;

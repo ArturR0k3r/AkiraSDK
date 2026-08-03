@@ -1752,6 +1752,82 @@ extern int adc_read_mv(int channel);
 
 /*
  * =============================================================================
+ * NFC API
+ * Capability: "nfc"
+ * =============================================================================
+ *
+ * Chip-agnostic NFC tag access via nfc_manager — works with any registered
+ * NFC tag driver (currently ST25DV). Covers static user-memory read/write,
+ * RF field detection, and Fast Transfer Mode (FTM) mailbox exchange for
+ * dynamic content served live to an RF reader.
+ */
+
+/**
+ * @brief Read the tag's 8-byte UID.
+ * @param uid_out 8-byte destination buffer.
+ * @return 0 on success, negative error code on failure (-ENODEV if no NFC
+ *         tag is registered).
+ */
+extern int nfc_uid(uint8_t uid_out[8]);
+
+/**
+ * @brief Read from tag user memory.
+ * @param addr Byte address within user memory.
+ * @param buf  Destination buffer.
+ * @param len  Number of bytes to read (max 256).
+ * @return 0 on success, negative error code on failure.
+ */
+extern int nfc_read(int addr, uint8_t *buf, unsigned int len);
+
+/**
+ * @brief Write to tag user memory.
+ * @param addr Byte address within user memory.
+ * @param buf  Source buffer.
+ * @param len  Number of bytes to write (max 256).
+ * @return 0 on success, negative error code on failure.
+ */
+extern int nfc_write(int addr, const uint8_t *buf, unsigned int len);
+
+/**
+ * @brief Check whether an RF field is currently present.
+ * @return 1 if present, 0 if absent, negative error code on failure.
+ */
+extern int nfc_field_present(void);
+
+/**
+ * @brief Enable/disable Fast Transfer Mode (FTM) mailbox.
+ * @param enable 1 to enable, 0 to disable.
+ * @param wdg    Watchdog setting 0-7: duration = 2^(wdg-1) x 30ms, 0 = infinite.
+ * @return 0 on success, negative error code on failure.
+ */
+extern int nfc_mb_enable(int enable, uint8_t wdg);
+
+/**
+ * @brief Put a message in the FTM mailbox for an RF reader to read.
+ * @param buf Source buffer.
+ * @param len Message length (1-256).
+ * @return 0 on success, negative error code on failure.
+ */
+extern int nfc_mb_put(const uint8_t *buf, unsigned int len);
+
+/**
+ * @brief Get the message an RF reader put in the FTM mailbox.
+ * @param buf Destination buffer.
+ * @param cap Destination buffer capacity.
+ * @return Number of bytes read (>=0) on success, negative error code on failure.
+ */
+extern int nfc_mb_get(uint8_t *buf, unsigned int cap);
+
+/**
+ * @brief Query FTM mailbox control/status bits and current message length.
+ * @param ctrl_out    Set to the raw MB_CTRL_Dyn register value.
+ * @param msg_len_out Set to the current message length.
+ * @return 0 on success, negative error code on failure.
+ */
+extern int nfc_mb_status(uint8_t *ctrl_out, unsigned int *msg_len_out);
+
+/*
+ * =============================================================================
  * WDT API
  * Capability: "wdt"
  * =============================================================================

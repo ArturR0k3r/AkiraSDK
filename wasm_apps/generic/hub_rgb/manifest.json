@@ -1,0 +1,24 @@
+{
+  "name": "hub_rgb",
+  "version": "1.0.0",
+  "description": "Drive the PWM RGB LED from AkiraHub or the phone companion app.cmd bridge",
+  "capabilities": [
+    "ipc",
+    "pwm"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.6.0",
+  "commands": [
+    {
+      "id": "set",
+      "label": "Set RGB",
+      "params": [
+        { "name": "on", "type": "int", "min": 0, "max": 1 },
+        { "name": "r", "type": "int", "min": 0, "max": 255 },
+        { "name": "g", "type": "int", "min": 0, "max": 255 },
+        { "name": "b", "type": "int", "min": 0, "max": 255 },
+        { "name": "bri", "type": "int", "min": 0, "max": 255 }
+      ]
+    }
+  ]
+}

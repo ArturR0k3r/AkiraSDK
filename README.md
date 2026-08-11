@@ -1,3 +1,5 @@
+
+
 # Akira SDK
 
 <div align="center">
@@ -46,6 +48,7 @@ AkiraSDK/
 ├── wasm_apps/
 │   ├── build.sh           # Build all apps (or a single named app)
 │   ├── Makefile           # Master Makefile (make / make clean / make install)
+│   ├── akiraconsole/      # Sample applications (display_test, compass, cube3d, etc.)
 │   ├── hello_world/       # Minimal printf example
 │   ├── ble_led/           # BLE GATT LED control
 │   ├── macro_pad/         # 5-button HID macro pad

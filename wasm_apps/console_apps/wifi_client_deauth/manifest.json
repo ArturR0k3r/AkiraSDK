@@ -1,0 +1,8 @@
+{
+  "name": "wifi_client_deauth",
+  "version": "1.0.0",
+  "description": "Enumerate clients of an AP by passive sniffing, then targeted-deauth a single client or all — WiFi poking toolkit.",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "wifi.inject", "rtc.read", "app.switch"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

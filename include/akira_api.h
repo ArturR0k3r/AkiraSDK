@@ -1401,6 +1401,24 @@ extern int rf_tx_cw_stop(void);
  */
 extern int rf_tx_cw_set_freq(uint32_t freq_hz);
 
+/**
+ * @brief Set the 8-bit LoRa sync word (LR2021 only).
+ *
+ * The LoRa sync word is the correlator gate: with the wrong value the chip
+ * never locks and delivers no packets (SYNC_FAIL); with a match, packets
+ * land in the RX FIFO. Used to intercept non-default networks — cycle
+ * candidate values and keep the first that yields receptions.
+ *
+ * Common values: 0x12 (Semtech private), 0x34 (LoRaWAN public), 0x56,
+ * 0xAB. Full space is 0x00–0xFF.
+ *
+ * Re-issues LoRa config and re-arms RX immediately. Requires "rf.transceive".
+ *
+ * @param sync  Sync word byte (0–255).
+ * @return 0 on success, negative errno on failure (-ENOTSUP if not LoRa/LR2021).
+ */
+extern int rf_set_sync_word(uint32_t sync);
+
 /*
  * Raw OOK/ASK signal capture and replay (CC1121 byte-stream mode).
  * Supported chips: CC1121.  Returns -ENOTSUP on chips without raw mode.
@@ -2013,6 +2031,42 @@ extern int wifi_capture_pmkid(const uint8_t *bssid, const uint8_t *client_mac,
                                handshake_capture_result_t *result,
                                int32_t timeout_ms);
 
+/**
+ * @brief One client record returned by wifi_scan_clients().
+ *
+ * Fixed 7-byte wire format — layout must stay in sync with
+ * struct client_wire in akira_wifi_api.c.
+ */
+typedef struct {
+    uint8_t mac[6];   /**< Client (station) MAC address */
+    int8_t  rssi;     /**< Strongest RSSI seen from this client (dBm) */
+} akira_wifi_client_t; /* sizeof == 7 */
+
+/**
+ * @brief Enumerate clients of an AP by passive sniffing its channel.
+ *
+ * Locks the radio to @p channel in promiscuous mode for @p timeout_ms and
+ * collects distinct client MACs: data frames whose BSSID matches @p bssid
+ * (both directions) plus any probe requests seen on the channel. MACs are
+ * deduplicated keeping the strongest RSSI.
+ *
+ * This is passive receive only — no frames are injected.
+ *
+ * Requires manifest capability: "wifi.inject"
+ *
+ * @param bssid       6-byte AP BSSID to correlate against.
+ * @param buf         Array of akira_wifi_client_t in WASM memory.
+ * @param buf_len     Size of @p buf in bytes. Max clients = buf_len / 7.
+ * @param channel     2.4 GHz channel (1–14) the AP is on.
+ * @param timeout_ms  Sniff window in ms (clamped to ≥ 1000; default 4000).
+ * @return Number of clients found (≥ 0), or negative errno on error.
+ *         -EPERM   "wifi.inject" capability not granted
+ *         -EINVAL  Invalid channel, NULL pointer, or buf_len < 7
+ */
+extern int wifi_scan_clients(const uint8_t *bssid, akira_wifi_client_t *buf,
+                             uint32_t buf_len, int32_t channel,
+                             int32_t timeout_ms);
+
 /*
  * =============================================================================
  * STORAGE API
@@ -2445,7 +2499,7 @@ extern int power_set_low_power(int enable);
  *   if (AKIRA_BTN_PRESSED(held, AKIRA_BTN_A)) { ... }
  *
  *   akira_input_event_t ev;
- *   if (input_poll_event(&ev) == 1 && ev.pressed) { ... }
+ *   if (input_poll_event(&ev, sizeof(ev)) == 1 && ev.pressed) { ... }
  */
 
 /** Packed event filled by input_poll_event(). 8 bytes, naturally aligned. */
@@ -2464,10 +2518,12 @@ extern int input_get_buttons(void);
 
 /**
  * @brief Drain one edge event from the ring buffer (non-blocking).
- * @param evt  Pointer to an akira_input_event_t in WASM linear memory.
+ * @param evt      Pointer to an akira_input_event_t in WASM linear memory.
+ * @param evt_len  Size of the event struct in bytes (must be ≥ 8).
  * @return 1 if an event was dequeued and written, 0 if queue is empty, <0 error.
+ * @note ABI is "(*~)i": pointer + explicit length — the len arg is required.
  */
-extern int input_poll_event(akira_input_event_t *evt);
+extern int input_poll_event(akira_input_event_t *evt, uint32_t evt_len);
 
 /*
  * =============================================================================

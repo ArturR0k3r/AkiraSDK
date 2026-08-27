@@ -99,6 +99,22 @@ static const char *u_str(char *buf, uint32_t v)
     return buf;
 }
 
+/* Minimal signed-to-decimal (RSSI is negative dBm). */
+static const char *i_str(char *buf, int32_t v)
+{
+    int neg = v < 0;
+    uint32_t uv = neg ? (uint32_t)(-v) : (uint32_t)v;
+    char tmp[13];
+    int i = 0;
+    if (uv == 0) tmp[i++] = '0';
+    while (uv) { tmp[i++] = (char)('0' + uv % 10); uv /= 10; }
+    int j = 0;
+    if (neg) buf[j++] = '-';
+    while (i) buf[j++] = tmp[--i];
+    buf[j] = 0;
+    return buf;
+}
+
 static void hex2(char *buf, uint8_t v)
 {
     const char *h = "0123456789abcdef";
@@ -251,7 +267,8 @@ static void draw_nodes(void)
         display_text(DW * 9 / 100, y + 3, n->name[0] ? n->name : "-", COL_TXT);
 
         char buf[12], line[20];
-        display_text(DW * 66 / 100, y + 3, u_str(buf, n->hop_count), COL_DIM);
+        display_text(DW * 52 / 100, y + 3, u_str(buf, n->hop_count), COL_DIM);
+        display_text(DW * 62 / 100, y + 3, i_str(buf, n->rssi), COL_TXT);
 
         uint32_t age = (now - n->last_seen) / 1000u;
         int p = 0;

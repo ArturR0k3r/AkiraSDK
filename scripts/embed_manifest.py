@@ -47,6 +47,47 @@ def build_custom_section(name: str, payload: bytes) -> bytes:
     return bytes([0x00]) + section_size_leb + section_data
 
 
+def decode_leb128(data: bytes, offset: int) -> tuple:
+    """Decode an unsigned LEB128 value starting at offset. Returns (value, next_offset)."""
+    result = 0
+    shift = 0
+    while True:
+        byte = data[offset]
+        offset += 1
+        result |= (byte & 0x7F) << shift
+        if not (byte & 0x80):
+            break
+        shift += 7
+    return result, offset
+
+
+def strip_custom_section(wasm: bytes, name: str) -> bytes:
+    """
+    Remove any existing custom section named `name` from wasm.
+
+    A per-app Makefile's embed step reruns on every `make` invocation even when
+    the compile step is skipped (target up to date vs. main.c) — without this,
+    re-embedding after only editing manifest.json appends a second
+    ".akira.manifest" section, and the device parser returns the first match it
+    finds, silently keeping the stale one forever.
+    """
+    name_bytes = name.encode("utf-8")
+    out = bytearray(wasm[:8])  # magic + version
+    pos = 8
+    while pos < len(wasm):
+        section_id = wasm[pos]
+        size, body_start = decode_leb128(wasm, pos + 1)
+        body_end = body_start + size
+        if section_id == 0x00:
+            name_len, name_start = decode_leb128(wasm, body_start)
+            if wasm[name_start:name_start + name_len] == name_bytes:
+                pos = body_end
+                continue
+        out += wasm[pos:body_end]
+        pos = body_end
+    return bytes(out)
+
+
 def embed_manifest(wasm_path: str, json_path: str, output_path: str) -> None:
     with open(wasm_path, "rb") as f:
         wasm = f.read()
@@ -59,6 +100,7 @@ def embed_manifest(wasm_path: str, json_path: str, output_path: str) -> None:
     with open(json_path, "rb") as f:
         json_data = f.read()
 
+    wasm = strip_custom_section(wasm, ".akira.manifest")
     section = build_custom_section(".akira.manifest", json_data)
     out = wasm + section
 

@@ -1,0 +1,9 @@
+{
+  "name": "ppdr_monitor",
+  "display_name": "PPDR Monitor",
+  "version": "1.0.0",
+  "description": "Passive RSSI presence/pattern detector for the PPDR band (default 380-400MHz) on the LR2021 - flags TDMA-like burst activity vs continuous carriers, no demod/decode, receive-only.",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "storage.read", "storage.write", "rtc.read"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

@@ -102,6 +102,21 @@ static void append_calib_event(uint32_t freq_hz, int rssi_dbm, int cls, int scor
     storage_close(fd);
 }
 
+/* One record per completed waterfall row: timestamp + the same quantized
+ * bytes waterfall_blit() renders on screen, so an offline decoder can
+ * reproduce the exact waterfall image later via gradient565(). */
+static void log_waterfall_row(const uint8_t *row, int row_len)
+{
+    int32_t ts = rtc_get_unix_time();
+    int fd = storage_open("ppdr_waterfall.bin", STORAGE_O_APPEND);
+    if (fd < 0) {
+        return;
+    }
+    storage_write(fd, &ts, (int)sizeof(ts));
+    storage_write(fd, row, row_len);
+    storage_close(fd);
+}
+
 #define CALIB_VIEW_MAX 8
 static calib_rec_t calib_view[CALIB_VIEW_MAX];
 static int         calib_view_n = 0;
@@ -254,21 +269,23 @@ static uint32_t g_btn_pending = 0;
 
 static int poll_input(void)
 {
-    /* This app only needs the held-button bitmask, not individual edges -
-     * but the native edge queue (16 deep) is a separate ring buffer that
-     * nothing else drains either, so it fills up from real button presses
-     * and logs "event queue full, evicting oldest" forever once ~16 edges
-     * have ever occurred. Draining it here (bitmask is already read above
-     * and is unaffected by queue state) keeps that log quiet. */
+    /* Level-diffing input_get_buttons() alone misses a press+release that
+     * completes entirely between two poll_input() calls (e.g. across a
+     * display_flush() or a CalibFE stall) - the edge queue is the only
+     * record of that tap, so build the pressed mask from it instead of
+     * draining and discarding. */
+    uint32_t pressed = 0;
     akira_input_event_t ev;
     while (input_poll_event(&ev, sizeof(ev)) == 1) {
-        /* discarded: bitmask diffing below is this app's only input model */
+        if (ev.pressed) {
+            pressed |= (1U << ev.button_id);
+        }
     }
 
-    uint32_t held    = (uint32_t)input_get_buttons();
-    uint32_t pressed = held & ~g_btn_prev;
-    g_btn_prev        = held;
-    g_btn_pending     |= pressed;
+    uint32_t held = (uint32_t)input_get_buttons();
+    pressed      |= held & ~g_btn_prev;
+    g_btn_prev    = held;
+    g_btn_pending |= pressed;
     return pressed != 0;
 }
 
@@ -453,6 +470,7 @@ static void waterfall_push_row(void)
     for (int x = 0; x < WF_W; x++) {
         wf_hist[0][x] = row[x];
     }
+    log_waterfall_row(row, WF_W);
 }
 
 static void waterfall_blit(void)

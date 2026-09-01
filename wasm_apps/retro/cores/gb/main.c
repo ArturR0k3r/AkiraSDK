@@ -2,20 +2,21 @@
  * @file main.c
  * @brief AkiraOS Game Boy / Game Boy Color emulator — app entry point
  *
- * Mirrors the (working) NES core's input and display approach: gpio_read for
- * buttons and display_raw_write for the framebuffer, with the display size
- * queried at runtime. The GB's 160×144 image is nearest-neighbour upscaled to
- * fill the panel (the one thing NES doesn't need, since NES is already ~screen
- * sized).
+ * Mirrors the (working) NES core's input and display approach:
+ * input_get_buttons() for buttons and display_raw_write for the framebuffer,
+ * with the display size queried at runtime. The GB's 160×144 image is
+ * nearest-neighbour upscaled to fill the panel (the one thing NES doesn't
+ * need, since NES is already ~screen sized).
  *
  * ROM data injected by rom_to_wasm.py:
  *   const uint8_t  rom_data[];  const uint32_t rom_size;
  *
- * Button mapping (akiraconsole GPIOs — identical to the NES core):
- *   D-pad U/D/L/R (4/5/6/7) → GB d-pad
- *   A (15) → GB A      physical Y (41) → GB B
- *   physical B (16) → GB Select   physical X (17) → GB Start
- *   OK (0, active-low) → pause overlay
+ * Button mapping (via input_get_buttons(), kernel gpio-keys — identical to
+ * the NES core):
+ *   D-pad U/D/L/R → GB d-pad
+ *   A → GB A      physical Y → GB B
+ *   physical B → GB Select   physical X → GB Start
+ *   Home/OK → pause overlay
  *
  * @license Apache-2.0
  */
@@ -34,16 +35,9 @@ static const char *save_slot_path(int slot)
 extern const uint8_t  rom_data[];
 extern const uint32_t rom_size;
 
-/* ── GPIO pins (akiraconsole — same as the NES core) ─────────────────── */
-#define PIN_UP        4
-#define PIN_DOWN      5
-#define PIN_LEFT      6
-#define PIN_RIGHT     7
-#define PIN_A        15
-#define PIN_B        41   /* physical Y — swapped to logical B */
-#define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
-#define PIN_X        16   /* physical B — swapped to logical X */
-#define PIN_Y        17   /* physical X — swapped to logical Y */
+/* ── Buttons (kernel gpio-keys via input_get_buttons()) ───────────────── */
+#define BTN_HOME (1u << 1)   /* zephyr,code=1 — no AKIRA_BTN_* for Home/OK */
+static int btn_held(uint32_t mask) { return (input_get_buttons() & mask) != 0; }
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BLACK   0x0000u
@@ -147,21 +141,6 @@ static void save_int(const char *key, int val)
     settings_set(key, buf);
 }
 
-/* ── GPIO init (identical to the NES core) ───────────────────────────── */
-static void init_gpio(void)
-{
-    int f = GPIO_INPUT | GPIO_PULL_DOWN;
-    gpio_configure(PIN_UP,       f);
-    gpio_configure(PIN_DOWN,     f);
-    gpio_configure(PIN_LEFT,     f);
-    gpio_configure(PIN_RIGHT,    f);
-    gpio_configure(PIN_A,        f);
-    gpio_configure(PIN_B,        f);
-    gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_X,        f);
-    gpio_configure(PIN_Y,        f);
-}
-
 /* ── Display geometry: fit 160×144 into the panel, aspect-preserved ──── */
 static void init_display_geometry(void)
 {
@@ -240,9 +219,9 @@ static void show_settings_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    debkey_t ku={.held=gpio_read(PIN_UP)},   kd={.held=gpio_read(PIN_DOWN)};
-    debkey_t ka={.held=gpio_read(PIN_A)},    kb={.held=gpio_read(PIN_B)};
-    debkey_t kl={.held=gpio_read(PIN_LEFT)}, kr={.held=gpio_read(PIN_RIGHT)};
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)},   kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)},    kb={.held=btn_held(AKIRA_BTN_Y)};
+    debkey_t kl={.held=btn_held(AKIRA_BTN_LEFT)}, kr={.held=btn_held(AKIRA_BTN_RIGHT)};
 
     while (1) {
         if (dirty) {
@@ -258,12 +237,12 @@ static void show_settings_menu(void)
             display_flush();
             dirty = 0;
         }
-        int u=deb_edge(&ku, gpio_read(PIN_UP));
-        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
-        int a=deb_edge(&ka, gpio_read(PIN_A));
-        int b=deb_edge(&kb, gpio_read(PIN_B));
-        int l=deb_edge(&kl, gpio_read(PIN_LEFT));
-        int r=deb_edge(&kr, gpio_read(PIN_RIGHT));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
+        int l=deb_edge(&kl, btn_held(AKIRA_BTN_LEFT));
+        int r=deb_edge(&kr, btn_held(AKIRA_BTN_RIGHT));
 
         if (u) { cur=(cur+1)%2; dirty=1; }
         if (d) { cur=(cur+1)%2; dirty=1; }
@@ -347,8 +326,8 @@ static void show_slot_menu(int for_save)
     const int back_row = SAVE_SLOT_COUNT;
 
     int cur=0, dirty=1;
-    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
-    debkey_t ka={.held=gpio_read(PIN_A)}, kb={.held=gpio_read(PIN_B)};
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)}, kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)}, kb={.held=btn_held(AKIRA_BTN_Y)};
 
     while (1) {
         if (dirty) {
@@ -366,10 +345,10 @@ static void show_slot_menu(int for_save)
             display_flush();
             dirty = 0;
         }
-        int u=deb_edge(&ku, gpio_read(PIN_UP));
-        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
-        int a=deb_edge(&ka, gpio_read(PIN_A));
-        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
 
         if (u) { cur=(cur+SAVE_SLOT_COUNT+1-1)%(SAVE_SLOT_COUNT+1); dirty=1; }
         if (d) { cur=(cur+1)%(SAVE_SLOT_COUNT+1);                   dirty=1; }
@@ -388,7 +367,7 @@ static void show_slot_menu(int for_save)
 /* ── Pause overlay (identical structure to the NES core) ──────────────── */
 static int show_pause_menu(void)
 {
-    while (gpio_read(PIN_SETTINGS)) delay(10000);
+    while (btn_held(BTN_HOME)) delay(10000);
     delay(40000);
 
     const int OW = (g_disp_w >= 175) ? 170 : g_disp_w - 4;
@@ -396,9 +375,9 @@ static int show_pause_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
-    debkey_t ka={.held=gpio_read(PIN_A)},  kb={.held=gpio_read(PIN_B)};
-    debkey_t ks={.held=gpio_read(PIN_SETTINGS)};
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)}, kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)},  kb={.held=btn_held(AKIRA_BTN_Y)};
+    debkey_t ks={.held=btn_held(BTN_HOME)};
 
     while (1) {
         if (dirty) {
@@ -417,11 +396,11 @@ static int show_pause_menu(void)
             }
             dirty = 0;
         }
-        int s=deb_edge(&ks, gpio_read(PIN_SETTINGS));
-        int u=deb_edge(&ku, gpio_read(PIN_UP));
-        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
-        int a=deb_edge(&ka, gpio_read(PIN_A));
-        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int s=deb_edge(&ks, btn_held(BTN_HOME));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
 
         if (s) return PM_RESUME;
         if (u) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
@@ -488,7 +467,6 @@ static void boot_animation(void)
 /* ── Main ─────────────────────────────────────────────────────────────── */
 int main(void)
 {
-    init_gpio();
     load_settings();
     init_display_geometry();
 
@@ -498,7 +476,7 @@ int main(void)
 
     draw_border();
 
-    debkey_t k_settings = { .held = gpio_read(PIN_SETTINGS) };
+    debkey_t k_settings = { .held = btn_held(BTN_HOME) };
     int frame_count   = 0;
     uint8_t prev_btns = 0;
     printf("[GB] boot OK, rom_size=%u\n", rom_size);
@@ -506,40 +484,40 @@ int main(void)
     while (1) {
         /* ── Buttons (identical mapping to the NES core) ──────────────── */
         uint8_t btns = 0;
-        if (gpio_read(PIN_RIGHT))  btns |= GB_BTN_RIGHT;
-        if (gpio_read(PIN_LEFT))   btns |= GB_BTN_LEFT;
-        if (gpio_read(PIN_DOWN))   btns |= GB_BTN_DOWN;
-        if (gpio_read(PIN_UP))     btns |= GB_BTN_UP;
-        if (gpio_read(PIN_A))      btns |= GB_BTN_A;
-        if (gpio_read(PIN_B))      btns |= GB_BTN_B;
-        if (gpio_read(PIN_X))      btns |= GB_BTN_SELECT;
-        if (gpio_read(PIN_Y))      btns |= GB_BTN_START;
+        if (btn_held(AKIRA_BTN_RIGHT)) btns |= GB_BTN_RIGHT;
+        if (btn_held(AKIRA_BTN_LEFT))  btns |= GB_BTN_LEFT;
+        if (btn_held(AKIRA_BTN_DOWN))  btns |= GB_BTN_DOWN;
+        if (btn_held(AKIRA_BTN_UP))    btns |= GB_BTN_UP;
+        if (btn_held(AKIRA_BTN_A))     btns |= GB_BTN_A;
+        if (btn_held(AKIRA_BTN_Y))     btns |= GB_BTN_B;
+        if (btn_held(AKIRA_BTN_B))     btns |= GB_BTN_SELECT;
+        if (btn_held(AKIRA_BTN_X))     btns |= GB_BTN_START;
         gb_set_buttons(&gb, btns);
 
-        /* ── Per-button diagnostic log (pin -> GB function) ───────────── */
+        /* ── Per-button diagnostic log ─────────────────────────────────── */
         if (btns != prev_btns) {
-            static const struct { uint8_t mask; int pin; const char *name; } BTN_LOG[] = {
-                { GB_BTN_RIGHT,  PIN_RIGHT, "RIGHT"  },
-                { GB_BTN_LEFT,   PIN_LEFT,  "LEFT"   },
-                { GB_BTN_UP,     PIN_UP,    "UP"     },
-                { GB_BTN_DOWN,   PIN_DOWN,  "DOWN"   },
-                { GB_BTN_A,      PIN_A,     "A"      },
-                { GB_BTN_B,      PIN_B,     "B"      },
-                { GB_BTN_SELECT, PIN_X,     "SELECT" },
-                { GB_BTN_START,  PIN_Y,     "START"  },
+            static const struct { uint8_t mask; const char *name; } BTN_LOG[] = {
+                { GB_BTN_RIGHT,  "RIGHT"  },
+                { GB_BTN_LEFT,   "LEFT"   },
+                { GB_BTN_UP,     "UP"     },
+                { GB_BTN_DOWN,   "DOWN"   },
+                { GB_BTN_A,      "A"      },
+                { GB_BTN_B,      "B"      },
+                { GB_BTN_SELECT, "SELECT" },
+                { GB_BTN_START,  "START"  },
             };
             for (int i = 0; i < 8; i++) {
                 uint8_t m = BTN_LOG[i].mask;
                 if ((btns & m) && !(prev_btns & m))
-                    printf("[GB] btn %s down pin=%d\n", BTN_LOG[i].name, BTN_LOG[i].pin);
+                    printf("[GB] btn %s down\n", BTN_LOG[i].name);
                 else if (!(btns & m) && (prev_btns & m))
-                    printf("[GB] btn %s up pin=%d\n", BTN_LOG[i].name, BTN_LOG[i].pin);
+                    printf("[GB] btn %s up\n", BTN_LOG[i].name);
             }
             prev_btns = btns;
         }
 
         /* ── Pause button (debounced rising edge) ─────────────────────── */
-        if (deb_edge(&k_settings, gpio_read(PIN_SETTINGS))) {
+        if (deb_edge(&k_settings, btn_held(BTN_HOME))) {
             int choice = show_pause_menu();
             if (choice == PM_EXIT) {
                 display_clear(C_BLACK); display_flush();

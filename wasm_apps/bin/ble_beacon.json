@@ -1,9 +1,0 @@
-{
-  "name": "ble_beacon",
-  "display_name": "BLE Sensor Beacon",
-  "version": "1.0.0",
-  "description": "Turns the console into a BLE GATT peripheral streaming live accelerometer tilt and temperature — connect from a phone and watch the values update.",
-  "capabilities": ["display.write", "input.read", "sensor.read", "ble"],
-  "memory_quota": 65536,
-  "min_akiraos_version": "1.5.0"
-}

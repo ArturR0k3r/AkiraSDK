@@ -15,6 +15,8 @@
 #                                             thumbv7em (STM32),
 #                                             riscv32 (ESP32-C3),
 #                                             x86_64 (native_sim)
+#   ./build.sh <app_name> --aot[=target]  - Build .wasm then AOT-compile it
+#                                    (same targets as above, default xtensa)
 #
 # Environment variables:
 #   WASI_SDK=/opt/wasi-sdk         - Path to WASI SDK (C apps)
@@ -175,8 +177,13 @@ aot_app() {
     flags=$(get_aot_flags "$target")
 
     echo -e "${GREEN}AOT compiling ${app_name} → ${target}...${NC}"
+    # --emit-custom-sections carries the .akira.manifest WASM custom section
+    # (embedded by build_app) into the AOT file's own custom-section format —
+    # without it cap_mask=0 at runtime and every capability check is denied.
     # shellcheck disable=SC2086
-    "$WAMRC" $flags --opt-level=3 --size-level=1 -o "$aot_file" "$wasm_file"
+    "$WAMRC" $flags --opt-level=3 --size-level=1 \
+        --emit-custom-sections=.akira.manifest \
+        -o "$aot_file" "$wasm_file"
 
     if [ $? -eq 0 ]; then
         local size
@@ -312,6 +319,19 @@ list_apps() {
 
 # Main
 main() {
+    # Pull --aot[=target] out of the args so it can trail any app_name form.
+    local do_aot=0
+    local aot_target="xtensa"
+    local args=()
+    for arg in "$@"; do
+        case "$arg" in
+            --aot) do_aot=1 ;;
+            --aot=*) do_aot=1; aot_target="${arg#--aot=}" ;;
+            *) args+=("$arg") ;;
+        esac
+    done
+    set -- "${args[@]}"
+
     local command=${1:-build}
 
     case "$command" in
@@ -410,6 +430,7 @@ main() {
                     exit 1
                 fi
                 build_rust_app "$app_name" "$app_dir" || exit 1
+                if [ "$do_aot" -eq 1 ]; then aot_app "$app_name" "$aot_target" || exit 1; fi
 
             elif [[ "$command" == python/* ]]; then
                 # Explicit Python prefix: e.g. python/hello_world
@@ -424,6 +445,7 @@ main() {
                     exit 1
                 fi
                 build_python_app "$app_name" "$app_dir" || exit 1
+                if [ "$do_aot" -eq 1 ]; then aot_app "$app_name" "$aot_target" || exit 1; fi
 
             else
                 # Plain name — probe C paths
@@ -436,10 +458,11 @@ main() {
                 fi
                 if ! build_app "$command" "$app_dir"; then
                     echo ""
-                    echo "Usage: $0 [clean|list|build|aot [target]|rust/<name>|python/<name>|APP_NAME]"
+                    echo "Usage: $0 [clean|list|build|aot [target]|rust/<name>|python/<name>|APP_NAME] [--aot[=target]]"
                     list_apps
                     exit 1
                 fi
+                if [ "$do_aot" -eq 1 ]; then aot_app "$command" "$aot_target" || exit 1; fi
             fi
             ;;
     esac

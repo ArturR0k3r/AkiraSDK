@@ -1,7 +1,0 @@
-{
-  "name": "usb_rubber_ducky",
-  "version": "1.0.0",
-  "capabilities": ["display.write", "input.read", "hid", "fs.read", "rtc.read", "app.switch"],
-  "memory_quota": 131072,
-  "min_akiraos_version": "1.4.0"
-}

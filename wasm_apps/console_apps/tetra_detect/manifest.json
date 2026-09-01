@@ -1,0 +1,9 @@
+{
+  "name": "tetra_detect",
+  "display_name": "TETRA Detector MD",
+  "version": "1.0.0",
+  "description": "Passive police-presence monitor for the Moldovan TETRA/PPDR band (380-400 MHz) on the LR2021 - flags persistent downlink towers (TETRA SITE) and TDMA uplink bursts (POLICE RADIO). Receive-only energy detection, no decode.",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "rtc.read"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

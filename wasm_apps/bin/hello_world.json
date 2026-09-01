@@ -1,8 +1,0 @@
-{
-  "name": "hello_world",
-  "version": "1.0.0",
-  "capabilities": [
-    "input.read"
-  ],
-  "memory_quota": 65536
-}

@@ -2,7 +2,7 @@
  * @file main.c
  * @brief AkiraOS SMS emulator — app entry point
  *
- * Reads SMS buttons from the akiraconsole DPAD GPIOs, runs the SMS
+ * Reads SMS buttons via input_get_buttons(), runs the SMS
  * machine, and pushes each frame to the AkiraOS display via
  * display_bitmap().  The SMS 256×192 image is centered on the
  * 320×240 display with 32-pixel black bars on left/right and 24-pixel
@@ -12,15 +12,12 @@
  *   const uint8_t  rom_data[];
  *   const uint32_t rom_size;
  *
- * Button mapping (akiraconsole pins):
- *   D-pad Up    (pin  4) → SMS Up
- *   D-pad Down  (pin  5) → SMS Down
- *   D-pad Left  (pin  6) → SMS Left
- *   D-pad Right (pin  7) → SMS Right
- *   A button    (pin 15) → SMS Button 1
- *   physical Y  (pin 41) → SMS Button 2 (logical B)
- *   physical X  (pin 17) → SMS Start / Pause (logical Y, NMI)
- *   Settings    (pin  2) → Emulator pause menu
+ * Button mapping (via input_get_buttons(), kernel gpio-keys):
+ *   D-pad Up/Down/Left/Right → SMS Up/Down/Left/Right
+ *   A button    → SMS Button 1
+ *   physical Y  → SMS Button 2
+ *   physical X  → SMS Start / Pause (NMI)
+ *   Home/OK     → Emulator pause menu
  *
  * @license Apache-2.0
  */
@@ -53,16 +50,9 @@ static const int FS_MOD[4] = {1, 2, 3, 4};  /* 60 / 30 / 20 / 15 fps */
 static int g_frameskip = 1;                  /* default: 30 fps */
 static int g_overscan  = 0;                  /* default: off    */
 
-/* ── GPIO pin assignments ────────────────────────────────────────────── */
-#define PIN_UP        4
-#define PIN_DOWN      5
-#define PIN_LEFT      6
-#define PIN_RIGHT     7
-#define PIN_A        15
-#define PIN_B        41   /* physical Y — swapped to logical B */
-#define PIN_SETTINGS  0   /* BTN.OK = GPIO0, active-low pull-up */
-#define PIN_X        16   /* physical B — swapped to logical X */
-#define PIN_Y        17   /* physical X — swapped to logical Y */
+/* ── Buttons (kernel gpio-keys via input_get_buttons()) ───────────────── */
+#define BTN_HOME (1u << 1)   /* zephyr,code=1 — no AKIRA_BTN_* for Home/OK */
+static int btn_held(uint32_t mask) { return (input_get_buttons() & mask) != 0; }
 
 /* ── Colours (RGB565) ────────────────────────────────────────────────── */
 #define C_BLACK   0x0000u
@@ -202,9 +192,9 @@ static void show_settings_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    debkey_t ku={.held=gpio_read(PIN_UP)},   kd={.held=gpio_read(PIN_DOWN)};
-    debkey_t ka={.held=gpio_read(PIN_A)},    kb={.held=gpio_read(PIN_B)};
-    debkey_t kl={.held=gpio_read(PIN_LEFT)}, kr={.held=gpio_read(PIN_RIGHT)};
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)},   kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)},    kb={.held=btn_held(AKIRA_BTN_Y)};
+    debkey_t kl={.held=btn_held(AKIRA_BTN_LEFT)}, kr={.held=btn_held(AKIRA_BTN_RIGHT)};
 
     while (1) {
         if (dirty) {
@@ -218,12 +208,12 @@ static void show_settings_menu(void)
             display_flush();
             dirty = 0;
         }
-        int u=deb_edge(&ku, gpio_read(PIN_UP));
-        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
-        int a=deb_edge(&ka, gpio_read(PIN_A));
-        int b=deb_edge(&kb, gpio_read(PIN_B));
-        int l=deb_edge(&kl, gpio_read(PIN_LEFT));
-        int r=deb_edge(&kr, gpio_read(PIN_RIGHT));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
+        int l=deb_edge(&kl, btn_held(AKIRA_BTN_LEFT));
+        int r=deb_edge(&kr, btn_held(AKIRA_BTN_RIGHT));
 
         if (u) { cur=(cur+2)%3; dirty=1; }
         if (d) { cur=(cur+1)%3; dirty=1; }
@@ -300,8 +290,8 @@ static void show_slot_menu(int for_save)
     const int back_row = SAVE_SLOT_COUNT;
 
     int cur=0, dirty=1;
-    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
-    debkey_t ka={.held=gpio_read(PIN_A)}, kb={.held=gpio_read(PIN_B)};
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)}, kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)}, kb={.held=btn_held(AKIRA_BTN_Y)};
 
     while (1) {
         if (dirty) {
@@ -319,10 +309,10 @@ static void show_slot_menu(int for_save)
             display_flush();
             dirty = 0;
         }
-        int u=deb_edge(&ku, gpio_read(PIN_UP));
-        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
-        int a=deb_edge(&ka, gpio_read(PIN_A));
-        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
 
         if (u) { cur=(cur+SAVE_SLOT_COUNT+1-1)%(SAVE_SLOT_COUNT+1); dirty=1; }
         if (d) { cur=(cur+1)%(SAVE_SLOT_COUNT+1);                   dirty=1; }
@@ -341,7 +331,7 @@ static void show_slot_menu(int for_save)
 static int show_pause_menu(void)
 {
     /* Wait for Settings button release */
-    while (gpio_read(PIN_SETTINGS)) delay(10000);
+    while (btn_held(BTN_HOME)) delay(10000);
     delay(40000);
 
     const int OW = 170;
@@ -349,9 +339,9 @@ static int show_pause_menu(void)
     const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    debkey_t ku={.held=gpio_read(PIN_UP)}, kd={.held=gpio_read(PIN_DOWN)};
-    debkey_t ka={.held=gpio_read(PIN_A)},  kb={.held=gpio_read(PIN_B)};
-    debkey_t ks={.held=gpio_read(PIN_SETTINGS)};
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)}, kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)},  kb={.held=btn_held(AKIRA_BTN_Y)};
+    debkey_t ks={.held=btn_held(BTN_HOME)};
 
     while (1) {
         if (dirty) {
@@ -371,11 +361,11 @@ static int show_pause_menu(void)
             }
             dirty = 0;
         }
-        int s=deb_edge(&ks, gpio_read(PIN_SETTINGS));
-        int u=deb_edge(&ku, gpio_read(PIN_UP));
-        int d=deb_edge(&kd, gpio_read(PIN_DOWN));
-        int a=deb_edge(&ka, gpio_read(PIN_A));
-        int b=deb_edge(&kb, gpio_read(PIN_B));
+        int s=deb_edge(&ks, btn_held(BTN_HOME));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
 
         if (s) return MENU_RESUME;
         if (u) { cur=(cur+MENU_COUNT-1)%MENU_COUNT; dirty=1; }
@@ -389,21 +379,6 @@ static int show_pause_menu(void)
         if (b) return MENU_RESUME;
         delay(16667);
     }
-}
-
-/* ── GPIO setup ──────────────────────────────────────────────────────── */
-static void init_gpio(void)
-{
-    int flags = GPIO_INPUT | GPIO_PULL_DOWN;
-    gpio_configure(PIN_UP,       flags);
-    gpio_configure(PIN_DOWN,     flags);
-    gpio_configure(PIN_LEFT,     flags);
-    gpio_configure(PIN_RIGHT,    flags);
-    gpio_configure(PIN_A,        flags);
-    gpio_configure(PIN_B,        flags);
-    gpio_configure(PIN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
-    gpio_configure(PIN_X,        flags);
-    gpio_configure(PIN_Y,        flags);
 }
 
 /* ── Animated boot screen ─────────────────────────────────────────────── */
@@ -460,7 +435,6 @@ int main(void)
 {
     printf("AkiraOS SMS Emulator\n");
 
-    init_gpio();
     load_settings();
     init_display_geometry();
 
@@ -478,7 +452,7 @@ int main(void)
     draw_border();
     display_flush();
 
-    debkey_t k_settings = { .held = gpio_read(PIN_SETTINGS) };
+    debkey_t k_settings = { .held = btn_held(BTN_HOME) };
     int frame_count = 0;
 
     printf("[SMS] Init OK — entering main loop\n");
@@ -488,18 +462,18 @@ int main(void)
     while (1) {
         /* ── Read input ─────────────────────────────────────────────── */
         uint8_t btns = 0;
-        if (gpio_read(PIN_UP))    btns |= SMS_BTN_UP;
-        if (gpio_read(PIN_DOWN))  btns |= SMS_BTN_DOWN;
-        if (gpio_read(PIN_LEFT))  btns |= SMS_BTN_LEFT;
-        if (gpio_read(PIN_RIGHT)) btns |= SMS_BTN_RIGHT;
-        if (gpio_read(PIN_A))     btns |= SMS_BTN_1;
-        if (gpio_read(PIN_B))     btns |= SMS_BTN_2;
-        if (gpio_read(PIN_Y))     btns |= SMS_BTN_START;  /* Pause/NMI */
+        if (btn_held(AKIRA_BTN_UP))    btns |= SMS_BTN_UP;
+        if (btn_held(AKIRA_BTN_DOWN))  btns |= SMS_BTN_DOWN;
+        if (btn_held(AKIRA_BTN_LEFT))  btns |= SMS_BTN_LEFT;
+        if (btn_held(AKIRA_BTN_RIGHT)) btns |= SMS_BTN_RIGHT;
+        if (btn_held(AKIRA_BTN_A))     btns |= SMS_BTN_1;
+        if (btn_held(AKIRA_BTN_Y))     btns |= SMS_BTN_2;
+        if (btn_held(AKIRA_BTN_X))     btns |= SMS_BTN_START;  /* Pause/NMI */
 
         sms_set_buttons(&sms, 0, btns);
 
         /* ── Pause menu (debounced rising edge) ───────────────────── */
-        if (deb_edge(&k_settings, gpio_read(PIN_SETTINGS))) {
+        if (deb_edge(&k_settings, btn_held(BTN_HOME))) {
             int choice = show_pause_menu();
             if (choice == MENU_EXIT) {
                 app_switch("supervisor");

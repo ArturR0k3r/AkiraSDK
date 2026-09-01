@@ -1,9 +1,0 @@
-{
-  "name": "tilt_racer",
-  "display_name": "Tilt Racer",
-  "version": "1.0.0",
-  "description": "Motion game controller — tilt steers the analog stick and buttons map to gamepad buttons over USB HID. Turn the console into a racing wheel.",
-  "capabilities": ["display.write", "input.read", "sensor.read", "hid"],
-  "memory_quota": 65536,
-  "min_akiraos_version": "1.5.0"
-}

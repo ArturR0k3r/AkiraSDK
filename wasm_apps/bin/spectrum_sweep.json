@@ -1,9 +1,0 @@
-{
-  "name": "spectrum_sweep",
-  "display_name": "Spectrum Sweep",
-  "version": "1.0.0",
-  "description": "Sub-GHz RF spectrum analyzer — sweeps an ISM band on the CC1121 and plots RSSI per channel with peak-hold.",
-  "capabilities": ["display.write", "input.read", "rf.transceive"],
-  "memory_quota": 65536,
-  "min_akiraos_version": "1.6.0"
-}

@@ -1,7 +1,0 @@
-{
-  "name": "wifi_deauth_watch",
-  "version": "1.0.0",
-  "capabilities": ["display.write", "input.read", "rf.transceive", "wifi.inject", "rtc.read", "app.switch"],
-  "memory_quota": 131072,
-  "min_akiraos_version": "1.6.0"
-}

@@ -36,7 +36,7 @@ static int32_t SCR_H = 240;
 #define MAX_LEVEL               15
 #define SOFT_DROP_DELAY       8000   /* µs per cell while DOWN held */
 
-/* ── Button pins (akiraconsole, active-HIGH, pull-down) ──────────────── */
+/* ── Button pins (akiraconsole) — polarity per board pull-up/down wiring ── */
 #define BTN_UP       4
 #define BTN_DOWN     5
 #define BTN_LEFT     6
@@ -607,15 +607,15 @@ int main(void)
 
     display_get_size(&SCR_W, &SCR_H);
 
-    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_LEFT,     GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_RIGHT,    GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
     gpio_configure(BTN_X,        GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_configure(BTN_Y,        GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_Y,        GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     /* Title screen — centred on screen */
     display_clear(COL_BG);

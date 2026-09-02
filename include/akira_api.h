@@ -165,12 +165,26 @@ static inline int strcmp(const char *a, const char *b) {
 }
 
 // A simple integer-to-string helper since we have no libc
-static void itoa(int value, char *ptr) {
+static inline void itoa(int value, char *ptr) {
     char temp[12];
     int i = 0;
+    unsigned int u;
     if (value == 0) { *ptr++ = '0'; *ptr = '\0'; return; }
-    if (value < 0) { *ptr++ = '-'; value = -value; }
-    while (value > 0) { temp[i++] = (value % 10) + '0'; value /= 10; }
+    if (value < 0) { *ptr++ = '-'; u = (unsigned int)(-(long)value); } else { u = (unsigned int)value; }
+    while (u > 0) { temp[i++] = (u % 10) + '0'; u /= 10; }
+    while (i > 0) { *ptr++ = temp[--i]; }
+    *ptr = '\0';
+}
+
+// Unsigned in an arbitrary base (8/10/16).  Takes 64 bits so that %llu/%llx
+// can be printed in full — on wasm32 a long long vararg is 64 bits wide, and
+// reading only half of one would desynchronise every later conversion.
+static inline void utoa_base(unsigned long long value, char *ptr, unsigned int base, int upper) {
+    const char *digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+    char temp[24];
+    int i = 0;
+    if (value == 0) { *ptr++ = '0'; *ptr = '\0'; return; }
+    while (value > 0) { temp[i++] = digits[value % base]; value /= base; }
     while (i > 0) { *ptr++ = temp[--i]; }
     *ptr = '\0';
 }
@@ -179,10 +193,14 @@ static void itoa(int value, char *ptr) {
 void printf(const char *fmt, ...) {
     char buffer[256]; // The "baked" string buffer
     char *p = buffer;
+    /* One slot reserved for the terminator; every append is bounded against
+     * this so a long %s cannot run off the end of the stack buffer. */
+    char *const end = buffer + sizeof(buffer) - 1;
+    char scratch[24];
     va_list args;
     va_start(args, fmt);
 
-    for (const char *f = fmt; *f != '\0'; f++) {
+    for (const char *f = fmt; *f != '\0' && p < end; f++) {
         if (*f == '\n' || *f == '\r') {
             /* Skip newlines — the host logger adds its own line endings */
             continue;
@@ -192,18 +210,69 @@ void printf(const char *fmt, ...) {
             continue;
         }
         f++; // Skip '%'
+        /* Length modifiers.  On wasm32 int/long/size_t varargs are all 32 bits,
+         * so only ll (and j) widen the argument to 64. */
+        int is_ll = 0;
+        while (*f == 'l' || *f == 'h' || *f == 'z' || *f == 't' || *f == 'j') {
+            if (*f == 'j' || (*f == 'l' && f[1] == 'l')) {
+                is_ll = 1;
+            }
+            f++;
+        }
         switch (*f) {
-            case 'd': {
-                itoa(va_arg(args, int), p);
-                while (*p) p++; // Move pointer to end of number
+            case 'd':
+            case 'i': {
+                long long v = is_ll ? va_arg(args, long long) : (long long)va_arg(args, int);
+                if (v < 0) {
+                    if (p < end) *p++ = '-';
+                    utoa_base((unsigned long long)(-v), scratch, 10, 0);
+                } else {
+                    utoa_base((unsigned long long)v, scratch, 10, 0);
+                }
+                for (const char *q = scratch; *q && p < end; q++) *p++ = *q;
+                break;
+            }
+            case 'u':
+            case 'o':
+            case 'x':
+            case 'X': {
+                unsigned long long v = is_ll ? va_arg(args, unsigned long long)
+                                             : (unsigned long long)va_arg(args, unsigned int);
+                unsigned int base = (*f == 'u') ? 10u : (*f == 'o') ? 8u : 16u;
+                utoa_base(v, scratch, base, *f == 'X');
+                for (const char *q = scratch; *q && p < end; q++) *p++ = *q;
+                break;
+            }
+            case 'p': {
+                utoa_base((unsigned long long)(uintptr_t)va_arg(args, void *), scratch, 16, 0);
+                if (p < end) *p++ = '0';
+                if (p < end) *p++ = 'x';
+                for (const char *q = scratch; *q && p < end; q++) *p++ = *q;
+                break;
+            }
+            case 'c': {
+                if (p < end) *p++ = (char)va_arg(args, int);
                 break;
             }
             case 's': {
-                char *s = va_arg(args, char *);
-                while (*s) *p++ = *s++;
+                const char *s = va_arg(args, const char *);
+                if (!s) s = "(null)";
+                while (*s && p < end) *p++ = *s++;
                 break;
             }
-            default: *p++ = *f; break;
+            case '%': {
+                *p++ = '%';
+                break;
+            }
+            /* Unknown conversion: emit it literally.  The vararg it was meant
+             * to consume is deliberately left alone — guessing its width would
+             * desynchronise every later conversion in the same call. */
+            default: {
+                if (p < end) *p++ = '%';
+                if (*f == '\0') { f--; break; }
+                if (p < end) *p++ = *f;
+                break;
+            }
         }
     }
     *p = '\0';

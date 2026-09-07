@@ -539,11 +539,12 @@ int main(void)
         gb.ppu.skip_render = (uint8_t)skip;
         gb_step_frame(&gb);
         frame_count++;
-        { char pcbuf[5]; hex4(gb.cpu.pc, pcbuf);
-          printf("[GB] frame=%d pc=0x%s\n", frame_count, pcbuf); }
 
         if (!skip) {
             render_gb_frame();
+            /* See the NES core: render_gb_frame() only writes the framebuffer,
+             * so without this the display freezes and the loop spins at 100%. */
+            display_flush();
         }
     }
 

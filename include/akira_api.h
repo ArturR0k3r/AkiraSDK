@@ -2487,11 +2487,12 @@ extern int net_get_ip(char *buf, int32_t len);
  * @brief Unpack a battery status buffer filled by power_get_battery_status().
  *
  * Example:
- *   uint8_t buf[12];
+ *   uint8_t buf[16];
  *   power_get_battery_status(buf, sizeof(buf));
  *   int pct = buf[0];
  *   bool charging = buf[1] & BATT_FLAG_CHARGING;
  *   int32_t mv; memcpy(&mv, buf + 4, 4);
+ *   int32_t temp_c; memcpy(&temp_c, buf + 12, 4); // INT32_MIN = unavailable
  */
 
 /**

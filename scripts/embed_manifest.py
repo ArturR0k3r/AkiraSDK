@@ -88,6 +88,25 @@ def strip_custom_section(wasm: bytes, name: str) -> bytes:
     return bytes(out)
 
 
+# WASM ABI this SDK targets; keep in sync with include/akira_abi.h.
+AKIRA_WASM_ABI_VERSION = "1.0"
+
+
+def ensure_abi_stamp(json_data: bytes) -> bytes:
+    """Add "abi" to the manifest JSON if the app did not set one, so the runtime
+    can reject apps built for an incompatible firmware ABI."""
+    import json as _json
+
+    try:
+        obj = _json.loads(json_data)
+    except ValueError:
+        return json_data  # leave malformed JSON for the runtime to reject
+    if isinstance(obj, dict) and "abi" not in obj:
+        obj["abi"] = AKIRA_WASM_ABI_VERSION
+        return _json.dumps(obj).encode("utf-8")
+    return json_data
+
+
 def embed_manifest(wasm_path: str, json_path: str, output_path: str) -> None:
     with open(wasm_path, "rb") as f:
         wasm = f.read()
@@ -99,6 +118,8 @@ def embed_manifest(wasm_path: str, json_path: str, output_path: str) -> None:
 
     with open(json_path, "rb") as f:
         json_data = f.read()
+
+    json_data = ensure_abi_stamp(json_data)
 
     wasm = strip_custom_section(wasm, ".akira.manifest")
     section = build_custom_section(".akira.manifest", json_data)

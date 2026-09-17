@@ -31,10 +31,10 @@ static int32_t SCR_H = 240;
 #define BOARD_PX_H     (BOARD_HEIGHT * BLOCK_SIZE)
 
 /* ── Game configuration ───────────────────────────────────────────────── */
-#define INITIAL_DROP_DELAY  300000   /* 0.3 s at level 1 — noticeably brisker */
-#define MIN_DROP_DELAY       50000
+#define INITIAL_DROP_DELAY  3000000   /* 0.3 s at level 1 — noticeably brisker */
+#define MIN_DROP_DELAY       500000
 #define MAX_LEVEL               15
-#define SOFT_DROP_DELAY       8000   /* µs per cell while DOWN held */
+#define SOFT_DROP_DELAY       80000   /* µs per cell while DOWN held */
 
 /* ── Button pins (akiraconsole) — polarity per board pull-up/down wiring ── */
 #define BTN_UP       4

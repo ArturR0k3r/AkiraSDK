@@ -199,7 +199,54 @@ static void render(const char *handle, const char *name,
         draw_tbig(rx + 10, cy + 5, role, 3, COL_BG);
     }
 
+    /* Control hint — dim enough to stay out of the badge's way */
+    display_text(SCR_W / 2 - 52, SCR_H - 14, "Y:REFRESH   B:EXIT", COL_DIM);
+
     display_flush();
+}
+
+/* ── Identity ─────────────────────────────────────────────────────────── */
+static char handle[17] = "ARTUR";
+static char name[33] = "R0k3r";
+static char org[17] = "PENENGINEERING";
+static char role[17] = "CEO";
+
+/**
+ * @brief Load identity from NVS, keeping the built-in default on any miss.
+ *
+ * settings_get() leaves the buffer untouched when the key is absent
+ * (-ENOENT), so an unprovisioned badge still shows something sensible.
+ * An empty stored value is treated as "not set" for the same reason.
+ */
+static void load_identity(void)
+{
+    char tmp[33];
+
+    if (settings_get("badge/handle", tmp, sizeof(tmp)) == 0 && tmp[0])
+        for (int i = 0; i < (int)sizeof(handle); i++)
+            if ((handle[i] = tmp[i]) == '\0')
+                break;
+
+    if (settings_get("badge/name", tmp, sizeof(tmp)) == 0 && tmp[0])
+        for (int i = 0; i < (int)sizeof(name); i++)
+            if ((name[i] = tmp[i]) == '\0')
+                break;
+
+    if (settings_get("badge/org", tmp, sizeof(tmp)) == 0 && tmp[0])
+        for (int i = 0; i < (int)sizeof(org); i++)
+            if ((org[i] = tmp[i]) == '\0')
+                break;
+
+    if (settings_get("badge/role", tmp, sizeof(tmp)) == 0 && tmp[0])
+        for (int i = 0; i < (int)sizeof(role); i++)
+            if ((role[i] = tmp[i]) == '\0')
+                break;
+
+    /* Guarantee termination even if a stored value filled the buffer. */
+    handle[sizeof(handle) - 1] = '\0';
+    name[sizeof(name) - 1] = '\0';
+    org[sizeof(org) - 1] = '\0';
+    role[sizeof(role) - 1] = '\0';
 }
 
 /* ── Entry point ──────────────────────────────────────────────────────── */
@@ -207,16 +254,34 @@ int main(void)
 {
     display_get_size(&SCR_W, &SCR_H);
 
-    char handle[17] = "ARTUR";
-    char name[33] = "R0k3r";
-    char org[17] = "PENENGINEERING";
-    char role[17] = "CEO";
-
+    load_identity();
     render(handle, name, org, role);
+
+    /* A badge is a static screen: draw once, then idle on the buttons.
+     * Re-rendering every frame would pound a full-screen flush forever. */
+    uint32_t prev = (uint32_t)input_get_buttons();
+
     while (1)
     {
-        render(handle, name, org, role);
-        delay(200);
+        uint32_t held = (uint32_t)input_get_buttons();
+        uint32_t pressed = held & ~prev;
+        prev = held;
+
+        /* Y — re-read identity from settings and redraw */
+        if (AKIRA_BTN_PRESSED(pressed, AKIRA_BTN_Y))
+        {
+            load_identity();
+            render(handle, name, org, role);
+        }
+
+        /* B — back to the launcher */
+        if (AKIRA_BTN_PRESSED(pressed, AKIRA_BTN_B))
+        {
+            app_switch("supervisor");
+            return 0;
+        }
+
+        delay(50000);
     }
 
     return 0;

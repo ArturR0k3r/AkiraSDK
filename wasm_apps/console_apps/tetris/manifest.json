@@ -5,7 +5,9 @@
     "display.write",
     "input.read",
     "gpio.read",
-    "app.switch"
+    "app.switch",
+    "crypto",
+    "rtc.read"
   ],
   "memory_quota": 131072,
   "min_akiraos_version": "1.0.0"

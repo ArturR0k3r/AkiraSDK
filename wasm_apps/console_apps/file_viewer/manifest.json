@@ -1,0 +1,14 @@
+{
+  "name": "file_viewer",
+  "display_name": "File Viewer",
+  "version": "1.0.0",
+  "description": "Browse the app sandbox and view files as a hex dump or as text, with line/page scrolling. Directories can be entered; files up to 8 KB are shown.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "fs.read",
+    "app.switch"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

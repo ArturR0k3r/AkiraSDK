@@ -1,0 +1,14 @@
+{
+  "name": "i2c_scanner",
+  "display_name": "I2C Scanner",
+  "version": "1.0.0",
+  "description": "I2C bus scanner and register poke tool — probes 0x08-0x77 on bus 0/1, names known AkiraConsole parts, hex-dumps and edits registers with a confirm-gated write.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "i2c",
+    "app.switch"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.5.0"
+}

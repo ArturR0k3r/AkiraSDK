@@ -1,0 +1,14 @@
+{
+  "name": "image_viewer",
+  "display_name": "Image Viewer",
+  "version": "1.0.0",
+  "description": "View 24-bit uncompressed BMP images from the app sandbox. Images are decoded a row at a time and scaled to fit the display.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "fs.read",
+    "app.switch"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

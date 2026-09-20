@@ -1,0 +1,15 @@
+{
+  "name": "akira_pet",
+  "display_name": "Akira Pet",
+  "version": "1.0.0",
+  "description": "A virtual pet that lives in real time: its needs decay by the wall clock (even while the console is off) via RTC + NVS. Feed, play, sleep, clean, and watch it grow through five life stages.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "settings.*",
+    "rtc.read"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.5.0"
+}

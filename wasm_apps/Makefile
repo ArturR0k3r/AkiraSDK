@@ -50,7 +50,7 @@ AOT_FLAGS_x86_64   := --target=x86_64
 # App directories by category
 GENERIC_APPS = ble_led gpio hello_world net_echo net_server storage_test
 
-CONSOLE_APPS = akira_shell compass cube3d display_test \
+CONSOLE_APPS = akira_pet akira_shell card_crawl compass cube3d display_test \
                file_viewer glasses_mystery gravity_dash i2c_scanner \
                image_viewer imu_3d imu_timer_test inclinometer \
                logic_analyzer macro_pad pixel_dungeon pixel_farmer \

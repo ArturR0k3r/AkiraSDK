@@ -1,6 +1,6 @@
-# pixel_dungeon - AkiraOS WASM Application Makefile
+# tetris - AkiraOS WASM Application Makefile
 
-APP_NAME   = pixel_dungeon
+APP_NAME   = card_crawl
 WASI_SDK  ?= /opt/wasi-sdk
 CC         = $(WASI_SDK)/bin/clang
 

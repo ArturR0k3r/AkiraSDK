@@ -166,29 +166,50 @@ static int collides(int piece, int rot, int x, int y)
     return 0;
 }
 
+/* ── Colour shading helpers (RGB565) ─────────────────────────────────── */
+static uint16_t lighten(uint16_t c, int a) {
+    int r=(c>>11)&31, g=(c>>5)&63, b=c&31;
+    r+=a; g+=a*2; b+=a; if(r>31)r=31; if(g>63)g=63; if(b>31)b=31;
+    return (uint16_t)((r<<11)|(g<<5)|b);
+}
+static uint16_t darken(uint16_t c, int a) {
+    int r=(c>>11)&31, g=(c>>5)&63, b=c&31;
+    r-=a; g-=a*2; b-=a; if(r<0)r=0; if(g<0)g=0; if(b<0)b=0;
+    return (uint16_t)((r<<11)|(g<<5)|b);
+}
+
 /* ── Draw primitives ─────────────────────────────────────────────────── */
 
-/* Solid block with bevel highlight/shadow */
+/* Glossy, gradient-shaded tetromino cell */
 static void draw_block(int bx, int by, uint16_t col)
 {
     int px = BOARD_X + bx * BLOCK_SIZE;
     int py = BOARD_Y + by * BLOCK_SIZE;
     int sz = BLOCK_SIZE - 1; /* 1px gap between blocks */
-    display_rect(px, py, sz, sz, col);
-    /* bright top-left bevel */
-    display_rect(px, py, sz - 1, 1, 0xFFFF);
-    display_rect(px, py, 1, sz - 1, 0xFFFF);
-    /* dark bottom-right shadow */
-    display_rect(px + sz - 1, py + 1, 1, sz - 1, 0x0000);
-    display_rect(px + 1, py + sz - 1, sz - 1, 1, 0x0000);
+    uint16_t hi = lighten(col, 8), hi2 = lighten(col, 4);
+    uint16_t lo = darken(col, 7),  lo2 = darken(col, 4);
+
+    /* Vertical gradient body: light top → base → dark bottom */
+    display_rect(px, py,        sz, 2,      hi2);
+    display_rect(px, py+2,      sz, sz-4,   col);
+    display_rect(px, py+sz-2,   sz, 2,      lo2);
+    /* Bevel edges */
+    display_hline(px, py, sz, hi);           /* top highlight   */
+    display_vline(px, py, sz, hi);           /* left highlight  */
+    display_hline(px, py+sz-1, sz, lo);      /* bottom shadow   */
+    display_vline(px+sz-1, py, sz, lo);      /* right shadow    */
+    /* Corner glint */
+    display_pixel(px+1, py+1, 0xFFFF);
 }
 
-/* Empty cell */
+/* Empty cell — subtle vertical gradient + grid dot for depth */
 static void draw_empty_cell(int bx, int by)
 {
     int px = BOARD_X + bx * BLOCK_SIZE;
     int py = BOARD_Y + by * BLOCK_SIZE;
-    display_rect(px, py, BLOCK_SIZE - 1, BLOCK_SIZE - 1, COL_CELL_EMPTY);
+    uint16_t base = lighten(COL_CELL_EMPTY, by/4);   /* deeper at the top */
+    display_rect(px, py, BLOCK_SIZE - 1, BLOCK_SIZE - 1, base);
+    display_pixel(px + (BLOCK_SIZE-1)/2, py + (BLOCK_SIZE-1)/2, darken(base, 2));
 }
 
 /* ── Number to string helper (no libc printf in WASM) ───────────────── */
@@ -392,18 +413,40 @@ static void lock_piece(void)
             }
 }
 
+/* Flash the completed rows white before they collapse. */
+static void flash_rows(const int *rows, int cnt)
+{
+    for (int f = 0; f < 3; f++) {
+        uint16_t c = (f & 1) ? 0xFFFF : 0xC618;
+        for (int i = 0; i < cnt; i++) {
+            int y = rows[i];
+            for (int x = 0; x < BOARD_WIDTH; x++)
+                display_rect(BOARD_X + x*BLOCK_SIZE, BOARD_Y + y*BLOCK_SIZE,
+                             BLOCK_SIZE-1, BLOCK_SIZE-1, c);
+        }
+        display_flush();
+        delay(55000);
+    }
+}
+
 static int clear_lines(void)
 {
+    /* First pass: find full rows and flash them. */
+    int full_rows[BOARD_HEIGHT], nf = 0;
+    for (int y = 0; y < BOARD_HEIGHT; y++) {
+        int full = 1;
+        for (int x = 0; x < BOARD_WIDTH; x++) if (!g.board[y][x]) { full = 0; break; }
+        if (full) full_rows[nf++] = y;
+    }
+    if (nf > 0) flash_rows(full_rows, nf);
+
+    /* Second pass: collapse them. */
     int n = 0;
     for (int y = BOARD_HEIGHT - 1; y >= 0; y--)
     {
         int full = 1;
         for (int x = 0; x < BOARD_WIDTH; x++)
-            if (!g.board[y][x])
-            {
-                full = 0;
-                break;
-            }
+            if (!g.board[y][x]) { full = 0; break; }
         if (full)
         {
             n++;

@@ -1,0 +1,14 @@
+{
+  "name": "altimeter",
+  "display_name": "Altimeter / Vario",
+  "version": "1.0.0",
+  "description": "Barometric altimeter and vario for hiking (BME280): current altitude vs a calibratable datum, smoothed vertical speed, min/max, total ascent/descent with a noise deadband, and an altitude profile sparkline.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "sensor.read"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.5.0"
+}

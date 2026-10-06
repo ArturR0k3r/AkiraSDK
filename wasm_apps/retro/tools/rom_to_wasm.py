@@ -224,7 +224,7 @@ def compile_wasm(sources, rom_data_c, output, wasi_sdk, include_dirs,
     includes = [f'-I{d}' for d in include_dirs]
 
     cmd = [
-        cc, '-O3', '-nostdlib',
+        cc, '-O3', '-flto', '-nostdlib',
         '-Wall', '-Wextra', '-Wno-unused-parameter', '-Wno-unknown-attributes',
     ] + includes + [
         '-Wl,--no-entry',

@@ -107,10 +107,12 @@ PLATFORMS = {
         'magic': None,
         'magic_offset': 0,
         'template_dir': 'snes',
-        'sources': ['main.c', 'snes.c'],
+        'sources': ['main.c', 'snes.c', 'cpu65816.c', 'ppu.c'],
         'stack_size': 16384,
-        'extra_memory': 300 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        # SNES struct ~345KB (WRAM 128K + VRAM 64K + SRAM 32K + 112KB FB + PPU/CPU state)
+        # + PPU line buffers + code/globals + headroom
+        'extra_memory': 448 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch', 'rtc.read'],
         'description': 'Super Nintendo Entertainment System',
     },
 }

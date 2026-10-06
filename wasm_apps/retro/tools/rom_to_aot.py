@@ -141,7 +141,7 @@ def build_wasm(rom_path, wasm_output, platform, name, wasi_sdk, sdk_root,
 
 
 def compile_aot(wasm_path, aot_output, wamrc, target, cpu, opt_level,
-                size_level, verbose=False):
+                size_level, verbose=False, bounds_checks=True):
     """Stage 2: WASM → AOT via wamrc."""
     cmd = [
         wamrc,
@@ -150,6 +150,7 @@ def compile_aot(wasm_path, aot_output, wamrc, target, cpu, opt_level,
         f'--opt-level={opt_level}',
         f'--size-level={size_level}',
         '--emit-custom-sections=.akira.manifest',
+    ] + ([] if bounds_checks else ['--bounds-checks=0']) + [
         '-o', aot_output,
         wasm_path,
     ]
@@ -212,6 +213,10 @@ def main():
                         help='AOT target CPU (default: esp32s3)')
     parser.add_argument('--opt-level', type=int, default=3, choices=[0,1,2,3],
                         help='Optimization level (default: 3)')
+    parser.add_argument('--no-bounds-checks', action='store_true',
+                        help='UNSAFE: drop wasm software bounds checks (much faster on '
+                             'xtensa, but an out-of-range access hits real RAM). Only for '
+                             'trusted, tested emulator cores.')
     parser.add_argument('--size-level', type=int, default=0, choices=[0,1,2,3],
                         help='Code model: 0=large,1=medium,2=kernel,3=small (default: 0)')
     parser.add_argument('--keep-wasm', action='store_true',
@@ -265,7 +270,8 @@ def main():
         # Stage 2: WASM → AOT
         aot_tmp = os.path.join(build_dir, f'{rom_name}.aot')
         compile_aot(wasm_path, aot_tmp, wamrc, args.target, args.cpu,
-                    args.opt_level, args.size_level, verbose)
+                    args.opt_level, args.size_level, verbose,
+                    bounds_checks=not args.no_bounds_checks)
 
         shutil.copy(aot_tmp, output_aot)
         aot_size, has_manifest = verify_aot(output_aot, verbose)

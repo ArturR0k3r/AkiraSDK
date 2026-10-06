@@ -469,6 +469,20 @@ extern int display_raw_write(int32_t x, int32_t y, int32_t w, int32_t h,
                               const uint16_t *data, uint32_t data_size);
 
 /**
+ * @brief Like display_raw_write() but returns immediately: the SPI transfer runs on a
+ *        system work queue while the app keeps going.
+ *
+ * The buffer must not be modified until display_raw_wait() returns. At most one
+ * transfer is in flight; a second call blocks until the first has finished.
+ * Requires the same capability as display_raw_write().
+ */
+extern int display_raw_write_async(int32_t x, int32_t y, int32_t w, int32_t h,
+                                   const uint16_t *data, uint32_t data_size);
+
+/** @brief Block until the last display_raw_write_async() transfer has completed. */
+extern int display_raw_wait(void);
+
+/**
  * @brief Blit an RGB565 bitmap with a transparent colour key.
  *
  * Pixels whose value equals @p key are not written to the framebuffer.

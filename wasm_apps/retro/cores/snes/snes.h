@@ -152,3 +152,5 @@ uint8_t ppu_read(SNES *s, uint16_t reg);
 void    ppu_write(SNES *s, uint16_t reg, uint8_t v);
 void    ppu_render_line(SNES *s, int y);
 void    ppu_vblank_start(SNES *s);
+void    ppu_set_colormath(int on);   /* 0 = skip colour maths (faster, not exact) */
+void    ppu_invalidate(void);        /* call after replacing PPU/VRAM state wholesale */

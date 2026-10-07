@@ -12,15 +12,22 @@
 #include "snes.h"
 
 /* ── Register access ─────────────────────────────────────────────────── */
-/* Inexact speed-ups (0 = bit-exact reference). 1: draw odd lines as a copy of the line above
- * (half vertical resolution). 2: ignore colour maths (no translucency). */
-#ifndef SNES_APPROX
-#define SNES_APPROX 2
-#endif
+static int cm_on = 1;      /* colour maths enabled: off skips translucency for speed (not bit-exact) */
 static int pal_br = -1;     /* brightness pal565[] was built for; -1 = stale */
 static uint32_t spread[256]; /* plane byte -> one bit per nibble, leftmost pixel in nibble 0 */
 static int spr_dirty = 1;   /* OAM changed: decoded sprite table is stale */
 static struct { uint32_t ver; uint16_t key; uint8_t ty; int8_t blank; } bc[4];   /* bg_blank() cache */
+
+void ppu_set_colormath(int on) { cm_on = on; }
+
+/* Drop every cache keyed on PPU state (after the whole machine state is replaced). */
+void ppu_invalidate(void)
+{
+    int i;
+    pal_br = -1;
+    spr_dirty = 1;
+    for (i = 0; i < 4; i++) bc[i].blank = -1;
+}
 
 void ppu_reset(PPU *p)
 {
@@ -527,9 +534,6 @@ void ppu_render_line(SNES *s, int y)
     int x, bg, br = p->inidisp & 15, complex_, cw_active, sub_ready;
     uint32_t fixx;
 
-#if SNES_APPROX & 1
-    if (y & 1) { memcpy(dst, dst - SNES_W, SNES_W * 2); return; }
-#endif
     if (p->inidisp & 0x80) { memset(dst, 0, SNES_W * 2); return; }
 
     setup_rank(p);
@@ -556,10 +560,7 @@ void ppu_render_line(SNES *s, int y)
     compose(p->tm, p->tmw, mainz);
     if (pal_br != br) build_pal565(p, br);
 
-    complex_ = (p->cgadsub & 0x3F) || (p->cgwsel & 0xC0);
-#if SNES_APPROX & 2
-    complex_ = 0;
-#endif
+    complex_ = cm_on && ((p->cgadsub & 0x3F) || (p->cgwsel & 0xC0));
     if (!complex_) {
         for (x = 0; x < SNES_W; x++) dst[x] = pal565[mainz[x] & 0xFF];
         return;

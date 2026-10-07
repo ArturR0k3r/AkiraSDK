@@ -112,7 +112,8 @@ PLATFORMS = {
         # SNES struct ~345KB (WRAM 128K + VRAM 64K + SRAM 32K + 112KB FB + PPU/CPU state)
         # + PPU line buffers + code/globals + headroom
         'extra_memory': 448 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch', 'rtc.read'],
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch', 'rtc.read',
+                          'storage.read', 'storage.write'],
         'description': 'Super Nintendo Entertainment System',
     },
 }

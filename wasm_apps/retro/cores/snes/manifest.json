@@ -5,7 +5,10 @@
     "display.write",
     "input.read",
     "app.switch",
-    "rtc.read"
+    "rtc.read",
+    "storage.read",
+    "storage.write",
+    "settings.*"
   ],
   "memory_quota": 524288
 }

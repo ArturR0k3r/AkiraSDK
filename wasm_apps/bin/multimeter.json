@@ -1,0 +1,15 @@
+{
+  "name": "multimeter",
+  "display_name": "Multimeter",
+  "version": "1.0.0",
+  "description": "ADC voltage read-out: big volts figure, raw sample, min/max/avg, HOLD and a rolling trace. L/R picks the ADC channel.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "adc",
+    "app.switch"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "gpio_explorer",
+  "display_name": "GPIO Explorer",
+  "version": "1.0.0",
+  "description": "Bench tool: scroll the ESP32-S3 GPIO map, watch input levels live, and drive outputs. Flash/PSRAM/USB/UART and the console buttons are locked so it can't brick the device.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "gpio.write",
+    "app.switch"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
+}

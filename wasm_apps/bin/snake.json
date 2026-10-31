@@ -1,0 +1,17 @@
+{
+  "name": "snake",
+  "display_name": "Snake",
+  "version": "1.0.0",
+  "description": "Classic snake: eat apples, grow longer, don't bite yourself or hit a wall. Speed ramps with every apple; best score saved to NVS. Hold A to dash.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "app.switch",
+    "settings.*",
+    "crypto",
+    "rtc.read"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

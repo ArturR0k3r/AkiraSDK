@@ -1,0 +1,15 @@
+{
+  "name": "nfc_toolkit",
+  "display_name": "NFC Toolkit",
+  "version": "1.0.0",
+  "description": "Program the console's dynamic NFC tag: UID + live RF-field, NDEF URL/Text writer (tap-to-open), memory hex viewer, reader-tap monitor, erase. Tag-side only (needs an ST25DV board); not an external-tag reader.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "app.switch",
+    "nfc"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

@@ -1,0 +1,13 @@
+{
+    "name": "rf_mapper",
+    "version": "1.0.0",
+    "author": "Akira Security Lab",
+    "capabilities": [
+        "rf.transceive",
+        "display.write",
+        "timer",
+        "gpio.read"
+    ],
+    "memory_quota": 65536,
+    "description": "RSSI heatmap mapper for sub-GHz and Wi-Fi bands"
+}

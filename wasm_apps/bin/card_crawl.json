@@ -1,0 +1,16 @@
+{
+  "name": "card_crawl",
+  "display_name": "Card Crawl",
+  "version": "1.0.0",
+  "description": "A Slay-the-Spire-style roguelite deckbuilder: turn-based card battles over a branching node map, with block/vulnerable/weak/poison/strength, relics, elites and a boss. Best floor saved to NVS.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "settings.*",
+    "crypto",
+    "rtc.read"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

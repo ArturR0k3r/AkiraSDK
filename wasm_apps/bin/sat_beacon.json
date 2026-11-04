@@ -1,0 +1,7 @@
+{
+  "name": "sat_beacon",
+  "version": "1.0.0",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "gpio.read"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

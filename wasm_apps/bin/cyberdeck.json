@@ -1,0 +1,20 @@
+{
+  "name": "cyberdeck",
+  "display_name": "Cyberdeck HUD",
+  "version": "1.2.0",
+  "description": "All-systems status dashboard (4 pages): RTC clock, battery, network/IP, BLE scope, Wi-Fi channels, LR2021/CC1121 sub-GHz radios, BME280 environment (temp/humidity/pressure/altitude), IMU level, NFC field, power mode and uptime.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "rtc.read",
+    "power.read",
+    "network.read",
+    "ble.scan",
+    "rf.transceive",
+    "sensor.read",
+    "nfc"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

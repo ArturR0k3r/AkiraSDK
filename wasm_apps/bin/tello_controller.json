@@ -1,0 +1,9 @@
+{
+  "name": "tello_controller",
+  "display_name": "Tello Controller",
+  "version": "1.0.0",
+  "description": "BLE HID gamepad for Tello drone. IMU tilt controls pitch+roll, D-pad controls throttle+yaw. A=takeoff, B=land.",
+  "capabilities": ["display.write", "gpio.read", "sensor.read", "hid"],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.5.0"
+}

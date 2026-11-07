@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "akira-dev"
+version = "1.6.7"
+description = "AkiraOS developer CLI — scaffold, build, deploy and manage WASM apps"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AkiraOS Contributors" }]
+keywords = ["akiraos", "wasm", "embedded", "webassembly", "esp32"]
+
+# Pure-stdlib core (urllib). mDNS discovery (`akira devices`) uses zeroconf when the
+# `mdns` extra is installed; without it, pass --device explicitly.
+dependencies = []
+
+[project.optional-dependencies]
+mdns = ["zeroconf>=0.131"]
+
+[project.scripts]
+akira = "akira.cli:main"
+
+[project.urls]
+Homepage = "https://akiraos.dev"
+Repository = "https://github.com/ArturR0k3r/AkiraSDK"
+Documentation = "https://docs.akiraos.dev"
+
+[tool.setuptools]
+packages = ["akira"]
+
+[tool.setuptools.package-data]
+akira = ["templates/**/*"]

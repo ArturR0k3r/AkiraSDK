@@ -1,0 +1,18 @@
+[package]
+name = "__APP_NAME__"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/main.rs"
+
+[dependencies]
+akira_sdk = { git = "https://github.com/ArturR0k3r/AkiraSDK", branch = "v1.6.x" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true

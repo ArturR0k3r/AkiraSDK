@@ -1,0 +1,7 @@
+{
+  "name": "__APP_NAME__",
+  "version": "0.1.0",
+  "capabilities": ["display.write"],
+  "memory_quota": 262144,
+  "min_akiraos_version": "1.6.0"
+}

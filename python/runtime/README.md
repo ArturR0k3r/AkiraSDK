@@ -5,16 +5,11 @@ This directory holds the prebuilt `micropython.wasm` binary used by
 
 ## Obtaining micropython.wasm
 
-### Option 1 — Download the prebuilt binary (recommended)
+### Option 1 — Download a prebuilt binary
 
-Check the AkiraOS releases page for a prebuilt `micropython.wasm` that includes
-the `_akira` native C module:
-
-```
-https://github.com/AkiraOS/AkiraOS/releases
-```
-
-Place the downloaded file here as `micropython.wasm`.
+No AkiraOS or AkiraSDK release ships `micropython.wasm` yet. When one does, it will be
+attached to <https://github.com/ArturR0k3r/AkiraOS/releases>; place it here as
+`micropython.wasm`.
 
 ### Option 2 — Build from source
 

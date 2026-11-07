@@ -6,10 +6,10 @@
 ![WASM](https://img.shields.io/badge/WASM-Ready-purple?style=for-the-badge)
 ![IoT](https://img.shields.io/badge/IoT-Powered-green?style=for-the-badge)
 ![C](https://img.shields.io/badge/Lang-C-lightgrey?style=for-the-badge)
-![Rust](https://img.shields.io/badge/Lang-Rust-orange?style=for-the-badge)
-![Python](https://img.shields.io/badge/Lang-Python-blue?style=for-the-badge)
+![Rust](https://img.shields.io/badge/Lang-Rust_(experimental)-orange?style=for-the-badge)
+![MicroPython](https://img.shields.io/badge/Lang-MicroPython_(experimental)-blue?style=for-the-badge)
 
-**Build embedded WebAssembly applications for AkiraOS** — in C, Rust, or Python
+**Build embedded WebAssembly applications for AkiraOS** — in C, with experimental Rust and MicroPython support
 
 [API Reference](docs/API_REFERENCE.md) • [Rust Guide](docs/RUST_GUIDE.md) • [Python Guide](docs/PYTHON_GUIDE.md) • [Best Practices](docs/BEST_PRACTICES.md) • [Troubleshooting](docs/TROUBLESHOOTING.md) • [Sample Apps](wasm_apps/)
 
@@ -28,7 +28,7 @@ for the MicroPython heap).
 
 ### Features
 
-- **Languages** — C (WASI SDK), **Rust** (`cargo`), **Python** (MicroPython WASM)
+- **Languages** — C (WASI SDK, supported); Rust (`cargo`) and MicroPython are experimental — see [language support](https://docs.akiraos.dev/development/building-apps.html#language-support)
 - **Display** — RGB565 graphics: shapes, text (two sizes), bitmaps, progress bars, rounded rects
 - **GPIO** — Simple read/write with configurable pull-ups/pull-downs
 - **Sensors** — IMU, temperature, pressure, humidity, magnetometer, power monitoring
@@ -57,7 +57,7 @@ AkiraSDK/
 ├── python/
 │   ├── akira.py           # Python API wrapper (import akira)
 │   ├── runtime/
-│   │   └── micropython.wasm   # Prebuilt MicroPython + _akira module
+│   │   └── README.md          # How to get micropython.wasm (not shipped yet)
 │   └── apps/
 │       └── hello_world/   # Python hello_world template
 ├── scripts/

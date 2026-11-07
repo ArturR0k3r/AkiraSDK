@@ -108,3 +108,6 @@ build_nrf53/
 *.wasm
 # MicroPython build output (stray gitlink caused recursive submodule checkout to fail)
 python/runtime/_build/
+
+# Cargo build output
+target/

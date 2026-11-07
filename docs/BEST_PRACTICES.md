@@ -455,7 +455,7 @@ Keep using `.wasm` during development (faster iteration, architecture-independen
 | Build time | Fast | Adds wamrc step |
 | Debug iteration | Best | Rebuild .wasm first, then re-AOT |
 | Target portability | Single binary runs everywhere | One `.aot` per CPU |
-| Execution speed | Baseline | 10–50× faster |
+| Execution speed | Baseline (WAMR classic interpreter) | Faster; ratio [not yet measured](https://docs.akiraos.dev/resources/performance.html#webassembly-execution-speed) |
 | File per deployment | `app.wasm` | `app-xtensa.aot` (board-specific) |
 
 ### AOT workflow

@@ -277,14 +277,14 @@ that executes directly on the target CPU.
 | | `.wasm` (Interpreter) | `.aot` (AOT) |
 |---|---|---|
 | Execution | WAMR interprets bytecode | Native machine code |
-| Speed | Baseline | **10–50× faster** |
+| Speed | Baseline (WAMR classic interpreter) | Faster; ratio [not yet measured](https://docs.akiraos.dev/resources/performance.html#webassembly-execution-speed) |
 | Portability | Runs on any AkiraOS target | One `.aot` per architecture |
 | Use case | Development, testing, all targets | Compute-heavy apps, games, UI |
 | File required | `app.wasm` | `app-<target>.aot` |
 
 ### When to use AOT
 
-- **Games / 3D rendering** (cube3d, tetris, imu_3d) — clear benefit from native speed
+- **Games / 3D rendering** (cube3d, tetris, imu_3d) — tight loops gain the most from machine code
 - **Signal processing / math-heavy apps** — interpreter overhead eliminated
 - **Battery-sensitive deployments** — fewer cycles per instruction
 - Keep using `.wasm` for development iteration and multi-target deployments

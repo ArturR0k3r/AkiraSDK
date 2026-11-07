@@ -1,0 +1,11 @@
+{
+  "name": "rgb_controller",
+  "version": "1.0.0",
+  "description": "BLE-controlled PWM RGB LED (GPIO4/5/6)",
+  "capabilities": [
+    "ble",
+    "pwm"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.0.0"
+}

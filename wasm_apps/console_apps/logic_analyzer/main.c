@@ -1,0 +1,318 @@
+/*
+ * Copyright (c) 2026 PenEngineering S.R.L
+* SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file logic_analyzer.c
+ * @brief 4-channel GPIO logic analyzer — real-time scrolling waveform
+ *
+ * Probe channels (floating/external signal input):
+ *   CH1 → GPIO42   CH2 → GPIO21   CH3 → GPIO20   CH4 → GPIO19
+ *
+ * Controls (akiraconsole buttons, active-HIGH, pull-down):
+ *   UP (4)                  increase sample rate
+ *   DOWN (5)                decrease sample rate
+ *   A (15) / B (16)         pause / resume capture
+ *   SETTINGS (2)            pause / resume capture
+ */
+
+#include "akira_api.h"
+#include "../../common/akira_ui.h"
+
+/* ── Probe pins ──────────────────────────────────────────────────────── */
+#define CH_COUNT  4
+static const uint32_t CH_PIN[CH_COUNT] = { 42, 21, 20, 19 };
+
+/* ── Button pins (akiraconsole, active-HIGH, pull-down) ──────────────── */
+#define BTN_UP       4
+#define BTN_DOWN     5
+#define BTN_A        15
+#define BTN_B        16
+#define BTN_SETTINGS 0    /* BTN.OK = GPIO0, active-low pull-up */
+
+/* ── Display geometry (set at startup via display_get_size) ──────────── *
+ *   Header bar   (title + rate + status)
+ *   Channels     (4 rows)
+ *   Footer       (controls hint)
+ *   Label column (channel name, level, pin)
+ *   Waveform area (remaining width, 1 sample per pixel column)
+ * ─────────────────────────────────────────────────────────────────────── */
+static int32_t SCR_W = 320;
+static int32_t SCR_H = 240;
+static int32_t HDR_H;
+static int32_t FTR_H;
+static int32_t LBL_W;
+static int32_t WAVE_X;
+static int32_t WAVE_W;
+static int32_t WAVE_Y;
+static int32_t CHART_H;
+static int32_t CH_H;
+
+/* y-offsets from the top of a CH_H row (fractions of row height) */
+static int32_t Y_HI;   /* top of HIGH signal bar  */
+static int32_t Y_LO;   /* top of LOW  signal bar  */
+#define BAR_T   2   /* signal bar thickness    */
+static int32_t Y_MID;  /* dotted centre reference */
+
+/* ── Colours ─────────────────────────────────────────────────────────── */
+#define COL_BG      0x0000
+#define COL_HDR     0x000F   /* navy                   */
+#define COL_FTR     0x0009   /* dark navy              */
+#define COL_TITLE   0x07FF   /* cyan                   */
+#define COL_LABEL   COLOR_WHITE
+#define COL_VALUE   0xFFFF   /* white                  */
+#define COL_GRID    0x18C3   /* dark guide dots        */
+#define COL_SEP     0x2945   /* separator lines        */
+#define COL_CURSOR  0x3186   /* write-cursor column    */
+#define COL_PAUSED  0xFFE0   /* yellow PAUSED notice   */
+#define COL_HINT    0x4208   /* footer hint text       */
+
+static const uint16_t CH_COLOR[CH_COUNT] = {
+    COLOR_WHITE,
+    COLOR_WHITE,
+    COLOR_WHITE,
+    COLOR_WHITE,
+};
+
+/* ── Sample ring buffer ──────────────────────────────────────────────── *
+ * One entry per screen pixel column (max buffer width, capped at wave_w).
+ * wr  = index of the column that will receive the NEXT sample.
+ * prv = last displayed level per channel (used for transition drawing).
+ * ─────────────────────────────────────────────────────────────────────── */
+#define BUF_W  272   /* max samples; plain literal required for array decl */
+
+static uint8_t  smp[CH_COUNT][BUF_W];
+static uint8_t  prv[CH_COUNT];
+static int      wr      = 0;
+static int      paused  = 0;
+static int32_t  wave_w  = BUF_W;   /* active columns, min(WAVE_W, BUF_W) */
+
+/* ── Sample rate ─────────────────────────────────────────────────────── */
+static const uint32_t RATE_US[] = {
+    100, 200, 500, 1000, 2000, 5000, 10000, 20000
+};
+static const char *RATE_STR[] = {
+    "100us", "200us", "500us", "1ms", "2ms", "5ms", "10ms", "20ms"
+};
+#define N_RATES 8
+static int rate_idx = 3;   /* default: 1 ms / 1 kHz */
+
+/* ── Button edge state ───────────────────────────────────────────────── */
+static int pup = 0, pdn = 0, pa = 0, pb = 0, pcfg = 0;
+
+/* ── Helpers ─────────────────────────────────────────────────────────── */
+static int ch_y(int ch) { return WAVE_Y + ch * CH_H; }
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+static void draw_header(void) {
+    /* Shared chrome: kit status bar (spans real display via get_size). Rate +
+     * paused flag ride the right-aligned status slot. */
+    char right[24];
+    int p = 0;
+    for (const char *rs = RATE_STR[rate_idx]; *rs; rs++) right[p++] = *rs;
+    if (paused) {
+        for (const char *ps = " PAUSED"; *ps; ps++) right[p++] = *ps;
+    }
+    right[p] = '\0';
+    akira_ui_status_t sb = {
+        .title = "LOGIC ANALYZER",
+        .clock = right,
+        .battery_pct = -1,
+    };
+    akira_ui_status_bar(&sb);
+}
+
+/* Live header sub-updates now redraw the whole kit bar (still no flush; the
+ * caller flushes). */
+static void update_header_rate(void)   { draw_header(); }
+static void update_header_status(void) { draw_header(); }
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+static void draw_footer(void) {
+    display_rect(0, SCR_H - FTR_H, SCR_W, FTR_H, COL_FTR);
+    display_text(4, SCR_H - FTR_H + 5,
+                 "UP:FASTER  DN:SLOWER  A/B/SET:PAUSE", COL_HINT);
+}
+
+/* ── Grid (drawn once at startup) ────────────────────────────────────── */
+static void draw_grid(void) {
+    for (int ch = 0; ch < CH_COUNT; ch++) {
+        int y = ch_y(ch);
+        display_rect(0, y, SCR_W, 1, COL_SEP);
+        for (int x = WAVE_X; x < SCR_W; x += 32)
+            display_rect(x, y + Y_MID, 2, 1, COL_GRID);
+    }
+    display_rect(0, ch_y(CH_COUNT), SCR_W, 1, COL_SEP);
+    display_rect(LBL_W - 1, WAVE_Y, 1, CHART_H, COL_SEP);
+}
+
+/* ── Channel label ───────────────────────────────────────────────────── */
+static const char *ch_name[CH_COUNT] = { "CH1", "CH2", "CH3", "CH4" };
+static const char *ch_pin [CH_COUNT] = { "G42", "G21", "G20", "G19" };
+
+static void draw_label(int ch, int level) {
+    int y = ch_y(ch);
+    display_rect(0, y + 1, LBL_W - 2, CH_H - 2, COL_BG);
+    display_text(2, y + CH_H * 10 / 100, ch_name[ch],         CH_COLOR[ch]);
+    display_text(2, y + CH_H * 38 / 100, level ? " H" : " L", COL_LABEL);
+    display_text(2, y + CH_H * 66 / 100, ch_pin[ch],           COL_LABEL);
+}
+
+/* ── Waveform column ─────────────────────────────────────────────────── *
+ * draw_cursor = 1  →  paint the write-cursor marker (no signal drawn)
+ * draw_cursor = 0  →  paint the actual sample (signal + transition)
+ * ─────────────────────────────────────────────────────────────────────── */
+static void draw_col(int col, int draw_cursor) {
+    int sx = WAVE_X + col;
+
+    for (int ch = 0; ch < CH_COUNT; ch++) {
+        int yt = ch_y(ch);
+
+        /* Clear channel column */
+        display_rect(sx, yt + 1, 1, CH_H - 2, COL_BG);
+
+        /* Restore guide dot if this falls on a grid boundary */
+        if ((col & 31) == 0)
+            display_rect(sx, yt + Y_MID, 1, 1, COL_GRID);
+
+        if (draw_cursor) {
+            display_rect(sx, yt + 2, 1, CH_H - 4, COL_CURSOR);
+        } else {
+            int level = (int)smp[ch][col];
+            int prev  = (int)prv[ch];
+            uint16_t c = CH_COLOR[ch];
+
+            /* Vertical transition connector */
+            if (level != prev) {
+                int y1 = yt + (prev  ? Y_HI : Y_LO) + BAR_T / 2;
+                int y2 = yt + (level ? Y_HI : Y_LO) + BAR_T / 2;
+                if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
+                display_rect(sx, y1, 1, y2 - y1 + 1, c);
+            }
+
+            /* Horizontal signal bar */
+            display_rect(sx, yt + (level ? Y_HI : Y_LO), 1, BAR_T, c);
+        }
+    }
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+static void handle_buttons(void) {
+    int up  = gpio_read(BTN_UP);
+    int dn  = gpio_read(BTN_DOWN);
+    int a   = gpio_read(BTN_A);
+    int b   = gpio_read(BTN_B);
+    int cfg = gpio_read(BTN_SETTINGS);
+
+    if (up && !pup && rate_idx > 0) {
+        rate_idx--;
+        update_header_rate();
+        display_flush();
+    }
+    if (dn && !pdn && rate_idx < N_RATES - 1) {
+        rate_idx++;
+        update_header_rate();
+        display_flush();
+    }
+    if ((a && !pa) || (b && !pb) || (cfg && !pcfg)) {
+        paused = !paused;
+        update_header_status();
+        display_flush();
+    }
+
+    pup = up; pdn = dn; pa = a; pb = b; pcfg = cfg;
+}
+
+/* ── Init ────────────────────────────────────────────────────────────── */
+static void init_geometry(void) {
+    HDR_H   = SCR_H * 8 / 100;
+    FTR_H   = SCR_H * 9 / 100;
+    LBL_W   = SCR_W * 15 / 100;
+    WAVE_X  = LBL_W;
+    WAVE_Y  = HDR_H;
+    CHART_H = SCR_H - HDR_H - FTR_H;
+    CH_H    = CHART_H / CH_COUNT;
+    WAVE_W  = SCR_W - LBL_W;
+    wave_w  = WAVE_W < BUF_W ? WAVE_W : BUF_W;
+
+    Y_HI  = CH_H * 20 / 100;
+    Y_LO  = CH_H * 76 / 100;
+    Y_MID = CH_H * 48 / 100;
+}
+
+static void init_gpio(void) {
+    for (int ch = 0; ch < CH_COUNT; ch++)
+        gpio_configure(CH_PIN[ch], GPIO_INPUT | GPIO_PULL_DOWN);
+
+    gpio_configure(BTN_UP,       GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_DOWN,     GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_A,        GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_B,        GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
+}
+
+static void init_screen(void) {
+    display_clear(COL_BG);
+    draw_header();
+    draw_grid();
+    draw_footer();
+
+    for (int ch = 0; ch < CH_COUNT; ch++) {
+        prv[ch] = 0;
+        draw_label(ch, 0);
+        for (int i = 0; i < wave_w; i++) smp[ch][i] = 0;
+    }
+
+    /* Draw initial flat LOW waveform */
+    for (int col = 0; col < wave_w; col++)
+        draw_col(col, 0);
+
+    /* Show cursor at write position 0 */
+    draw_col(0, 1);
+    display_flush();
+}
+
+/* ── Entry point ─────────────────────────────────────────────────────── */
+int main(void) {
+    printf("AkiraOS Logic Analyzer v2.0");
+
+    display_get_size(&SCR_W, &SCR_H);
+    init_geometry();
+    init_gpio();
+    init_screen();
+
+    while (1) {
+        handle_buttons();
+
+        if (!paused) {
+            /* 1. Sample */
+            for (int ch = 0; ch < CH_COUNT; ch++)
+                smp[ch][wr] = (uint8_t)gpio_read(CH_PIN[ch]);
+
+            /* 2. Draw new column (uses prv[] for transition detection) */
+            draw_col(wr, 0);
+
+            /* 3. Update labels + prv[] for channels that changed */
+            for (int ch = 0; ch < CH_COUNT; ch++) {
+                if (smp[ch][wr] != prv[ch]) {
+                    prv[ch] = smp[ch][wr];
+                    draw_label(ch, prv[ch]);
+                }
+            }
+
+            /* 4. Advance write pointer */
+            wr = (wr + 1) % wave_w;
+
+            /* 5. Mark next write position with cursor */
+            draw_col(wr, 1);
+
+            display_flush();
+            delay(RATE_US[rate_idx]);
+        } else {
+            delay(20000);  /* poll at ~50 Hz while paused */
+        }
+    }
+
+    return 0;
+}

@@ -1,0 +1,11 @@
+{
+  "name": "matter_rgb",
+  "version": "1.0.0",
+  "description": "Expose the PWM RGB LED as a Matter color light (HA/Google Home)",
+  "capabilities": [
+    "matter",
+    "pwm"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.6.0"
+}

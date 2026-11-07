@@ -1,0 +1,11 @@
+{
+  "name": "ha_rgb",
+  "version": "1.0.0",
+  "description": "Expose the PWM RGB LED to Home Assistant over MQTT",
+  "capabilities": [
+    "mqtt",
+    "pwm"
+  ],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.6.0"
+}

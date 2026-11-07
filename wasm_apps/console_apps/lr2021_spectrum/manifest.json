@@ -1,0 +1,8 @@
+{
+  "name": "lr2021_spectrum",
+  "version": "1.0.0",
+  "description": "LR2021 LoRa-band spectrum analyzer — RSSI bar graph + scrolling waterfall, plus LoRa-signal detector that cycles SF/BW configs and reports live receptions.",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "storage.write"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

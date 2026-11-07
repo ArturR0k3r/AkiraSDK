@@ -10,40 +10,48 @@
  *                             2=1-in-3 ~20fps, 3=1-in-4 ~15fps).  Default 1.
  *   nes/overscan    "0"/"1"  (1=crop top/bottom 8 lines =224 px).  Default 1.
  *
- * Button mapping (akiraconsole GPIOs):
- *   D-pad Up/Down/Left/Right (4/5/6/7) → NES d-pad
- *   A (15) → NES A      B (16) → NES B
- *   Y (41) → NES Start  X (17) → NES Select
- *   Settings (2) → Pause overlay (not sent to NES)
+ * Button mapping (via input_get_buttons(), kernel gpio-keys):
+ *   D-pad Up/Down/Left/Right → NES d-pad
+ *   A → NES A      physical Y → NES B
+ *   physical X → NES Start  physical B → NES Select
+ *   Home/OK → Pause overlay (not sent to NES)
  *
  * @license Apache-2.0
  */
 #include "akira_api.h"
 #include "nes.h"
+#include "save_state.h"
+
+#define SAVE_SLOT_COUNT 3
+static const char *save_slot_path(int slot)
+{
+    static const char *PATHS[SAVE_SLOT_COUNT] = { "save1.bin", "save2.bin", "save3.bin" };
+    return PATHS[slot];
+}
 
 /* ── ROM data injected by rom_to_wasm.py ─────────────────────────────── */
 extern const uint8_t  rom_data[];
 extern const uint32_t rom_size;
 
-/* ── Display geometry ────────────────────────────────────────────────── */
-#define DISP_W         320
-#define DISP_H         240
-#define NES_OFFSET_X   ((DISP_W - NES_W) / 2)   /* 32 px side bars */
-
-/* Overscan: crop 8 top/bottom lines → render 224 rows */
+/* ── Overscan ────────────────────────────────────────────────────────── */
 #define NES_OVERSCAN   8
 #define NES_CROP_H     (NES_H - 2 * NES_OVERSCAN)   /* 224 */
 
-/* ── GPIO pins (akiraconsole) ─────────────────────────────────────────── */
-#define PIN_UP        4
-#define PIN_DOWN      5
-#define PIN_LEFT      6
-#define PIN_RIGHT     7
-#define PIN_A        15
-#define PIN_B        16
-#define PIN_SETTINGS  2
-#define PIN_X        17
-#define PIN_Y        41
+/* ── Render modes (set at startup by init_display_geometry) ──────────── */
+#define RENDER_LETTERBOX  0   /* disp_w >= NES_W: centre + black bars     */
+#define RENDER_CROP       1   /* 128-255px wide: show centre N pixels      */
+#define RENDER_SCALE2     2   /* <128px wide: 2:1 nearest-neighbour scale  */
+
+static int g_disp_w, g_disp_h;
+static int g_render_mode;
+static int g_nes_dst_x;   /* X on display where NES image starts           */
+static int g_nes_dst_y;   /* Y on display where NES image starts           */
+static int g_nes_src_x;   /* X in NES fb to start reading (crop only)      */
+static int g_nes_draw_w;  /* Pixels written per row                        */
+
+/* ── Buttons (kernel gpio-keys via input_get_buttons()) ───────────────── */
+#define BTN_HOME (1u << 1)   /* zephyr,code=1 — no AKIRA_BTN_* for Home/OK */
+static int btn_held(uint32_t mask) { return (input_get_buttons() & mask) != 0; }
 
 /* ── Colours (RGB565, byte-swapped for ST7789V SPI) ──────────────────── */
 #define C_BLACK   0x0000u
@@ -57,14 +65,36 @@ extern const uint32_t rom_size;
 #define MENU_PAD  10
 #define HDR_H     22
 
+/* ── Debounced button edge-detect ─────────────────────────────────────────
+ * A single-sample "x && !prev" edge check re-fires on mechanical contact
+ * bounce: a real press/release can toggle the raw pin several times across
+ * consecutive ~16.7ms poll ticks, each toggle looking like a fresh press.
+ * deb_edge() requires REL_STABLE consecutive released reads before a button
+ * can re-arm, so bounce during release can't be seen as a second press. */
+#define REL_STABLE 2
+typedef struct { int held, rel_run; } debkey_t;
+static int deb_edge(debkey_t *k, int raw)
+{
+    if (raw) {
+        k->rel_run = 0;
+        if (!k->held) { k->held = 1; return 1; }
+        return 0;
+    }
+    if (k->rel_run < REL_STABLE) k->rel_run++;
+    if (k->rel_run >= REL_STABLE) k->held = 0;
+    return 0;
+}
+
 /* ── Pause-menu items ─────────────────────────────────────────────────── */
-#define PM_RESUME    0
-#define PM_SETTINGS  1
-#define PM_RESTART   2
-#define PM_EXIT      3
-#define PM_COUNT     4
+#define PM_RESUME     0
+#define PM_SAVE_STATE 1
+#define PM_LOAD_STATE 2
+#define PM_SETTINGS   3
+#define PM_RESTART    4
+#define PM_EXIT       5
+#define PM_COUNT      6
 static const char *PM_LABELS[PM_COUNT] = {
-    "Resume", "Settings...", "Restart", "Exit to Menu"
+    "Resume", "Save State", "Load State", "Settings...", "Restart", "Exit to Menu"
 };
 
 /* ── Settings-menu items ──────────────────────────────────────────────── */
@@ -112,19 +142,83 @@ static void save_int(const char *key, int val)
     settings_set(key, buf);
 }
 
-/* ── GPIO init ────────────────────────────────────────────────────────── */
-static void init_gpio(void)
+/* ── Display geometry init ────────────────────────────────────────────── */
+static void init_display_geometry(void)
 {
-    int f = GPIO_INPUT | GPIO_PULL_DOWN;
-    gpio_configure(PIN_UP,       f);
-    gpio_configure(PIN_DOWN,     f);
-    gpio_configure(PIN_LEFT,     f);
-    gpio_configure(PIN_RIGHT,    f);
-    gpio_configure(PIN_A,        f);
-    gpio_configure(PIN_B,        f);
-    gpio_configure(PIN_SETTINGS, f);
-    gpio_configure(PIN_X,        f);
-    gpio_configure(PIN_Y,        f);
+    display_get_size(&g_disp_w, &g_disp_h);
+
+    if (g_disp_w >= NES_W) {
+        g_render_mode = RENDER_LETTERBOX;
+        g_nes_dst_x   = (g_disp_w - NES_W) / 2;
+        g_nes_src_x   = 0;
+        g_nes_draw_w  = NES_W;
+    } else if (g_disp_w >= NES_W / 2) {
+        g_render_mode = RENDER_CROP;
+        g_nes_dst_x   = 0;
+        g_nes_src_x   = (NES_W - g_disp_w) / 2;
+        g_nes_draw_w  = g_disp_w;
+    } else {
+        g_render_mode = RENDER_SCALE2;
+        g_nes_draw_w  = NES_W / 2;
+        g_nes_dst_x   = (g_disp_w - g_nes_draw_w) / 2;
+        g_nes_src_x   = 0;
+    }
+
+    int out_h   = (g_render_mode == RENDER_SCALE2) ? NES_H / 2 : NES_H;
+    /* Negative dst_y means the display is shorter than the NES output height:
+     * render_nes_frame will use it to skip NES rows from the top and centre
+     * the visible window.  Positive dst_y centres NES inside a taller display. */
+    g_nes_dst_y = (g_disp_h - out_h) / 2;
+}
+
+/* ── Frame render helper ──────────────────────────────────────────────── */
+/* fb      : NES RGB565 framebuffer (NES_W pixels wide)
+ * src_y   : first NES row to output (e.g. NES_OVERSCAN when overscan on)
+ * rows    : number of NES rows to output                                 */
+static void render_nes_frame(const uint16_t *fb, int src_y, int rows)
+{
+    if (g_render_mode == RENDER_LETTERBOX) {
+        /* Vertical clip: when display is shorter than NES output, g_nes_dst_y is
+         * negative.  Advance the NES source row and shrink the row count so we
+         * only write pixels that fit on screen (centred window). */
+        int dst_y = g_nes_dst_y + src_y;
+        if (dst_y < 0) { src_y += -dst_y; rows -= -dst_y; dst_y = 0; }
+        if (dst_y + rows > g_disp_h) rows = g_disp_h - dst_y;
+        if (rows <= 0) return;
+        display_raw_write(g_nes_dst_x, dst_y,
+                          g_nes_draw_w, rows,
+                          fb + src_y * NES_W,
+                          rows * NES_W * 2);
+    } else if (g_render_mode == RENDER_CROP) {
+        int dst_y = g_nes_dst_y + src_y;
+        if (dst_y < 0) { int skip = -dst_y; src_y += skip; rows -= skip; dst_y = 0; }
+        if (dst_y + rows > g_disp_h) rows = g_disp_h - dst_y;
+        if (rows <= 0) return;
+        static uint16_t s_line[NES_W];
+        for (int r = 0; r < rows; r++) {
+            const uint16_t *src = fb + (src_y + r) * NES_W + g_nes_src_x;
+            __builtin_memcpy(s_line, src, g_nes_draw_w * 2);
+            display_raw_write(g_nes_dst_x, dst_y + r,
+                              g_nes_draw_w, 1,
+                              s_line, g_nes_draw_w * 2);
+        }
+    } else { /* RENDER_SCALE2: src_y and rows are in NES-pixel space (2× scaled down) */
+        int out_y    = src_y / 2;
+        int dst_y    = g_nes_dst_y + out_y;
+        int out_rows = rows / 2;
+        if (dst_y < 0) { int skip = -dst_y; src_y += skip * 2; out_rows -= skip; dst_y = 0; }
+        if (dst_y + out_rows > g_disp_h) out_rows = g_disp_h - dst_y;
+        if (out_rows <= 0) return;
+        static uint16_t s_line[NES_W / 2];
+        for (int r = 0; r < out_rows; r++) {
+            const uint16_t *src = fb + (src_y + r * 2) * NES_W;
+            for (int c = 0; c < g_nes_draw_w; c++)
+                s_line[c] = src[c * 2];
+            display_raw_write(g_nes_dst_x, dst_y + r,
+                              g_nes_draw_w, 1,
+                              s_line, g_nes_draw_w * 2);
+        }
+    }
 }
 
 /* ── Draw helpers ─────────────────────────────────────────────────────── */
@@ -156,24 +250,24 @@ static void boot_animation(void)
     display_clear(C_BLACK);
     display_flush();
 
-    int cy = DISP_H / 2;
+    int cy = g_disp_h / 2;
     for (int i = 1; i <= 10; i++) {
-        int half = (DISP_H / 2) * i / 10;
-        display_rect(0, cy - half, DISP_W, half * 2, C_BLACK);
-        display_hline(0, cy - half,     DISP_W, C_WHITE);
-        display_hline(0, cy + half - 1, DISP_W, C_WHITE);
+        int half = (g_disp_h / 2) * i / 10;
+        display_rect(0, cy - half, g_disp_w, half * 2, C_BLACK);
+        display_hline(0, cy - half,     g_disp_w, C_WHITE);
+        display_hline(0, cy + half - 1, g_disp_w, C_WHITE);
         display_flush();
         delay(15000);
     }
 
     /* Boot card */
     display_clear(C_BLACK);
-    display_text_large(88, 60, "RETRO", C_WHITE);
-    display_text_large(116, 90, "NES", C_WHITE);
-    display_hline(40, 125, DISP_W - 80, C_DGRAY);
+    display_text_large(g_disp_w/2 - 40, g_disp_h/4,      "RETRO", C_WHITE);
+    display_text_large(g_disp_w/2 - 24, g_disp_h/4 + 30, "NES",   C_WHITE);
+    display_hline(40, g_disp_h/2 - 15, g_disp_w - 80, C_DGRAY);
 
     /* Loading progress bar */
-    const int bx=40, by=140, bw=DISP_W-80, bh=10;
+    const int bx=40, by=g_disp_h/2, bw=g_disp_w-80, bh=10;
     display_rect_outline(bx-1, by-1, bw+2, bh+2, C_DGRAY);
     display_flush();
 
@@ -184,13 +278,13 @@ static void boot_animation(void)
         delay(10000);
     }
     display_rect(bx, by, bw, bh, C_WHITE);
-    display_text(MENU_PAD, 164, "Loading ROM...", C_DIM);
+    display_text(MENU_PAD, g_disp_h/2 + 20, "Loading ROM...", C_DIM);
 
     /* Scanline wipe overlay */
     display_flush();
     delay(80000);
-    for (int y = 0; y < DISP_H; y += 10) {
-        display_hline(0, y, DISP_W, C_DGRAY);
+    for (int y = 0; y < g_disp_h; y += 10) {
+        display_hline(0, y, g_disp_w, C_DGRAY);
     }
     display_flush();
     delay(60000);
@@ -202,17 +296,17 @@ static void boot_animation(void)
 static void show_error(const char *hdr, const char *msg, const char *hint)
 {
     display_clear(C_BLACK);
-    display_rect(0, 0, DISP_W, HDR_H, 0xF800u);  /* red header */
+    display_rect(0, 0, g_disp_w, HDR_H, 0xF800u);  /* red header */
     display_text(MENU_PAD, 4, hdr, C_WHITE);
     int y = HDR_H + 14;
     display_text(MENU_PAD, y, msg, C_WHITE);  y += 20;
     if (hint) display_text(MENU_PAD, y, hint, C_DIM);
-    display_hline(0, DISP_H - ROW_H, DISP_W, C_DGRAY);
-    display_text(MENU_PAD, DISP_H - ROW_H + (ROW_H-8)/2,
+    display_hline(0, g_disp_h - ROW_H, g_disp_w, C_DGRAY);
+    display_text(MENU_PAD, g_disp_h - ROW_H + (ROW_H-8)/2,
                  "A/B: Return to menu", C_LGRAY);
     display_flush();
     delay(400000);
-    while (!gpio_read(PIN_A) && !gpio_read(PIN_B) && !gpio_read(PIN_SETTINGS))
+    while (!btn_held(AKIRA_BTN_A) && !btn_held(AKIRA_BTN_Y) && !btn_held(BTN_HOME))
         delay(16667);
 }
 
@@ -222,11 +316,14 @@ static void show_settings_menu(void)
     static const char *FS_LABELS[4] = {
         "Off (60fps)", "Half (30fps)", "1/3 (20fps)", "1/4 (15fps)"
     };
-    const int OW = 180, OH = HDR_H + SM_COUNT * ROW_H;
-    const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
+    const int OW = (g_disp_w >= 190) ? 180 : g_disp_w - 4;
+    const int OH = HDR_H + SM_COUNT * ROW_H;
+    const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, pl=0, pr=0;
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)},   kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)},    kb={.held=btn_held(AKIRA_BTN_Y)};
+    debkey_t kl={.held=btn_held(AKIRA_BTN_LEFT)}, kr={.held=btn_held(AKIRA_BTN_RIGHT)};
 
     while (1) {
         if (dirty) {
@@ -245,40 +342,141 @@ static void show_settings_menu(void)
             display_flush();
             dirty = 0;
         }
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
-        int l=gpio_read(PIN_LEFT),r=gpio_read(PIN_RIGHT);
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
+        int l=deb_edge(&kl, btn_held(AKIRA_BTN_LEFT));
+        int r=deb_edge(&kr, btn_held(AKIRA_BTN_RIGHT));
 
-        if (u&&!pu) { cur=(cur+SM_COUNT-1)%SM_COUNT; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%SM_COUNT;           dirty=1; }
-        if ((l&&!pl)||(r&&!pr)) {
-            int delta = (r&&!pr)?1:-1;
+        if (u) { cur=(cur+SM_COUNT-1)%SM_COUNT; dirty=1; }
+        if (d) { cur=(cur+1)%SM_COUNT;           dirty=1; }
+        if (l||r) {
+            int delta = r?1:-1;
             if (cur==SM_FRAMESKIP) { g_frameskip=(g_frameskip+delta+4)%4; save_int("nes/frameskip",g_frameskip); dirty=1; }
             if (cur==SM_OVERSCAN)  { g_overscan^=1; save_int("nes/overscan",g_overscan); dirty=1; }
         }
-        if (a&&!pa) {
+        if (a) {
             if (cur==SM_FRAMESKIP) { g_frameskip=(g_frameskip+1)%4; save_int("nes/frameskip",g_frameskip); dirty=1; }
             else if (cur==SM_OVERSCAN) { g_overscan^=1; save_int("nes/overscan",g_overscan); dirty=1; }
             else break;
         }
-        if (b&&!pb) break;
-        pu=u; pd=d; pa=a; pb=b; pl=l; pr=r;
+        if (b) break;
         delay(16667);
     }
 }
 
+/* ── NES machine (static to avoid stack overflow) ─────────────────────── */
+static NES g_nes;
+
 /* ── Pause overlay ────────────────────────────────────────────────────── */
+/* Briefly shows a standalone status toast, then leaves it to the caller
+ * to redraw whatever was on screen (caller must set dirty=1 afterward). */
+static void show_pause_status(const char *msg)
+{
+    const int w = 120, h = ROW_H;
+    const int x = (g_disp_w - w) / 2, y = (g_disp_h - h) / 2;
+    display_rect(x-2, y-2, w+4, h+4, C_DGRAY);
+    display_rect(x,   y,   w,   h,   C_BLACK);
+    display_text(x + MENU_PAD, y + (h - 8) / 2, msg, C_WHITE);
+    display_flush();
+    delay(500000);
+}
+
+/* nes_state_{pack,unpack} only marshal to/from a flat buffer (save_state.c
+ * can't include akira_api.h — see its header comment), so the actual
+ * storage_* I/O happens here. */
+static int do_save_state(int slot)
+{
+    nes_state_pack(&g_nes);
+    int fd = storage_open(save_slot_path(slot), STORAGE_O_WRITE);
+    if (fd < 0) return -1;
+    int n = storage_write(fd, nes_state_buf(), nes_state_size());
+    storage_close(fd);
+    return (n == nes_state_size()) ? 0 : -1;
+}
+
+static int do_load_state(int slot)
+{
+    int fd = storage_open(save_slot_path(slot), STORAGE_O_READ);
+    if (fd < 0) return -1;
+    int n = storage_read(fd, nes_state_buf(), nes_state_size());
+    storage_close(fd);
+    if (n != nes_state_size()) return -1;
+    return nes_state_unpack(&g_nes);
+}
+
+static int save_slot_exists(int slot)
+{
+    int fd = storage_open(save_slot_path(slot), STORAGE_O_READ);
+    if (fd < 0) return 0;
+    storage_close(fd);
+    return 1;
+}
+
+/* Dedicated slot picker: shown when the user chooses Save/Load State from
+ * the pause menu, so slot selection is an explicit screen rather than an
+ * L/R-while-highlighted gesture the user has to discover. */
+static void show_slot_menu(int for_save)
+{
+    const int OW = (g_disp_w >= 175) ? 170 : g_disp_w - 4;
+    const int OH = HDR_H + (SAVE_SLOT_COUNT + 1) * ROW_H;
+    const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
+    const int back_row = SAVE_SLOT_COUNT;
+
+    int cur=0, dirty=1;
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)}, kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)}, kb={.held=btn_held(AKIRA_BTN_Y)};
+
+    while (1) {
+        if (dirty) {
+            display_rect(OX-2, OY-2, OW+4, OH+4, C_DGRAY);
+            display_rect(OX,   OY,   OW,   OH,   C_WHITE);
+            draw_header(OX, OY, OW, for_save ? "Save to Slot" : "Load from Slot");
+            int ry = OY + HDR_H;
+            char label[8] = "Slot 1";
+            for (int i = 0; i < SAVE_SLOT_COUNT; i++) {
+                label[5] = (char)('1' + i);
+                draw_row(OX, ry, OW, label, save_slot_exists(i) ? "Used" : "Empty", i==cur);
+                ry += ROW_H;
+            }
+            draw_row(OX, ry, OW, "Back", "", cur==back_row);
+            display_flush();
+            dirty = 0;
+        }
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
+
+        if (u) { cur=(cur+SAVE_SLOT_COUNT+1-1)%(SAVE_SLOT_COUNT+1); dirty=1; }
+        if (d) { cur=(cur+1)%(SAVE_SLOT_COUNT+1);                   dirty=1; }
+        if (a) {
+            if (cur == back_row) return;
+            int rc = for_save ? do_save_state(cur) : do_load_state(cur);
+            show_pause_status(rc == 0 ? (for_save ? "Saved!" : "Loaded!")
+                                       : (for_save ? "Save failed" : "Load failed"));
+            return;
+        }
+        if (b) return;
+        delay(16667);
+    }
+}
+
 /* Returns PM_RESUME / PM_RESTART / PM_EXIT */
 static int show_pause_menu(void)
 {
-    while (gpio_read(PIN_SETTINGS)) delay(10000);
+    while (btn_held(BTN_HOME)) delay(10000);
     delay(40000);
 
-    const int OW = 170, OH = HDR_H + PM_COUNT * ROW_H;
-    const int OX = (DISP_W - OW) / 2, OY = (DISP_H - OH) / 2;
+    const int OW = (g_disp_w >= 175) ? 170 : g_disp_w - 4;
+    const int OH = HDR_H + PM_COUNT * ROW_H;
+    const int OX = (g_disp_w - OW) / 2, OY = (g_disp_h - OH) / 2;
 
     int cur=0, dirty=1;
-    int pu=0, pd=0, pa=0, pb=0, ps=0;
+    debkey_t ku={.held=btn_held(AKIRA_BTN_UP)}, kd={.held=btn_held(AKIRA_BTN_DOWN)};
+    debkey_t ka={.held=btn_held(AKIRA_BTN_A)},  kb={.held=btn_held(AKIRA_BTN_Y)};
+    debkey_t ks={.held=btn_held(BTN_HOME)};
 
     while (1) {
         if (dirty) {
@@ -298,25 +496,25 @@ static int show_pause_menu(void)
             }
             dirty = 0;
         }
-        int s=gpio_read(PIN_SETTINGS);
-        int u=gpio_read(PIN_UP), d=gpio_read(PIN_DOWN);
-        int a=gpio_read(PIN_A),  b=gpio_read(PIN_B);
+        int s=deb_edge(&ks, btn_held(BTN_HOME));
+        int u=deb_edge(&ku, btn_held(AKIRA_BTN_UP));
+        int d=deb_edge(&kd, btn_held(AKIRA_BTN_DOWN));
+        int a=deb_edge(&ka, btn_held(AKIRA_BTN_A));
+        int b=deb_edge(&kb, btn_held(AKIRA_BTN_Y));
 
-        if (s&&!ps) return PM_RESUME;
-        if (u&&!pu) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
-        if (d&&!pd) { cur=(cur+1)%PM_COUNT;           dirty=1; }
-        if (a&&!pa) {
+        if (s) return PM_RESUME;
+        if (u) { cur=(cur+PM_COUNT-1)%PM_COUNT; dirty=1; }
+        if (d) { cur=(cur+1)%PM_COUNT;           dirty=1; }
+        if (a) {
             if (cur==PM_SETTINGS) { show_settings_menu(); dirty=1; continue; }
+            if (cur==PM_SAVE_STATE) { show_slot_menu(1); dirty=1; continue; }
+            if (cur==PM_LOAD_STATE) { show_slot_menu(0); dirty=1; continue; }
             return cur;
         }
-        if (b&&!pb) return PM_RESUME;
-        pu=u; pd=d; pa=a; pb=b; ps=s;
+        if (b) return PM_RESUME;
         delay(16667);
     }
 }
-
-/* ── NES machine (static to avoid stack overflow) ─────────────────────── */
-static NES g_nes;
 
 /* ── Frameskip modulus per setting [0..3] ─────────────────────────────── */
 static const int FS_MOD[4] = {1, 2, 3, 4};
@@ -324,8 +522,8 @@ static const int FS_MOD[4] = {1, 2, 3, 4};
 /* ── Main ─────────────────────────────────────────────────────────────── */
 int main(void)
 {
-    init_gpio();
     load_settings();
+    init_display_geometry();
     boot_animation();
 
     if (nes_init(&g_nes, rom_data, rom_size) != 0) {
@@ -336,46 +534,53 @@ int main(void)
         return 1;
     }
 
-    /* Black side-bars and (if overscan) top/bottom bars */
-    display_rect(0,                    0, NES_OFFSET_X, DISP_H, C_BLACK);
-    display_rect(NES_OFFSET_X + NES_W, 0, NES_OFFSET_X, DISP_H, C_BLACK);
-    if (g_overscan) {
-        display_rect(0, 0,                          DISP_W, NES_OVERSCAN,   C_BLACK);
-        display_rect(0, NES_H - NES_OVERSCAN,       DISP_W, NES_OVERSCAN,   C_BLACK);
-        display_rect(0, NES_H,                      DISP_W, DISP_H - NES_H, C_BLACK);
+    /* Black side-bars (letterbox only) and overscan bars.
+     * g_nes_dst_y may be negative when the display is shorter than the NES
+     * output (vertical crop mode), so guard every y-coordinate before drawing. */
+    if (g_render_mode == RENDER_LETTERBOX && g_nes_dst_x > 0) {
+        display_rect(0,                     0, g_nes_dst_x, g_disp_h, C_BLACK);
+        display_rect(g_nes_dst_x + NES_W,   0, g_nes_dst_x, g_disp_h, C_BLACK);
     }
+    if (g_overscan) {
+        int ov_top = g_nes_dst_y;
+        int ov_bot = g_nes_dst_y + NES_H - NES_OVERSCAN;
+        if (ov_top >= 0 && ov_top < g_disp_h)
+            display_rect(0, ov_top, g_disp_w, NES_OVERSCAN, C_BLACK);
+        if (ov_bot >= 0 && ov_bot < g_disp_h)
+            display_rect(0, ov_bot, g_disp_w, NES_OVERSCAN, C_BLACK);
+    }
+    if (g_nes_dst_y > 0)
+        display_rect(0, 0, g_disp_w, g_nes_dst_y, C_BLACK);
     display_flush();
 
-    int settings_held = 0;
+    debkey_t k_settings = { .held = btn_held(BTN_HOME) };
     int frame_count   = 0;
 
     while (1) {
         /* ── Buttons ──────────────────────────────────────────────── */
         uint8_t btns = 0;
-        if (gpio_read(PIN_RIGHT))  btns |= NES_BTN_RIGHT;
-        if (gpio_read(PIN_LEFT))   btns |= NES_BTN_LEFT;
-        if (gpio_read(PIN_DOWN))   btns |= NES_BTN_DOWN;
-        if (gpio_read(PIN_UP))     btns |= NES_BTN_UP;
-        if (gpio_read(PIN_A))      btns |= NES_BTN_A;
-        if (gpio_read(PIN_B))      btns |= NES_BTN_B;
-        if (gpio_read(PIN_X))      btns |= NES_BTN_SELECT;
-        if (gpio_read(PIN_Y))      btns |= NES_BTN_START;
+        if (btn_held(AKIRA_BTN_RIGHT))  btns |= NES_BTN_RIGHT;
+        if (btn_held(AKIRA_BTN_LEFT))   btns |= NES_BTN_LEFT;
+        if (btn_held(AKIRA_BTN_DOWN))   btns |= NES_BTN_DOWN;
+        if (btn_held(AKIRA_BTN_UP))     btns |= NES_BTN_UP;
+        if (btn_held(AKIRA_BTN_A))      btns |= NES_BTN_A;
+        if (btn_held(AKIRA_BTN_Y))      btns |= NES_BTN_B;
+        if (btn_held(AKIRA_BTN_B))      btns |= NES_BTN_SELECT;
+        if (btn_held(AKIRA_BTN_X))      btns |= NES_BTN_START;
         nes_set_controller(&g_nes, 0, btns);
 
-        /* ── Settings button (rising edge) ───────────────────────── */
-        int settings_now = gpio_read(PIN_SETTINGS);
-        if (settings_now && !settings_held) {
+        /* ── Settings button (debounced rising edge) ──────────────── */
+        if (deb_edge(&k_settings, btn_held(BTN_HOME))) {
             /* Snapshot the current NES frame into the OS framebuffer so the
              * pause overlay has a correct freeze-frame background.         */
-            if (g_overscan) {
-                display_bitmap(NES_OFFSET_X, NES_OVERSCAN,
-                               NES_W, NES_CROP_H,
-                               g_nes.fb + NES_OVERSCAN * NES_W,
-                               NES_CROP_H * NES_W * 2);
-            } else {
-                display_bitmap(NES_OFFSET_X, 0, NES_W, NES_H,
-                               g_nes.fb, NES_FB_BYTES);
-            }
+            /* Re-use render_nes_frame so the snapshot respects display geometry
+             * (letterbox centering, crop, scale2, and vertical clip on small
+             * displays) instead of blitting the full NES framebuffer blindly. */
+            if (g_overscan)
+                render_nes_frame((const uint16_t *)g_nes.fb, NES_OVERSCAN, NES_CROP_H);
+            else
+                render_nes_frame((const uint16_t *)g_nes.fb, 0, NES_H);
+            display_flush();
             int choice = show_pause_menu();
             if (choice == PM_EXIT) {
                 /* Fade to black */
@@ -385,19 +590,23 @@ int main(void)
             }
             if (choice == PM_RESTART) {
                 nes_init(&g_nes, rom_data, rom_size);
-                display_rect(0, 0, NES_OFFSET_X, DISP_H, C_BLACK);
-                display_rect(NES_OFFSET_X + NES_W, 0, NES_OFFSET_X, DISP_H, C_BLACK);
+                if (g_render_mode == RENDER_LETTERBOX && g_nes_dst_x > 0) {
+                    display_rect(0,                   0, g_nes_dst_x, g_disp_h, C_BLACK);
+                    display_rect(g_nes_dst_x + NES_W, 0, g_nes_dst_x, g_disp_h, C_BLACK);
+                }
                 if (g_overscan) {
-                    display_rect(0, 0,                    DISP_W, NES_OVERSCAN, C_BLACK);
-                    display_rect(0, NES_H - NES_OVERSCAN, DISP_W, NES_OVERSCAN, C_BLACK);
+                    int ov_top = g_nes_dst_y;
+                    int ov_bot = g_nes_dst_y + NES_H - NES_OVERSCAN;
+                    if (ov_top >= 0 && ov_top < g_disp_h)
+                        display_rect(0, ov_top, g_disp_w, NES_OVERSCAN, C_BLACK);
+                    if (ov_bot >= 0 && ov_bot < g_disp_h)
+                        display_rect(0, ov_bot, g_disp_w, NES_OVERSCAN, C_BLACK);
                 }
                 display_flush();
                 frame_count = 0;
             }
-            settings_held = 0;
             continue;
         }
-        settings_held = settings_now;
 
         /* ── Emulate one NES frame ────────────────────────────────── */
         int mod  = FS_MOD[g_frameskip];
@@ -408,19 +617,16 @@ int main(void)
 
         /* ── Push rendered frame to display ──────────────────────── */
         if (!skip) {
-            /* display_raw_write: write directly to display hardware without
-             * copying to the OS framebuffer or flushing the full screen.
-             * Saves ~114 KB of memcpy + 25% SPI bandwidth per frame.    */
-            if (g_overscan) {
-                display_raw_write(NES_OFFSET_X, NES_OVERSCAN,
-                                  NES_W, NES_CROP_H,
-                                  g_nes.fb + NES_OVERSCAN * NES_W,
-                                  NES_CROP_H * NES_W * 2);
-            } else {
-                display_raw_write(NES_OFFSET_X, 0,
-                                  NES_W, NES_H,
-                                  g_nes.fb, NES_FB_BYTES);
-            }
+            if (g_overscan)
+                render_nes_frame((const uint16_t *)g_nes.fb, NES_OVERSCAN, NES_CROP_H);
+            else
+                render_nes_frame((const uint16_t *)g_nes.fb, 0, NES_H);
+            /* render_nes_frame() only writes the framebuffer. Without this the
+             * compositor is never handed a frame, so the screen freezes on the
+             * last flushed image — and because display_flush() is what blocks
+             * on the compositor, the loop also runs unthrottled and eats the
+             * whole CPU, starving the OS shell. Same shape as the SMS core. */
+            display_flush();
         }
     }
 

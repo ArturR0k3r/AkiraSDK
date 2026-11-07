@@ -1,0 +1,9 @@
+{
+  "name": "level_tool",
+  "display_name": "Level & Compass",
+  "version": "1.0.0",
+  "description": "Bubble spirit level from the accelerometer plus a magnetometer compass needle — a two-in-one workshop tool, no radio needed.",
+  "capabilities": ["display.write", "input.read", "sensor.read"],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.5.0"
+}

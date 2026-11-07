@@ -4,5 +4,6 @@
   "capabilities": [
     "network.*"
   ],
-  "memory_quota": 65536
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.0.0"
 }

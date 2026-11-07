@@ -1,0 +1,3 @@
+[submodule "tools/akira-cli"]
+	path = tools/akira-cli
+	url = https://github.com/PenEngineering/akira-cli.git

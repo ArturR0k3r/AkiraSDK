@@ -1,0 +1,7 @@
+{
+  "name": "wifi_spectrum",
+  "version": "1.0.0",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "app.switch"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.6.0"
+}

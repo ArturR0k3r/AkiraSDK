@@ -2,12 +2,12 @@
 """
 rom_to_wasm.py — Convert retro game ROM images to AkiraOS WASM binaries.
 
-Supported platforms (Mapper 0 / NROM for NES):
+Supported platforms:
   .nes  — Nintendo Entertainment System
-  .gb   — Game Boy         (future)
-  .gbc  — Game Boy Color   (future)
-  .sms  — Sega Master System (future)
-  .gg   — Game Gear          (future)
+  .sms  — Sega Master System
+  .gg   — Game Gear
+  .gb   — Game Boy
+  .gbc  — Game Boy Color
   .a26  — Atari 2600         (future)
   .sfc  — Super Nintendo     (future)
   .smc  — Super Nintendo     (future)
@@ -46,33 +46,49 @@ PLATFORMS = {
         'magic': b'NES\x1a',
         'magic_offset': 0,
         'template_dir': 'nes',
-        'sources': ['main.c', 'nes.c', 'cpu6502.c', 'ppu.c', 'mapper.c'],
+        'sources': ['main.c', 'nes.c', 'cpu6502.c', 'ppu.c', 'mapper.c', 'save_state.c'],
         'stack_size': 8192,
-        'extra_memory': 200 * 1024,  # framebuffer + emulator state overhead
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        # framebuffer + emulator state overhead + ~21KB save-state buffer
+        'extra_memory': 224 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch',
+                          'storage.read', 'storage.write'],
         'description': 'Nintendo Entertainment System',
     },
-    # Future platforms (placeholders):
     'gb': {
         'extensions': ['.gb', '.gbc'],
         'magic': b'Nintendo',
         'magic_offset': 0x134,
         'template_dir': 'gb',
-        'sources': ['main.c', 'gb.c'],
+        'sources': ['main.c', 'gb.c', 'cpu.c', 'ppu.c', 'save_state.c'],
         'stack_size': 8192,
-        'extra_memory': 100 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        # Overhead: GB struct ~460KB (VRAM 16KB + WRAM 32KB + cart RAM 128KB +
+        #           OAM/HRAM + FB 46KB + I/O + code) + the 192KB full-frame
+        #           upscale buffer (400x240 RGB565) + the ~50KB save-state
+        #           header buffer (cart_ram is streamed, not duplicated) +
+        #           heap headroom.
+        'extra_memory': 832 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch',
+                          'storage.read', 'storage.write'],
         'description': 'Game Boy / Game Boy Color',
     },
     'sms': {
         'extensions': ['.sms', '.gg'],
-        'magic': None,
-        'magic_offset': 0,
+        # SMS ROMs ≥32KB have "TMR SEGA" header at 0x7FF0.  Smaller homebrew
+        # ROMs may omit it, so we accept any .sms/.gg by extension alone but
+        # warn when the header is absent.
+        'magic': b'TMR SEGA',
+        'magic_offset': 0x7FF0,
         'template_dir': 'sms',
-        'sources': ['main.c', 'sms.c'],
+        'sources': ['main.c', 'sms.c', 'z80.c', 'vdp.c', 'mapper.c', 'save_state.c'],
         'stack_size': 8192,
-        'extra_memory': 150 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        # Overhead breakdown:
+        #   SMS machine struct: ~123 KB  (16 KB VRAM + 8 KB WRAM + 96 KB FB + state)
+        #   Save-state header:  ~25 KB   (VRAM/WRAM copy; cart has no extra RAM)
+        #   Code + globals:     ~40 KB
+        #   Headroom:           ~37 KB
+        'extra_memory': 225 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch',
+                          'storage.read', 'storage.write'],
         'description': 'Sega Master System / Game Gear',
     },
     'atari': {
@@ -91,10 +107,13 @@ PLATFORMS = {
         'magic': None,
         'magic_offset': 0,
         'template_dir': 'snes',
-        'sources': ['main.c', 'snes.c'],
+        'sources': ['main.c', 'snes.c', 'cpu65816.c', 'ppu.c'],
         'stack_size': 16384,
-        'extra_memory': 300 * 1024,
-        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch'],
+        # SNES struct ~345KB (WRAM 128K + VRAM 64K + SRAM 32K + 112KB FB + PPU/CPU state)
+        # + PPU line buffers + code/globals + headroom
+        'extra_memory': 448 * 1024,
+        'capabilities': ['display.write', 'gpio.read', 'input.read', 'app.switch', 'rtc.read',
+                          'storage.read', 'storage.write'],
         'description': 'Super Nintendo Entertainment System',
     },
 }
@@ -175,14 +194,24 @@ def find_sdk_root(script_dir):
     return None
 
 
-def generate_manifest(name, capabilities, memory_quota):
-    """Return manifest JSON dict."""
-    return {
-        'name': name,
-        'version': '1.0.0',
-        'capabilities': capabilities,
-        'memory_quota': memory_quota,
-    }
+def load_manifest(templates_dir, name, memory_quota, verbose=False):
+    """Load manifest.json from the core template directory and override
+    name and memory_quota with the runtime-computed values."""
+    manifest_path = os.path.join(templates_dir, 'manifest.json')
+    if not os.path.isfile(manifest_path):
+        log(f'  Warning: {manifest_path} not found; using minimal manifest.', verbose)
+        return {
+            'name': name,
+            'version': '1.0.0',
+            'capabilities': [],
+            'memory_quota': memory_quota,
+        }
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    manifest['name'] = name
+    manifest['memory_quota'] = memory_quota
+    log(f'  Manifest loaded from {manifest_path}', verbose)
+    return manifest
 
 
 def compile_wasm(sources, rom_data_c, output, wasi_sdk, include_dirs,
@@ -196,7 +225,7 @@ def compile_wasm(sources, rom_data_c, output, wasi_sdk, include_dirs,
     includes = [f'-I{d}' for d in include_dirs]
 
     cmd = [
-        cc, '-O3', '-nostdlib',
+        cc, '-O3', '-flto', '-nostdlib',
         '-Wall', '-Wextra', '-Wno-unused-parameter', '-Wno-unknown-attributes',
     ] + includes + [
         '-Wl,--no-entry',
@@ -376,10 +405,11 @@ def main():
             return
 
         # ── Generate and embed manifest ────────────────────────────────
-        manifest = generate_manifest(
+        manifest = load_manifest(
+            templates_dir=templates_dir,
             name=app_name,
-            capabilities=platform['capabilities'],
             memory_quota=memory_bytes,
+            verbose=verbose,
         )
 
         embed_script = os.path.join(sdk_root, 'scripts', 'embed_manifest.py')

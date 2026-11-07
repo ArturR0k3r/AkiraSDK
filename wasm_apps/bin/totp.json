@@ -1,0 +1,17 @@
+{
+  "name": "totp",
+  "display_name": "Authenticator",
+  "version": "1.0.0",
+  "description": "RFC 6238 TOTP authenticator (HMAC-SHA1, 6 digits, 30s), compatible with Google Authenticator/GitHub/AWS. PIN-gated; secrets sealed with AES-256-CTR in NVS.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read",
+    "app.switch",
+    "settings.*",
+    "crypto",
+    "rtc.read"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.5.0"
+}

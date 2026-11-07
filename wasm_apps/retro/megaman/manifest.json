@@ -1,0 +1,13 @@
+{
+  "name": "megaman",
+  "display_name": "Mega Man",
+  "version": "1.0.0",
+  "category": "retro_games",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "gpio.read"
+  ],
+  "memory_quota": 262144,
+  "min_akiraos_version": "1.0.0"
+}

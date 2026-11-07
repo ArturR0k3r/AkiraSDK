@@ -1,10 +1,11 @@
 {
   "name": "logic_analyzer",
   "version": "2.0.0",
-  "description": "4-channel GPIO logic analyzer — real-time scrolling waveform",
+  "description": "4-channel GPIO logic analyzer \u2014 real-time scrolling waveform",
   "capabilities": [
     "display.write",
     "gpio.read"
   ],
-  "memory_quota": 131072
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.0.0"
 }

@@ -1,0 +1,9 @@
+{
+  "name": "ble_jammer",
+  "display_name": "BLE Jammer",
+  "version": "1.0.0",
+  "description": "Channel-hopping BLE jammer using LR2021 BLE PHY",
+  "capabilities": ["display.write", "input.read", "rf.transceive", "ble.scan", "app.switch"],
+  "memory_quota": 65536,
+  "min_akiraos_version": "1.5.0"
+}

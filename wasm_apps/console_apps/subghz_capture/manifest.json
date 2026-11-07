@@ -1,6 +1,7 @@
 {
     "name": "rf_mapper",
     "version": "1.0.0",
+    "min_akiraos_version": "1.6.0",
     "author": "Akira Security Lab",
     "capabilities": [
         "rf.transceive",

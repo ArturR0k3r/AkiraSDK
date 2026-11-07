@@ -63,7 +63,7 @@ pub fn char_create(uuid128: &str, props: i32, max_len: i32) -> i32 {
 #[inline] pub fn set_advertised_service(svc_h: i32) -> i32 { unsafe { ble_set_advertised_service(svc_h) } }
 #[inline] pub fn advertise() -> i32 { unsafe { ble_advertise() } }
 #[inline] pub fn stop_advertise() -> i32 { unsafe { ble_stop_advertise() } }
-#[inline] pub fn is_connected() -> bool { unsafe { ble_is_connected() } == 1 }
+#[inline] pub fn is_connected() -> bool { unsafe { ble_is_connected() == 1 } }
 
 #[inline]
 pub fn char_write(char_h: i32, data: &[u8]) -> i32 {

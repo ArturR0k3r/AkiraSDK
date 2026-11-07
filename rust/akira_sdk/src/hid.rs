@@ -74,7 +74,7 @@ extern "C" {
 #[inline] pub fn init(transport: i32, device_types: i32) -> i32 { unsafe { hid_init(transport, device_types) } }
 #[inline] pub fn enable() -> i32 { unsafe { hid_enable() } }
 #[inline] pub fn disable() -> i32 { unsafe { hid_disable() } }
-#[inline] pub fn is_connected() -> bool { unsafe { hid_is_connected() } == 1 }
+#[inline] pub fn is_connected() -> bool { unsafe { hid_is_connected() == 1 } }
 #[inline] pub fn set_transport(transport: i32) -> i32 { unsafe { hid_set_transport(transport) } }
 #[inline] pub fn set_device_types(types: i32) -> i32 { unsafe { hid_set_device_types(types) } }
 #[inline] pub fn key_press(keycode: i32) -> i32 { unsafe { hid_key_press(keycode) } }

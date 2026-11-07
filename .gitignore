@@ -111,3 +111,8 @@ python/runtime/_build/
 
 # Cargo build output
 target/
+
+# Windows "mark of the web" sidecars and accidental copies
+*:Zone.Identifier
+*Zone.Identifier
+* - Copy.*

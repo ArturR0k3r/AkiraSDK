@@ -347,7 +347,7 @@ static int pkt_send(uint32_t to, const uint8_t *payload, int payload_len)
 
     for (int i = 0; i < MESH_HDR_SIZE; i++) g_tx_buf[i] = ((uint8_t *)&hdr)[i];
     for (int i = 0; i < payload_len; i++) g_tx_buf[MESH_HDR_SIZE + i] = enc[i];
-    return rf_send((uint32_t)(uintptr_t)g_tx_buf, (uint32_t)(MESH_HDR_SIZE + payload_len));
+    return rf_send(g_tx_buf, (uint32_t)(MESH_HDR_SIZE + payload_len));
 }
 
 static int mesh_send_data(uint32_t to, int portnum, const uint8_t *data, int data_len)

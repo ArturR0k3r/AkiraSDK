@@ -15,6 +15,10 @@ env:
   WASM_APPS_DIR: wasm_apps
   SCRIPTS_DIR: scripts
   DIST_DIR: dist
+  # akira-cli pulls in go-hid / go-bluetooth (cgo, -ludev) for its device
+  # transport, which the pack/sign path never uses. Building with cgo on the
+  # runner fails because libudev headers are absent; disable it.
+  CGO_ENABLED: "0"
 
 jobs:
   # ─────────────────────────────────────────────────────────────
@@ -286,7 +290,7 @@ jobs:
           set -euo pipefail
           mkdir -p ${{ env.DIST_DIR }}
 
-          for game_dir in ${{ env.WASM_APPS_DIR }}/retro_games/*/; do
+          for game_dir in ${{ env.WASM_APPS_DIR }}/retro/*/; do
             game=$(basename "$game_dir")
             aot="${game_dir}${game}.aot"
             manifest="${game_dir}manifest.json"
@@ -307,7 +311,7 @@ jobs:
                 "${game_dir}icon.png" "$manifest" "$manifest"
             fi
 
-            slug="retro_games-${game}"
+            slug="retro-${game}"
             pkg="${{ env.DIST_DIR }}/${slug}.akpkg"
             # Pack .aot as the wasm payload (akira-cli pack accepts any binary)
             ./akira-cli pack "$aot" "$manifest" -o "$pkg"

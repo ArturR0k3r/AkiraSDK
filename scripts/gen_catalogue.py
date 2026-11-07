@@ -18,7 +18,7 @@ The resulting catalogue.json has the schema:
       "id":                  "<category>/<name>",
       "name":                "<name>",
       "display_name":        "<display_name or name>",
-      "category":            "<generic|console_apps|retro_games>",
+      "category":            "<generic|console_apps|retro>",
       "version":             "1.2.3",
       "size_bytes":          12345,
       "capabilities":        ["display.write", "input.read"],

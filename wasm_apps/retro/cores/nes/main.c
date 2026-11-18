@@ -621,12 +621,11 @@ int main(void)
                 render_nes_frame((const uint16_t *)g_nes.fb, NES_OVERSCAN, NES_CROP_H);
             else
                 render_nes_frame((const uint16_t *)g_nes.fb, 0, NES_H);
-            /* render_nes_frame() only writes the framebuffer. Without this the
-             * compositor is never handed a frame, so the screen freezes on the
-             * last flushed image — and because display_flush() is what blocks
-             * on the compositor, the loop also runs unthrottled and eats the
-             * whole CPU, starving the OS shell. Same shape as the SMS core. */
-            display_flush();
+            /* render_nes_frame() writes scanlines straight to the panel with
+             * display_raw_write(), bypassing the OS framebuffer, so
+             * display_flush() would show the (black) framebuffer between game
+             * frames. Sleep 1 ms to pace the loop and leave CPU to the shell. */
+            delay(1000);
         }
     }
 

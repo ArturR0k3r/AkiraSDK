@@ -1,7 +1,7 @@
 {
   "name": "multimeter",
   "display_name": "Multimeter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ADC voltage read-out: big volts figure, raw sample, min/max/avg, HOLD and a rolling trace. L/R picks the ADC channel.",
   "capabilities": [
     "display.write",

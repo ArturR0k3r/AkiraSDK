@@ -1,7 +1,7 @@
 {
   "name": "uart_monitor",
   "display_name": "UART Monitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pocket serial sniffer — opens a secondary UART and shows incoming bytes as a live scrolling hex + ASCII dump. Selectable baud.",
   "capabilities": ["display.write", "input.read", "uart"],
   "memory_quota": 65536,

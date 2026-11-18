@@ -1,7 +1,7 @@
 {
   "name": "snake",
   "display_name": "Snake",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Classic snake: eat apples, grow longer, don't bite yourself or hit a wall. Speed ramps with every apple; best score saved to NVS. Hold A to dash.",
   "capabilities": [
     "display.write",

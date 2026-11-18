@@ -447,9 +447,41 @@ static inline void akira_ui__confirm_render(int bx, int by, int bw, int bh,
     display_flush();
 }
 
+/* Restricted powers go through the firmware's Seal (hold A+B), which an app
+ * cannot draw or skip; everything else keeps the in-app dialog below. */
+static inline int akira_ui__seal_op(const char *cap)
+{
+    static const struct { const char *name; int op; } map[] = {
+        { "RF_RAW_TX", AKIRA_SEAL_RF_TX },        { "RF_TX", AKIRA_SEAL_RF_TX },
+        { "WIFI_DEAUTH", AKIRA_SEAL_WIFI_INJECT }, { "WIFI_PMKID", AKIRA_SEAL_WIFI_INJECT },
+        { "WIFI_INJECT", AKIRA_SEAL_WIFI_INJECT }, { "BLE_SPAM", AKIRA_SEAL_BLE_SPAM },
+        { "USB_HID", AKIRA_SEAL_HID_INJECT },     { "HID", AKIRA_SEAL_HID_INJECT },
+        { "VAULT_SIGN", AKIRA_SEAL_VAULT_SIGN },
+    };
+
+    for (unsigned i = 0; cap && i < sizeof(map) / sizeof(map[0]); i++) {
+        const char *a = cap, *b = map[i].name;
+
+        while (*a && *a == *b) {
+            a++;
+            b++;
+        }
+        if (*a == '\0' && *b == '\0') {
+            return map[i].op;
+        }
+    }
+    return 0;
+}
+
 static inline bool akira_ui_confirm_dialog(const char *capability_name,
                                            const char *question)
 {
+    int seal_op = akira_ui__seal_op(capability_name);
+
+    if (seal_op) {
+        return seal_request(seal_op, question) == 1;
+    }
+
     int W, H;
     akira_ui__size(&W, &H);
     int bw = W - 60, bh = 150;

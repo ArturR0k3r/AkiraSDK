@@ -1,13 +1,17 @@
 {
   "name": "bucky",
   "display_name": "Bucky",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "retro_games",
   "capabilities": [
     "display.write",
-    "input.read",
     "gpio.read",
-    "settings*"
+    "input.read",
+    "app.switch",
+    "timer",
+    "storage.read",
+    "storage.write",
+    "settings.*"
   ],
   "memory_quota": 262144,
   "min_akiraos_version": "1.0.0"

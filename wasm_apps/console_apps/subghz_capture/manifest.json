@@ -1,13 +1,15 @@
 {
-    "name": "rf_mapper",
-    "version": "1.0.0",
+    "name": "subghz_capture",
+    "version": "1.0.1",
     "min_akiraos_version": "1.6.0",
     "author": "Akira Security Lab",
     "capabilities": [
         "rf.transceive",
         "display.write",
         "timer",
-        "gpio.read"
+        "gpio.read",
+        "storage.read",
+        "storage.write"
     ],
     "memory_quota": 65536,
     "description": "RSSI heatmap mapper for sub-GHz and Wi-Fi bands"

@@ -3851,6 +3851,61 @@ extern int ha_light_poll(const char *object_id, int *on, int *brightness,
                          int *r, int *g, int *b, int timeout_ms);
 
 
+/* ============================================================================
+ * Akira & the Seal
+ *
+ * Restricted powers (radio transmit, Wi-Fi injection, BLE spam, keystroke /
+ * mouse injection, signing with a secure-element key) only run under a Seal:
+ * the owner holds A+B while a ring charges — one lap for this run of the
+ * app, two laps for always.  The firmware enforces it inside the native
+ * calls themselves, so an app that never asks still gets the prompt on its
+ * first restricted call; asking first just lets the app say why.
+ *
+ * Every Seal is written to a signed, hash-chained ledger and grows a shard
+ * on Akira, the console's crystal.  Requires AkiraOS with CONFIG_AKIRA_CRYSTAL
+ * (an app importing these won't load on older firmware: set
+ * min_akiraos_version in its manifest).
+ * ========================================================================== */
+
+/** Sealable powers — pass to seal_request(). */
+#define AKIRA_SEAL_RF_TX       1 /**< transmit on a sub-GHz radio */
+#define AKIRA_SEAL_WIFI_INJECT 2 /**< deauth / PMKID: raw Wi-Fi frames */
+#define AKIRA_SEAL_BLE_SPAM    3 /**< spoofed BLE advertisements */
+#define AKIRA_SEAL_HID_INJECT  4 /**< type, click and move as a USB/BLE HID */
+#define AKIRA_SEAL_VAULT_SIGN  5 /**< sign with a key held in the SE050 */
+
+/**
+ * @brief Ask the owner for a restricted power, explaining why.
+ *
+ * Returns at once if this app already holds a grant; otherwise the Seal
+ * covers the screen (your frame is put back afterwards) and the call blocks
+ * until the owner answers or it times out.
+ *
+ * @param op      AKIRA_SEAL_*
+ * @param reason  shown under the title, e.g. "replay 433.92 MHz capture"
+ * @return 1 granted, 0 refused or timed out, negative errno on a bad op.
+ */
+extern int seal_request(int op, const char *reason);
+
+/**
+ * @brief Award an achievement: a glint floats around Akira.
+ *
+ * Deduplicated per (app, id); at most 5 glints per app.  No prompt.
+ * @return 1 if this was a new glint, 0 otherwise.
+ */
+extern int akira_glint(int achievement_id);
+
+/**
+ * @brief Seal a record (high score, best time) — the owner confirms with a
+ *        Seal and the console signs it, so it can be verified later.
+ *
+ * @param what   label, e.g. "High score"
+ * @param value  the record
+ * @return 1 sealed, 0 refused.
+ */
+extern int seal_record(const char *what, int64_t value);
+
+
 #ifdef __cplusplus
 }
 #endif

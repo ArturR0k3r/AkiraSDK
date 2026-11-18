@@ -1,7 +1,7 @@
 {
   "name": "ble_recon",
   "display_name": "BLE Recon",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "BLE scan and spam/spoof testing tool",
   "capabilities": ["display.write", "input.read", "ble.scan", "ble.spam", "app.switch"],
   "memory_quota": 131072,

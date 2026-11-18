@@ -1,6 +1,6 @@
 {
   "name": "matter_demo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Headless Matter accessory demo (On/Off + Level), no GPIO",
   "capabilities": [
     "matter"

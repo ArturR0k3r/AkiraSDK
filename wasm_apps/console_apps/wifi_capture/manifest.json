@@ -1,6 +1,6 @@
 {
   "name": "wifi_capture",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "capabilities": [
     "display.write",
     "input.read",

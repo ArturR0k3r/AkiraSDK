@@ -1,6 +1,6 @@
 {
   "name": "rgb_controller",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "BLE-controlled PWM RGB LED (GPIO4/5/6)",
   "capabilities": [
     "ble",

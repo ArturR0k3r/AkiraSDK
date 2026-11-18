@@ -1,6 +1,6 @@
 {
   "name": "hello_world",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "capabilities": [
     "input.read"
   ],

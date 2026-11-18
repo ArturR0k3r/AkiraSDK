@@ -225,7 +225,7 @@ name = akira.app_get_self_name()
 ```python
 mode  = akira.power_get_mode()
 level = akira.power_get_battery_level()
-akira.power_pet_watchdog()
+akira.wdt_pet()   # 0 if a watchdog runs; no longer feeds it (AkiraOS 1.7)
 ```
 
 ### HID

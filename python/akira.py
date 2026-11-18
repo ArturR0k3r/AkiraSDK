@@ -108,6 +108,9 @@ STORAGE_O_RDWR   = 3
 # =============================================================================
 # Power modes
 # =============================================================================
+# As returned by power_get_mode(). Since AkiraOS 1.7 apps can't select
+# LIGHT_SLEEP, DEEP_SLEEP or HIBERNATE: the firmware's power_set_mode()
+# returns -ENOTSUP (-134) for them; only ACTIVE and IDLE are accepted.
 POWER_MODE_ACTIVE      = 0
 POWER_MODE_IDLE        = 1
 POWER_MODE_LIGHT_SLEEP = 2
@@ -431,6 +434,11 @@ def power_get_battery_status() -> dict:
 
 
 def wdt_pet() -> int:
+    """Wrap the firmware's wdt_pet(): 0 if a system watchdog is running.
+
+    Since AkiraOS 1.7 this does NOT feed the hardware watchdog; the OS feeds
+    it itself.
+    """
     return _akira.wdt_pet()
 
 

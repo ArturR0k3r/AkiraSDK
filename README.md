@@ -39,7 +39,7 @@ for the MicroPython heap).
 - **Networking** — Async TCP/UDP via shared-memory ring buffers
 - **IPC** — In-process pub/sub messaging between apps
 - **UART / I2C / PWM** — Low-level peripheral access
-- **Power Management** — Battery status, sleep modes, wake sources
+- **Power Management** — Battery status and power mode queries (sleep modes are the OS's decision; apps can't select them)
 - **Capability-based security** — Every API group requires an explicit manifest capability
 
 ---

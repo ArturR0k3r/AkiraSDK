@@ -1,6 +1,6 @@
 {
   "name": "kws_demo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AkiraClaw keyword spotting demo — detects 'hey akira' and launches the shell",
   "capabilities": [
     "display.write",
@@ -11,5 +11,5 @@
     "memory"
   ],
   "memory_quota": 131072,
-  "min_akiraos_version": "1.6.0"
+  "min_akiraos_version": "1.7.0"
 }

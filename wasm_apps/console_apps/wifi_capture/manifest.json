@@ -1,6 +1,6 @@
 {
   "name": "wifi_capture",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "capabilities": [
     "display.write",
     "input.read",
@@ -12,5 +12,5 @@
     "storage.read"
   ],
   "memory_quota": 131072,
-  "min_akiraos_version": "1.6.0"
+  "min_akiraos_version": "1.7.0"
 }

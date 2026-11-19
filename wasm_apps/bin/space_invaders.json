@@ -1,6 +1,6 @@
 {
   "name": "space_invaders",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "capabilities": [
     "display.write",
     "input.read",
@@ -8,5 +8,5 @@
     "app.switch"
   ],
   "memory_quota": 131072,
-  "min_akiraos_version": "1.0.0"
+  "min_akiraos_version": "1.7.0"
 }

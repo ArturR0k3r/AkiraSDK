@@ -1,6 +1,6 @@
 {
   "name": "gr4v",
-  "version": "2.0.0",
+  "version": "2.0.3",
   "capabilities": [
     "display.write",
     "input.read",
@@ -8,5 +8,5 @@
     "app.switch"
   ],
   "memory_quota": 65536,
-  "min_akiraos_version": "1.0.0"
+  "min_akiraos_version": "1.7.0"
 }

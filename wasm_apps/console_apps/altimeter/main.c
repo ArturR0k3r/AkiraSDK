@@ -2,16 +2,18 @@
  * @file main.c
  * @brief Altimeter / Vario — barometric altitude for hiking (BME280).
  *
- * Altitude is derived from pressure with a near-surface linear model
- * (~8.3 m per hPa), referenced to a datum you calibrate on the trail, so it
- * needs only the BME280 pressure channel (sensor_read returns Pa).  Tracks
+ * Altitude is derived from pressure with the International Standard
+ * Atmosphere (sea level 1013.25 hPa, piecewise-linear table), plus an
+ * adjustment you dial in, so it needs only the BME280 pressure channel
+ * (sensor_read returns Pa).  Weather shifts it; adjust against a known
+ * elevation.  Tracks
  * current altitude, a smoothed vertical-speed vario, min/max, and total
  * ascent/descent with a noise deadband so a jittery sensor doesn't inflate
  * the totals.
  *
  * Controls:
- *   A = calibrate here (this point becomes the datum altitude)
- *   UP/DOWN = set datum altitude +/- 1 m (dial in a known elevation)
+ *   A = clear the adjustment (back to the standard atmosphere)
+ *   UP/DOWN = adjust altitude +/- 1 m (dial in a known elevation)
  *   Y = reset trip (ascent/descent/min/max)
  *   B = exit
  *
@@ -54,13 +56,14 @@ static void dm_str(int dm,char*b){
 }
 
 /* ── State (altitude in decimetres = 0.1 m for resolution) ───────────── */
-#define K_DM_PER_PA_NUM 83     /* 8.3 m/hPa = 0.83 dm/Pa = 83/100 dm per Pa */
-#define K_DM_PER_PA_DEN 100
+/* International Standard Atmosphere: pressure (Pa) at altitude (m). */
+static const int32_t STD_P[] = {101325, 95461, 89875, 84556, 79495, 70108, 61640, 54020, 47181, 35599};
+static const int16_t STD_H[] = {0, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000};
+#define STD_N ((int)(sizeof(STD_P) / sizeof(STD_P[0])))
 
 static int   have_baro;
 static int   p_ema;            /* smoothed pressure, Pa */
-static int   datum_pa;         /* reference pressure */
-static int   datum_alt_dm;     /* altitude assigned to the datum */
+static int   adj_dm;           /* user adjustment on top of the standard atmosphere */
 static int   cur_dm;           /* current altitude, dm */
 static int   min_dm, max_dm;
 static int   asc_dm, desc_dm;  /* trip totals */
@@ -77,11 +80,15 @@ static uint32_t prev_ms;
 static int16_t hist[HN]; static int h_head, h_len; static uint32_t h_last_ms;
 
 /* ── Compute altitude from smoothed pressure ─────────────────────────── */
-static void recompute(void) {
-    cur_dm = datum_alt_dm + (int)(((long)(datum_pa - p_ema) * K_DM_PER_PA_NUM) / K_DM_PER_PA_DEN);
+static int std_alt_dm(int p) {
+    int i = 0;
+    while (i < STD_N - 2 && p < STD_P[i + 1]) i++;
+    return STD_H[i] * 10 + (int)(((long)(STD_P[i] - p) * (STD_H[i + 1] - STD_H[i]) * 10) / (STD_P[i] - STD_P[i + 1]));
 }
 
-static void calibrate_here(void) { datum_pa = p_ema; recompute(); commit_dm = cur_dm; }
+static void recompute(void) { cur_dm = std_alt_dm(p_ema) + adj_dm; }
+
+static void calibrate_here(void) { adj_dm = 0; recompute(); commit_dm = cur_dm; }
 static void reset_trip(void) { asc_dm = desc_dm = 0; min_dm = max_dm = commit_dm = cur_dm; h_len=h_head=0; }
 
 /* ── Sampling ────────────────────────────────────────────────────────── */
@@ -89,7 +96,7 @@ static void sample(void) {
     int praw = sensor_read(SENSOR_CHAN_PRESS);      /* kPa*1000 == Pa */
     if (praw == AKIRA_SENSOR_ERROR || praw <= 0) { have_baro = 0; return; }
     if (!have_baro) {                               /* first valid reading */
-        have_baro = 1; p_ema = praw; datum_pa = praw; datum_alt_dm = 0;
+        have_baro = 1; p_ema = praw; adj_dm = 0;
         recompute(); prev_dm = cur_dm; min_dm = max_dm = commit_dm = cur_dm;
         prev_ms = (uint32_t)rtc_get_uptime_ms();
         return;
@@ -184,13 +191,13 @@ static void draw(void) {
     display_text_huge(10, 22, ab, C_GREEN);
     display_text(10+ (int)(text_px(ab)*3) + 6, 40, "m", C_DIM);
 
-    /* Pressure + datum readouts */
+    /* Pressure + adjustment readouts */
     int hpa=p_ema/100;                              /* Pa -> hPa */
     char pb[12]; int_to_str(hpa,pb);
     display_text(10, 66, "P", C_DIM); display_text(28, 66, pb, C_TEXT);
     display_text(28+text_px(pb), 66, "hPa", C_DIM);
-    char db[12]; dm_str(datum_alt_dm, db);
-    display_text(120, 66, "datum", C_DIM); display_text(160, 66, db, C_TEXT);
+    char db[12]; dm_str(adj_dm, db);
+    display_text(120, 66, "adj", C_DIM); display_text(148, 66, db, C_TEXT);
 
     /* Vario gauge on the right */
     int vw=70, vh=54;
@@ -215,7 +222,7 @@ static void draw(void) {
     draw_spark(gx+4, sy+13, SCR_W-20, SCR_H-sy-15-16);
 
     display_rect(0,SCR_H-13,SCR_W,13,C_HDR);
-    display_text(4,SCR_H-11,"A:cal here  UP/DN:set alt  Y:reset  B:exit",C_DIM);
+    display_text(4,SCR_H-11,"A:std  UP/DN:adj alt  Y:reset  B:exit",C_DIM);
     display_flush();
 }
 
@@ -235,8 +242,8 @@ int main(void) {
         if (have_baro) {
             if (edge & AKIRA_BTN_A)    calibrate_here();
             if (edge & AKIRA_BTN_Y)    reset_trip();
-            if (edge & AKIRA_BTN_UP)   { datum_alt_dm += 10; recompute(); }
-            if (edge & AKIRA_BTN_DOWN) { datum_alt_dm -= 10; recompute(); }
+            if (edge & AKIRA_BTN_UP)   { adj_dm += 10; recompute(); }
+            if (edge & AKIRA_BTN_DOWN) { adj_dm -= 10; recompute(); }
         }
 
         draw();

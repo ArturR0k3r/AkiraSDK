@@ -97,8 +97,8 @@ int main(void)
     }
 
     while (1) {
-        int b_held = gpio_read(BTN_B) == 0;
-        int y_held = gpio_read(BTN_Y) == 0;
+        int b_held = akira_btn_pin(BTN_B) == 0;
+        int y_held = akira_btn_pin(BTN_Y) == 0;
 
         /* ── Exit: hold B + Y ── */
         if (b_held && y_held) {
@@ -108,7 +108,7 @@ int main(void)
         }
 
         /* ── A button → R2+Y combo (takeoff/land toggle in Tello app) ── */
-        int a_held = gpio_read(BTN_A) == 0;
+        int a_held = akira_btn_pin(BTN_A) == 0;
         int buttons = a_held ? GP_BTN_Y : 0;
         int rt_axis = a_held ? AXIS_MAX : -32768;
 
@@ -127,10 +127,10 @@ int main(void)
         int dpad = DPAD_NONE;
         int yaw = 0, throttle = 0;
 
-        int up    = gpio_read(BTN_UP) == 0;
-        int down  = gpio_read(BTN_DOWN) == 0;
-        int left  = gpio_read(BTN_LEFT) == 0;
-        int right = gpio_read(BTN_RIGHT) == 0;
+        int up    = akira_btn_pin(BTN_UP) == 0;
+        int down  = akira_btn_pin(BTN_DOWN) == 0;
+        int left  = akira_btn_pin(BTN_LEFT) == 0;
+        int right = akira_btn_pin(BTN_RIGHT) == 0;
 
         if (up && !down)    { throttle = -AXIS_MAX; dpad = DPAD_UP; }
         if (down && !up)    { throttle =  AXIS_MAX; dpad = DPAD_DOWN; }

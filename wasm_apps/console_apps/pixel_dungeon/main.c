@@ -1587,8 +1587,8 @@ static void show_character(void) {
         display_text(bx+12, by+bh-16, "A / B: back", C_TEXT_DIM);
         display_flush();
 
-        int a=gpio_read(BTN_A);
-        int b=gpio_read(BTN_B), s=gpio_read(BTN_SETTINGS);
+        int a=akira_btn_pin(BTN_A);
+        int b=akira_btn_pin(BTN_B), s=akira_btn_pin(BTN_SETTINGS);
         if ((a && !pa) || (b && !pb) || (s && !ps)) return;
         pa=a; pb=b; ps=s;
         delay(20000);
@@ -1624,8 +1624,8 @@ static int show_scroll_menu(void) {
         display_text(bx+14, by+bh-16, "A cast  B back", C_TEXT_DIM);
         display_flush();
 
-        int u=gpio_read(BTN_UP), d=gpio_read(BTN_DOWN);
-        int a=gpio_read(BTN_A),  b=gpio_read(BTN_B), s=gpio_read(BTN_SETTINGS);
+        int u=akira_btn_pin(BTN_UP), d=akira_btn_pin(BTN_DOWN);
+        int a=akira_btn_pin(BTN_A),  b=akira_btn_pin(BTN_B), s=akira_btn_pin(BTN_SETTINGS);
         if ((b && !pb) || (s && !ps)) return 0;
         if (u && !pu) cur = (cur>0) ? cur-1 : N_SCROLL-1;
         if (d && !pd) cur = (cur<N_SCROLL-1) ? cur+1 : 0;
@@ -1679,7 +1679,7 @@ static void shop_screen(void) {
     };
 
     /* Debounce the descend press. */
-    while (gpio_read(BTN_A)) delay(10000);
+    while (akira_btn_pin(BTN_A)) delay(10000);
     delay(40000);
 
     while (1) {
@@ -1707,8 +1707,8 @@ static void shop_screen(void) {
         display_text(bx+14, by+bh-16, "A buy   B / Leave: descend", C_TEXT_DIM);
         display_flush();
 
-        int u=gpio_read(BTN_UP), d=gpio_read(BTN_DOWN);
-        int a=gpio_read(BTN_A),  b=gpio_read(BTN_B), s=gpio_read(BTN_SETTINGS);
+        int u=akira_btn_pin(BTN_UP), d=akira_btn_pin(BTN_DOWN);
+        int a=akira_btn_pin(BTN_A),  b=akira_btn_pin(BTN_B), s=akira_btn_pin(BTN_SETTINGS);
         if ((b && !pb) || (s && !ps)) return;
         if (u && !pu) cur = (cur>0) ? cur-1 : SHOP_COUNT-1;
         if (d && !pd) cur = (cur<SHOP_COUNT-1) ? cur+1 : 0;
@@ -1745,8 +1745,8 @@ static int show_pause_menu(void) {
         }
         display_flush();
 
-        int u=gpio_read(BTN_UP), d=gpio_read(BTN_DOWN);
-        int a=gpio_read(BTN_A),  b=gpio_read(BTN_B), s=gpio_read(BTN_SETTINGS);
+        int u=akira_btn_pin(BTN_UP), d=akira_btn_pin(BTN_DOWN);
+        int a=akira_btn_pin(BTN_A),  b=akira_btn_pin(BTN_B), s=akira_btn_pin(BTN_SETTINGS);
         if (s && !ps) return MENU_RESUME;
         if (u && !pu) cur = (cur>0) ? cur-1 : MENU_COUNT-1;
         if (d && !pd) cur = (cur<MENU_COUNT-1) ? cur+1 : 0;
@@ -1764,10 +1764,10 @@ static int pu,pd,pl,pr,pa,pb,ps,pxb;   /* pxb = prev X (px is the player!) */
 static int turn_taken;
 
 static int handle_input(void) {
-    int u=gpio_read(BTN_UP),   d=gpio_read(BTN_DOWN);
-    int l=gpio_read(BTN_LEFT), r=gpio_read(BTN_RIGHT);
-    int a=gpio_read(BTN_A),    b=gpio_read(BTN_B), s=gpio_read(BTN_SETTINGS);
-    int xb=gpio_read(BTN_X);
+    int u=akira_btn_pin(BTN_UP),   d=akira_btn_pin(BTN_DOWN);
+    int l=akira_btn_pin(BTN_LEFT), r=akira_btn_pin(BTN_RIGHT);
+    int a=akira_btn_pin(BTN_A),    b=akira_btn_pin(BTN_B), s=akira_btn_pin(BTN_SETTINGS);
+    int xb=akira_btn_pin(BTN_X);
 
     turn_taken=0;
     int nx=px, ny=py;
@@ -2033,7 +2033,7 @@ int main(void) {
     draw_title();
 
     uint32_t frames = 1;
-    while (!gpio_read(BTN_A) && !gpio_read(BTN_B)) { frames++; delay(20000); }
+    while (!akira_btn_pin(BTN_A) && !akira_btn_pin(BTN_B)) { frames++; delay(20000); }
     reseed(frames);
     delay(80000);
 
@@ -2050,7 +2050,7 @@ int main(void) {
         if (score > hi_score) { hi_score = score; save_hi_score(); }
 
         draw_death();
-        while (!gpio_read(BTN_A) && !gpio_read(BTN_B)) delay(20000);
+        while (!akira_btn_pin(BTN_A) && !akira_btn_pin(BTN_B)) delay(20000);
         delay(100000);
         reseed(++frames);
     }

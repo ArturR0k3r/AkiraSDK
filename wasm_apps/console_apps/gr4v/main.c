@@ -349,10 +349,10 @@ static int circle_hits_rect(int cx, int cy, int r,
 static int prev_a, prev_b, prev_u, prev_s;
 
 static int handle_input(void) {
-    int a = gpio_read(BTN_A);
-    int b = gpio_read(BTN_B);
-    int u = gpio_read(BTN_UP);
-    int s = gpio_read(BTN_SETTINGS);
+    int a = akira_btn_pin(BTN_A);
+    int b = akira_btn_pin(BTN_B);
+    int u = akira_btn_pin(BTN_UP);
+    int s = akira_btn_pin(BTN_SETTINGS);
 
     if ((a && !prev_a) || (b && !prev_b) || (u && !prev_u)) {
         grav_dir   = -grav_dir;
@@ -680,11 +680,11 @@ static int show_pause_menu(void) {
 
         display_flush();
 
-        int u = gpio_read(BTN_UP);
-        int d = gpio_read(BTN_DOWN);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
-        int s = gpio_read(BTN_SETTINGS);
+        int u = akira_btn_pin(BTN_UP);
+        int d = akira_btn_pin(BTN_DOWN);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
 
         if (s && !ps) return MENU_RESUME;
         if (u && !pu) cur = cur > 0 ? cur - 1 : MENU_N - 1;
@@ -702,8 +702,8 @@ static void show_title(void) {
     int prev = 1;  /* debounce start button */
 
     while (1) {
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
         if ((a || b) && !prev) break;
         prev = (a || b);
 
@@ -870,9 +870,9 @@ int main(void) {
             display_flush();
             update_dots();
 
-            int a = gpio_read(BTN_A);
-            int b = gpio_read(BTN_B);
-            int s = gpio_read(BTN_SETTINGS);
+            int a = akira_btn_pin(BTN_A);
+            int b = akira_btn_pin(BTN_B);
+            int s = akira_btn_pin(BTN_SETTINGS);
             if (a || b) { restart_flag = 1; break; }
             if (s)      { exit_flag    = 1; break; }
             delay(FRAME_US);

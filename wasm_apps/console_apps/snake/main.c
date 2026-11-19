@@ -310,11 +310,11 @@ static int prev_settings = 0;
 static int dash_held = 0;
 static void handle_buttons(void)
 {
-    int u = gpio_read(BTN_UP);
-    int d = gpio_read(BTN_DOWN);
-    int l = gpio_read(BTN_LEFT);
-    int r = gpio_read(BTN_RIGHT);
-    int s = gpio_read(BTN_SETTINGS);
+    int u = akira_btn_pin(BTN_UP);
+    int d = akira_btn_pin(BTN_DOWN);
+    int l = akira_btn_pin(BTN_LEFT);
+    int r = akira_btn_pin(BTN_RIGHT);
+    int s = akira_btn_pin(BTN_SETTINGS);
 
     /* Steer: queue the new heading unless it reverses the current one.
      * Compare against g.dir (committed) so a double-tap can't fold back. */
@@ -327,7 +327,7 @@ static void handle_buttons(void)
     if (want >= 0 && !opposite(g.dir, want))
         g.next_dir = want;
 
-    dash_held = gpio_read(BTN_A);
+    dash_held = akira_btn_pin(BTN_A);
 
     if (s && !prev_settings)
         pause_requested = 1;
@@ -427,7 +427,7 @@ static int show_pause_menu(void)
 
     int cur = MENU_BACK;
 
-    while (gpio_read(BTN_SETTINGS))
+    while (akira_btn_pin(BTN_SETTINGS))
         delay(10000);
     delay(50000);
 
@@ -453,11 +453,11 @@ static int show_pause_menu(void)
             redraw = 0;
         }
 
-        int s = gpio_read(BTN_SETTINGS);
-        int u = gpio_read(BTN_UP);
-        int d = gpio_read(BTN_DOWN);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
+        int u = akira_btn_pin(BTN_UP);
+        int d = akira_btn_pin(BTN_DOWN);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
 
         if (s && !prev_s)
             return MENU_BACK;
@@ -509,7 +509,7 @@ static void game_loop(void)
             draw_full(); /* wipe the overlay */
             acc = 0;
             /* swallow any button still held from the menu */
-            prev_settings = gpio_read(BTN_SETTINGS);
+            prev_settings = akira_btn_pin(BTN_SETTINGS);
         }
 
         uint32_t step_us = dash_held ? (g.step_us / DASH_DIV) : g.step_us;
@@ -560,9 +560,9 @@ int main(void)
     display_flush();
 
     uint32_t frames = 0;
-    while (!gpio_read(BTN_UP) && !gpio_read(BTN_DOWN) &&
-           !gpio_read(BTN_LEFT) && !gpio_read(BTN_RIGHT) &&
-           !gpio_read(BTN_A) && !gpio_read(BTN_B))
+    while (!akira_btn_pin(BTN_UP) && !akira_btn_pin(BTN_DOWN) &&
+           !akira_btn_pin(BTN_LEFT) && !akira_btn_pin(BTN_RIGHT) &&
+           !akira_btn_pin(BTN_A) && !akira_btn_pin(BTN_B))
     {
         frames++;
         delay(20000);

@@ -288,10 +288,10 @@ typedef struct { int u, d, l, r, a, b, s; } btn_t;
 static btn_t pb;
 static void read_edges(btn_t *now)
 {
-    now->u = gpio_read(BTN_UP);  now->d = gpio_read(BTN_DOWN);
-    now->l = gpio_read(BTN_LEFT); now->r = gpio_read(BTN_RIGHT);
-    now->a = gpio_read(BTN_A);   now->b = gpio_read(BTN_B);
-    now->s = gpio_read(BTN_SETTINGS);
+    now->u = akira_btn_pin(BTN_UP);  now->d = akira_btn_pin(BTN_DOWN);
+    now->l = akira_btn_pin(BTN_LEFT); now->r = akira_btn_pin(BTN_RIGHT);
+    now->a = akira_btn_pin(BTN_A);   now->b = akira_btn_pin(BTN_B);
+    now->s = akira_btn_pin(BTN_SETTINGS);
 }
 #define EDGE(f) (now.f && !pb.f)
 
@@ -303,7 +303,7 @@ static void pin_entry(char *pin, const char *title)
     int cur = 0;
 
     /* wait for OK release if we arrived holding it */
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(50000);
 
     while (1)
@@ -353,7 +353,7 @@ static int text_entry(const char *title, const char *charset, int cols,
     int len = 0;
     out[0] = '\0';
 
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(50000);
 
     while (1)
@@ -431,7 +431,7 @@ static void delete_account(int i)
 static int confirm(const char *line)
 {
     int sel = 0; /* 0=No,1=Yes */
-    while (gpio_read(BTN_A)) delay(10000);
+    while (akira_btn_pin(BTN_A)) delay(10000);
     delay(50000);
     while (1)
     {

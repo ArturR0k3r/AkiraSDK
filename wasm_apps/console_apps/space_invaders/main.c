@@ -18,8 +18,8 @@ static int32_t SCR_H = 240;
 /* ── Button pins ─────────────────────────────────────────────────────── */
 #define BTN_UP 4
 #define BTN_DOWN 5
-#define BTN_LEFT 7
-#define BTN_RIGHT 6
+#define BTN_LEFT 6
+#define BTN_RIGHT 7
 #define BTN_A 15
 #define BTN_B 16
 #define BTN_SETTINGS 0 /* BTN.OK = GPIO0, active-low pull-up */
@@ -327,11 +327,11 @@ static int prev_a, prev_s;
 
 static int handle_input(void)
 {
-    int left = gpio_read(BTN_LEFT);
-    int right = gpio_read(BTN_RIGHT);
-    int a = gpio_read(BTN_A);
-    int b = gpio_read(BTN_B);
-    int s = gpio_read(BTN_SETTINGS);
+    int left = akira_btn_pin(BTN_LEFT);
+    int right = akira_btn_pin(BTN_RIGHT);
+    int a = akira_btn_pin(BTN_A);
+    int b = akira_btn_pin(BTN_B);
+    int s = akira_btn_pin(BTN_SETTINGS);
 
     if (left && ship_x > 0)
         ship_x -= SHIP_SPEED;
@@ -716,11 +716,11 @@ static int show_pause_menu(void)
         }
         display_flush();
 
-        int u = gpio_read(BTN_UP);
-        int d = gpio_read(BTN_DOWN);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
-        int s = gpio_read(BTN_SETTINGS);
+        int u = akira_btn_pin(BTN_UP);
+        int d = akira_btn_pin(BTN_DOWN);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
 
         if (s && !prev_s)
             return MENU_RESUME;
@@ -845,7 +845,7 @@ int main(void)
 
     /* Wait for button */
     uint32_t seed = 1;
-    while (!gpio_read(BTN_A) && !gpio_read(BTN_B))
+    while (!akira_btn_pin(BTN_A) && !akira_btn_pin(BTN_B))
     {
         seed++;
         delay(20000);

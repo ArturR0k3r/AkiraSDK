@@ -61,16 +61,16 @@ static uint8_t g_frame[340];
 #define BTN_DOWN  5    /* GPIO5,  active-high, pull-down */
 
 static int read_button_a(void) {
-    return gpio_read(BTN_A);
+    return akira_btn_pin(BTN_A);
 }
 static int read_button_y(void) {
-    return gpio_read(BTN_Y);
+    return akira_btn_pin(BTN_Y);
 }
 static int read_button_up(void) {
-    return gpio_read(BTN_UP);
+    return akira_btn_pin(BTN_UP);
 }
 static int read_button_down(void) {
-    return gpio_read(BTN_DOWN);
+    return akira_btn_pin(BTN_DOWN);
 }
 
 /* ── Radio init ────────────────────────────────────────────────────────── */

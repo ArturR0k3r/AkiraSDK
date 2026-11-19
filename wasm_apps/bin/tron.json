@@ -1,7 +1,7 @@
 {
   "name": "tron",
-  "version": "1.0.0",
-  "capabilities": ["display.write", "input.read", "gpio.read", "app.switch"],
+  "version": "1.0.3",
+  "capabilities": ["display.write", "input.read", "gpio.read", "app.switch", "timer"],
   "memory_quota": 131072,
-  "min_akiraos_version": "1.0.0"
+  "min_akiraos_version": "1.7.0"
 }

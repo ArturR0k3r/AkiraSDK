@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "capabilities": [
     "display.write",
     "input.read",
@@ -14,6 +14,6 @@
     "app.switch"
   ],
   "memory_quota": 131072,
-  "min_akiraos_version": "1.6.0",
+  "min_akiraos_version": "1.7.0",
   "description": "Hardware Security Vault — TOTP 2FA · SSH Agent · FIDO2 Passkeys"
 }

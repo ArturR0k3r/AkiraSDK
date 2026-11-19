@@ -1,7 +1,7 @@
 {
   "name": "bucky",
   "display_name": "Bucky",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "retro_games",
   "capabilities": [
     "display.write",
@@ -10,5 +10,5 @@
     "settings*"
   ],
   "memory_quota": 262144,
-  "min_akiraos_version": "1.0.0"
+  "min_akiraos_version": "1.7.0"
 }

@@ -69,9 +69,6 @@ static uint8_t p_wins, ai_wins;
 static uint8_t round_over, match_over, paused;
 static uint8_t frame_tick, move_timer;
 
-/* input edge-detection */
-static int pl_prev, pr_prev, ps_prev;
-
 /* ── Grid helpers ────────────────────────────────────────────────────── */
 static int cell_blocked(int x, int y)
 {
@@ -212,7 +209,7 @@ static void init_match(void)
 {
     p_wins = 0; ai_wins = 0;
     match_over = 0; paused = 0;
-    pl_prev = 0; pr_prev = 0; ps_prev = 0;
+    { akira_input_event_t ev; while (input_poll_event(&ev, sizeof(ev)) == 1) {} }
     init_round();
 }
 
@@ -261,15 +258,15 @@ static void game_tick(void)
 /* ── Input ───────────────────────────────────────────────────────────── */
 static void handle_input(void)
 {
-    int l = gpio_read(BTN_LEFT);
-    int r = gpio_read(BTN_RIGHT);
-    int s = gpio_read(BTN_SETTINGS);
-
-    if (l && !pl_prev) pdir = TURN_L(pdir);
-    if (r && !pr_prev) pdir = TURN_R(pdir);
-    if (s && !ps_prev) paused = !paused;
-
-    pl_prev = l; pr_prev = r; ps_prev = s;
+    /* Edge queue, not held-state sampling: a tap shorter than one frame is
+     * still delivered, and presses queued during a slow frame all apply. */
+    akira_input_event_t ev;
+    while (input_poll_event(&ev, sizeof(ev)) == 1) {
+        if (!ev.pressed) continue;
+        if (ev.button_id == AKIRA_BTN_ID_LEFT)  pdir = TURN_L(pdir);
+        if (ev.button_id == AKIRA_BTN_ID_RIGHT) pdir = TURN_R(pdir);
+        if (ev.button_id == 1)                  paused = !paused; /* HOME/OK */
+    }
 }
 
 /* ── Per-frame draw (just heads) ─────────────────────────────────────── */
@@ -373,7 +370,7 @@ int main(void)
     gpio_configure(BTN_SETTINGS, GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW);
 
     draw_title();
-    while (!gpio_read(BTN_A)) delay(20000);
+    while (!akira_btn_pin(BTN_A)) delay(20000);
     delay(80000);
 
     int tmr = timer_create();
@@ -411,7 +408,7 @@ int main(void)
 
         show_match_result();
         delay(500000);
-        while (!gpio_read(BTN_A)) delay(20000);
+        while (!akira_btn_pin(BTN_A)) delay(20000);
         delay(80000);
     }
 

@@ -202,11 +202,11 @@ int main(void)
 
     while (1)
     {
-        int s = gpio_read(BTN_SETTINGS);
-        int l = gpio_read(BTN_LEFT);
-        int r = gpio_read(BTN_RIGHT);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
+        int l = akira_btn_pin(BTN_LEFT);
+        int r = akira_btn_pin(BTN_RIGHT);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
 
         if (s && !ps) { app_switch("supervisor"); return 0; }
         if (l && !pl) { if (ch > 0) ch--; stats_reset(); }

@@ -209,11 +209,11 @@ int main(void)
 
     while (1)
     {
-        int s = gpio_read(BTN_SETTINGS);
-        int u = gpio_read(BTN_UP);
-        int d = gpio_read(BTN_DOWN);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
+        int u = akira_btn_pin(BTN_UP);
+        int d = akira_btn_pin(BTN_DOWN);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
 
         if (s && !ps)
         {

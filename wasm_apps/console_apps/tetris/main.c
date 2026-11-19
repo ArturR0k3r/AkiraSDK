@@ -516,13 +516,13 @@ static int g_restart_game = 0;
 
 static void handle_buttons(void)
 {
-    int up = gpio_read(BTN_UP);
-    int down = gpio_read(BTN_DOWN);
-    int left = gpio_read(BTN_LEFT);
-    int right = gpio_read(BTN_RIGHT);
-    int a = gpio_read(BTN_A);
-    int b = gpio_read(BTN_B);
-    int settings = gpio_read(BTN_SETTINGS);
+    int up = akira_btn_pin(BTN_UP);
+    int down = akira_btn_pin(BTN_DOWN);
+    int left = akira_btn_pin(BTN_LEFT);
+    int right = akira_btn_pin(BTN_RIGHT);
+    int a = akira_btn_pin(BTN_A);
+    int b = akira_btn_pin(BTN_B);
+    int settings = akira_btn_pin(BTN_SETTINGS);
 
     /* SETTINGS — pause on press edge */
     if (settings && !btn_prev_settings)
@@ -689,7 +689,7 @@ static int show_pause_menu(void)
 
     /* Debounce: wait for the settings button to be released before reading
      * any new presses. */
-    while (gpio_read(BTN_SETTINGS))
+    while (akira_btn_pin(BTN_SETTINGS))
         delay(10000);
     delay(50000);
 
@@ -719,11 +719,11 @@ static int show_pause_menu(void)
             redraw = 0;
         }
 
-        int s = gpio_read(BTN_SETTINGS);
-        int u = gpio_read(BTN_UP);
-        int d = gpio_read(BTN_DOWN);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
+        int u = akira_btn_pin(BTN_UP);
+        int d = akira_btn_pin(BTN_DOWN);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
 
         if (s && !prev_s)
         {
@@ -842,9 +842,9 @@ int main(void)
     /* Wait for a button press — count frames for RNG seed (human reaction
      * time is unpredictable, giving a different seed on every run)       */
     uint32_t frames = 0;
-    while (!gpio_read(BTN_UP) && !gpio_read(BTN_DOWN) &&
-           !gpio_read(BTN_LEFT) && !gpio_read(BTN_RIGHT) &&
-           !gpio_read(BTN_A) && !gpio_read(BTN_B))
+    while (!akira_btn_pin(BTN_UP) && !akira_btn_pin(BTN_DOWN) &&
+           !akira_btn_pin(BTN_LEFT) && !akira_btn_pin(BTN_RIGHT) &&
+           !akira_btn_pin(BTN_A) && !akira_btn_pin(BTN_B))
     {
         frames++;
         delay(20000);

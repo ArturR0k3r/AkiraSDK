@@ -199,11 +199,11 @@ static void draw_col(int col, int draw_cursor) {
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 static void handle_buttons(void) {
-    int up  = gpio_read(BTN_UP);
-    int dn  = gpio_read(BTN_DOWN);
-    int a   = gpio_read(BTN_A);
-    int b   = gpio_read(BTN_B);
-    int cfg = gpio_read(BTN_SETTINGS);
+    int up  = akira_btn_pin(BTN_UP);
+    int dn  = akira_btn_pin(BTN_DOWN);
+    int a   = akira_btn_pin(BTN_A);
+    int b   = akira_btn_pin(BTN_B);
+    int cfg = akira_btn_pin(BTN_SETTINGS);
 
     if (up && !pup && rate_idx > 0) {
         rate_idx--;

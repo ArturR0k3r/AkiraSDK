@@ -17,8 +17,8 @@
 #define BTN_OK    0    /* GPIO0,  active-low, pull-up  — zephyr,code 0 */
 #define BTN_UP    4    /* GPIO4,  active-high, pull-down — zephyr,code 2 */
 #define BTN_DOWN  5    /* GPIO5,  active-high, pull-down — zephyr,code 3 */
-#define BTN_LEFT  7    /* GPIO7,  active-high, pull-down — physically RIGHT */
-#define BTN_RIGHT 6    /* GPIO6,  active-high, pull-down — physically LEFT */
+#define BTN_LEFT  6
+#define BTN_RIGHT 7
 #define BTN_A     15   /* GPIO15, active-high, pull-down — zephyr,code 6 */
 #define BTN_B     16   /* GPIO16, active-high, pull-down — zephyr,code 7 */
 #define BTN_X     17   /* GPIO17, active-high, pull-down — zephyr,code 8 */
@@ -29,15 +29,15 @@
 static int read_buttons(void)
 {
     int mask = 0;
-    if (!gpio_read(BTN_OK))    mask |= (1 << 0);   /* active-low */
-    if (gpio_read(BTN_UP))     mask |= (1 << 2);
-    if (gpio_read(BTN_DOWN))   mask |= (1 << 3);
-    if (gpio_read(BTN_LEFT))   mask |= (1 << 5);  /* physically LEFT button → AKIRA_BTN_RIGHT */
-    if (gpio_read(BTN_RIGHT))  mask |= (1 << 4);  /* physically RIGHT button → AKIRA_BTN_LEFT */
-    if (gpio_read(BTN_A))      mask |= (1 << 6);
-    if (gpio_read(BTN_B))      mask |= (1 << 7);
-    if (gpio_read(BTN_X))      mask |= (1 << 8);
-    if (gpio_read(BTN_Y))      mask |= (1 << 9);
+    if (!akira_btn_pin(BTN_OK))    mask |= (1 << 0);   /* active-low */
+    if (akira_btn_pin(BTN_UP))     mask |= (1 << 2);
+    if (akira_btn_pin(BTN_DOWN))   mask |= (1 << 3);
+    if (akira_btn_pin(BTN_LEFT))   mask |= (1 << 5);  /* physically LEFT button → AKIRA_BTN_RIGHT */
+    if (akira_btn_pin(BTN_RIGHT))  mask |= (1 << 4);  /* physically RIGHT button → AKIRA_BTN_LEFT */
+    if (akira_btn_pin(BTN_A))      mask |= (1 << 6);
+    if (akira_btn_pin(BTN_B))      mask |= (1 << 7);
+    if (akira_btn_pin(BTN_X))      mask |= (1 << 8);
+    if (akira_btn_pin(BTN_Y))      mask |= (1 << 9);
     return mask;
 }
 

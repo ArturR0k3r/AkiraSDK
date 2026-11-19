@@ -186,10 +186,10 @@ static int rect_overlap(int ax, int ay, int aw, int ah,
 static int prev_a, prev_b, prev_u, prev_s;
 
 static int handle_input(void) {
-    int a = gpio_read(BTN_A);
-    int b = gpio_read(BTN_B);
-    int u = gpio_read(BTN_UP);
-    int s = gpio_read(BTN_SETTINGS);
+    int a = akira_btn_pin(BTN_A);
+    int b = akira_btn_pin(BTN_B);
+    int u = akira_btn_pin(BTN_UP);
+    int s = akira_btn_pin(BTN_SETTINGS);
 
     /* Flip gravity on press */
     if ((a && !prev_a) || (b && !prev_b) || (u && !prev_u)) {
@@ -389,11 +389,11 @@ static int show_pause_menu(void) {
         }
         display_flush();
 
-        int u = gpio_read(BTN_UP);
-        int d = gpio_read(BTN_DOWN);
-        int a = gpio_read(BTN_A);
-        int b = gpio_read(BTN_B);
-        int s = gpio_read(BTN_SETTINGS);
+        int u = akira_btn_pin(BTN_UP);
+        int d = akira_btn_pin(BTN_DOWN);
+        int a = akira_btn_pin(BTN_A);
+        int b = akira_btn_pin(BTN_B);
+        int s = akira_btn_pin(BTN_SETTINGS);
 
         if (s && !ps) return MENU_RESUME;
         if (u && !pu) cur = (cur > 0) ? cur - 1 : MENU_ITEMS - 1;
@@ -436,7 +436,7 @@ int main(void)
     display_flush();
 
     uint32_t seed = 1;
-    while (!gpio_read(BTN_A) && !gpio_read(BTN_B)) {
+    while (!akira_btn_pin(BTN_A) && !akira_btn_pin(BTN_B)) {
         seed++;
         delay(20000);
     }
@@ -495,9 +495,9 @@ int main(void)
         /* Wait for retry or exit */
         int pa2 = 1, ps2 = 1;
         while (1) {
-            int a = gpio_read(BTN_A);
-            int b = gpio_read(BTN_B);
-            int s = gpio_read(BTN_SETTINGS);
+            int a = akira_btn_pin(BTN_A);
+            int b = akira_btn_pin(BTN_B);
+            int s = akira_btn_pin(BTN_SETTINGS);
             if ((a && !pa2) || (b && !pa2)) { restart_game = 1; break; }
             if (s && !ps2) { exit_to_supervisor = 1; break; }
             pa2 = a; ps2 = s;

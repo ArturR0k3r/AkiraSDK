@@ -316,7 +316,7 @@ int main(void)
     timer_start(g_tmr);
 
     draw_splash();
-    while (!gpio_read(BTN_A)) delay(20000);
+    while (!akira_btn_pin(BTN_A)) delay(20000);
     delay(80000);
 
     g_pom_count = 0;
@@ -344,9 +344,9 @@ int main(void)
         }
 
         /* Button input (edge-triggered) */
-        int a = gpio_read(BTN_A);
-        int l = gpio_read(BTN_LEFT);
-        int s = gpio_read(BTN_SETTINGS);
+        int a = akira_btn_pin(BTN_A);
+        int l = akira_btn_pin(BTN_LEFT);
+        int s = akira_btn_pin(BTN_SETTINGS);
 
         if (a && !g_prev_a) {
             g_running = !g_running;

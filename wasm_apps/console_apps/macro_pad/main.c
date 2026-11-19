@@ -70,7 +70,7 @@ static int buttons_edge(void)
 {
     int mask = 0;
     for (int i = 0; i < PAD_ROWS; i++) {
-        int cur = gpio_read(btn_pins[i]) == 1;
+        int cur = akira_btn_pin(btn_pins[i]) == 1;
         if (cur && !prev[i]) mask |= (1 << i);
         prev[i] = cur;
     }

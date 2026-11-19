@@ -70,10 +70,10 @@ typedef struct { int u, d, l, r, a, b, s; } btn_t;
 static btn_t pb;
 static void read_edges(btn_t *n)
 {
-    n->u = gpio_read(BTN_UP);  n->d = gpio_read(BTN_DOWN);
-    n->l = gpio_read(BTN_LEFT); n->r = gpio_read(BTN_RIGHT);
-    n->a = gpio_read(BTN_A);   n->b = gpio_read(BTN_B);
-    n->s = gpio_read(BTN_SETTINGS);
+    n->u = akira_btn_pin(BTN_UP);  n->d = akira_btn_pin(BTN_DOWN);
+    n->l = akira_btn_pin(BTN_LEFT); n->r = akira_btn_pin(BTN_RIGHT);
+    n->a = akira_btn_pin(BTN_A);   n->b = akira_btn_pin(BTN_B);
+    n->s = akira_btn_pin(BTN_SETTINGS);
 }
 #define EDGE(f) (now.f && !pb.f)
 
@@ -93,7 +93,7 @@ static const char *errstr(int ret)
 /* Centered status/result overlay; blocks until A/B/OK. */
 static void popup(const char *l1, const char *l2, uint32_t col)
 {
-    while (gpio_read(BTN_A)) delay(10000);
+    while (akira_btn_pin(BTN_A)) delay(10000);
     delay(40000);
     while (1)
     {
@@ -128,7 +128,7 @@ static int text_entry(const char *title, const char *charset, int cols,
     int setn = slen(charset);
     int cur = 0, len = 0;
     out[0] = '\0';
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(50000);
 
     while (1)
@@ -219,7 +219,7 @@ static int build_text(uint8_t *o, const char *txt)
 /* ── Screens ────────────────────────────────────────────────────────────── */
 static void screen_info(void)
 {
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(40000);
     while (1)
     {
@@ -265,7 +265,7 @@ static void screen_write_url(void)
 {
     const char *presets[] = { "https://akiraos.dev", "https://github.com/", "Custom URL..." };
     int n = 3, sel = 0;
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(40000);
 
     while (1)
@@ -335,7 +335,7 @@ static void screen_hexview(void)
     int addr = 0;
     const int PER = 8;   /* bytes per row */
     const int ROWS = 12;
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(40000);
 
     while (1)
@@ -396,7 +396,7 @@ static void screen_hexview(void)
 static void screen_fieldmon(void)
 {
     int last = 0, taps = 0;
-    while (gpio_read(BTN_SETTINGS)) delay(10000);
+    while (akira_btn_pin(BTN_SETTINGS)) delay(10000);
     delay(40000);
     while (1)
     {

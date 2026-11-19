@@ -3053,6 +3053,33 @@ extern int input_get_buttons(void);
  */
 extern int input_poll_event(akira_input_event_t *evt, uint32_t evt_len);
 
+/**
+ * @brief Pressed state (1/0) of a console button given its legacy GPIO number.
+ * The button pins belong to the gpio-keys input device on AkiraOS 1.7, so
+ * gpio_read() on them fails; this reads input_get_buttons() instead.
+ * Pins: 0 HOME, 4 UP, 5 DOWN, 6 LEFT, 7 RIGHT, 15 A, 16 B, 17 X, 41 Y.
+ * Capability: "input.read".
+ */
+static inline int akira_btn_pin(int pin)
+{
+    uint32_t held = (uint32_t)input_get_buttons();
+    uint32_t bit;
+
+    switch (pin) {
+    case 0:  bit = 1U << 1;           break; /* HOME (zephyr,code 1) */
+    case 4:  bit = AKIRA_BTN_UP;      break;
+    case 5:  bit = AKIRA_BTN_DOWN;    break;
+    case 6:  bit = AKIRA_BTN_LEFT;    break;
+    case 7:  bit = AKIRA_BTN_RIGHT;   break;
+    case 15: bit = AKIRA_BTN_A;       break;
+    case 16: bit = AKIRA_BTN_B;       break;
+    case 17: bit = AKIRA_BTN_X;       break;
+    case 41: bit = AKIRA_BTN_Y;       break;
+    default: return 0;
+    }
+    return (held & bit) != 0U;
+}
+
 /*
  * =============================================================================
  * SYSTEM API (privileged — requires "app.control")

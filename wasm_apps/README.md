@@ -44,6 +44,7 @@ simulator, so those apps run but can't talk to real peripherals — use a device
 | `reroute` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Rotate cable tiles to power every terminal; endless generated levels plus a date-seeded daily puzzle |
 | `solitaire` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Klondike patience: draw 1 or 3, undo, quick moves, auto-finish, saved stats |
 | `reversi` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Reversi against a time-boxed alpha-beta CPU (Easy / Normal / Hard) |
+| `nardy` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Long Nardy (long backgammon) against the CPU: full rules (head, no hitting, six-point walls, forced dice, mars), undo and hints |
 
 ---
 

@@ -1,0 +1,9 @@
+{
+  "name": "nardy",
+  "display_name": "Long Nardy",
+  "version": "1.0.0",
+  "description": "Long Nardy (long backgammon) against the CPU: no hitting, one checker off the head per turn (two on a first 6-6/4-4/3-3), no six-point walls ahead of every enemy checker, forced use of the dice, mars scoring. Only legal moves are offered; undo and hints. Wins and mars saved to NVS.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto", "settings.*"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

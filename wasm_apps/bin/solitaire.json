@@ -1,0 +1,9 @@
+{
+  "name": "solitaire",
+  "display_name": "Solitaire",
+  "version": "1.0.0",
+  "description": "Klondike patience: draw 1 or 3, undo, one-button quick moves, auto-finish once every card is face up. Wins, best time and streaks per draw mode saved to NVS.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto", "settings.*"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

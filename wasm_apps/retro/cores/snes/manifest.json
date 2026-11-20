@@ -1,0 +1,14 @@
+{
+  "name": "snes_game",
+  "version": "1.0.0",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "rtc.read",
+    "storage.read",
+    "storage.write",
+    "settings.*"
+  ],
+  "memory_quota": 524288
+}

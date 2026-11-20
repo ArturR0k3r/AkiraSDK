@@ -343,12 +343,15 @@ int interval_ms = (pct < 20) ? 5000 : 1000;  // slower on low battery
 ble_stop_advertise();
 ```
 
-### DO: Use deep sleep for long waits
+### DON'T: Try to put the device to sleep from an app
+
+Since AkiraOS 1.7 apps can't select light sleep, deep sleep or hibernate: `power_set_mode()` returns `-ENOTSUP` for them, and `power_wake_on_timer()` / `power_wake_on_gpio()` only record a request. The OS decides when the device sleeps. For long waits, loop on `delay()`; it ends early if the app is stopped.
 
 ```c
-power_wake_on_timer(30000);           // wake after 30 s
-power_set_mode(POWER_MODE_DEEP_SLEEP);
-// execution resumes here after wake
+// Wait ~30 s without spinning the CPU
+for (int i = 0; i < 300; i++) {
+    delay(100000);  // 100 ms
+}
 ```
 
 ---
@@ -455,7 +458,7 @@ Keep using `.wasm` during development (faster iteration, architecture-independen
 | Build time | Fast | Adds wamrc step |
 | Debug iteration | Best | Rebuild .wasm first, then re-AOT |
 | Target portability | Single binary runs everywhere | One `.aot` per CPU |
-| Execution speed | Baseline | 10–50× faster |
+| Execution speed | Baseline (WAMR classic interpreter) | Faster; ratio [not yet measured](https://docs.akiraos.dev/resources/performance.html#webassembly-execution-speed) |
 | File per deployment | `app.wasm` | `app-xtensa.aot` (board-specific) |
 
 ### AOT workflow

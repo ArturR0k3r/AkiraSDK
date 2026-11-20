@@ -4,6 +4,23 @@ Sample WebAssembly applications for AkiraOS running on the WAMR runtime.
 
 ---
 
+## Run in your browser
+
+No hardware needed — run any of these in the
+**[AkiraConsole simulator](https://console.app.akiraos.dev/simulator)**:
+
+- **From the catalogue:** every published app has a **▶ Try in simulator** button at
+  [console.app.akiraos.dev](https://console.app.akiraos.dev).
+- **Your local build:** drag a `bin/<app>.wasm` (or an `.akpkg`) onto the simulator.
+- **Deep link:** `https://console.app.akiraos.dev/simulator?url=<url-to-a-.wasm>`, or
+  `https://console.app.akiraos.dev/simulator/<category>%2F<name>` for a catalogue app
+  (e.g. `…/simulator/console_apps%2Ftetris`).
+
+Hardware-only natives (BLE, RF, Wi-Fi, HID, I²C, storage) return "not supported" in the
+simulator, so those apps run but can't talk to real peripherals — use a device for them.
+
+---
+
 ## Available Apps
 
 | App | Capabilities | Description |

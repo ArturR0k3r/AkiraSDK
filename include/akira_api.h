@@ -8,9 +8,19 @@
  * 
  * All native functions are declared as extern and automatically become imports
  * when compiled with WASI SDK and -nostdlib flag.
- * 
+ *
+ * AkiraOS 1.7 applies fixed limits to every app, whatever its manifest asks
+ * for: a memory cap, an output rate limit, file quotas, hardware allowlists,
+ * per-app ownership of shared resources and rate-limited calls. A call made
+ * while the app is being stopped may return early (-EINTR / -ECANCELED).
+ * The per-function comments below list the limits and error codes; the
+ * summary is in docs/API_REFERENCE.md ("Limits and error codes") and
+ * https://github.com/ArturR0k3r/AkiraOS/blob/main/docs/architecture/app-containment.md
+ *
  * @copyright Copyright (c) 2026 PenEngineering S.R.L
 * @license Apache-2.0
+ * @stability stable
+ * @since 1.0
  */
 
 #ifndef AKIRA_API_H
@@ -143,10 +153,18 @@ extern "C" {
 
 /**
  * @brief Log a message to the AkiraOS console
- * 
- * @param level Log level (LOG_LEVEL_ERR, LOG_LEVEL_WRN, LOG_LEVEL_INF, LOG_LEVEL_DBG)
+ *
+ * Each line is logged at info level, prefixed with the app name. App output
+ * (printf, printf_native, WASI stdout/stderr) is rate-limited per app: a
+ * 2 KB burst, then 1 KB/s, where each line costs its length plus 32 bytes.
+ * Lines over budget are dropped and the next line that fits is preceded by
+ * "N line(s) of output dropped (rate limit)". '\n' and '\r' split the
+ * message into lines; each line is cut at 160 characters, and control
+ * characters other than tab are replaced with '.'. Only the first 640 bytes
+ * of one message are read; the rest is dropped without a notice.
+ *
  * @param message Null-terminated string message to log
- * @return 0 on success, negative error code on failure
+ * @return 0 on success, -EINVAL if @p message is NULL
  */
 extern int printf_native(const char *message);
 
@@ -163,12 +181,26 @@ static inline int strcmp(const char *a, const char *b) {
 }
 
 // A simple integer-to-string helper since we have no libc
-static void itoa(int value, char *ptr) {
+static inline void itoa(int value, char *ptr) {
     char temp[12];
     int i = 0;
+    unsigned int u;
     if (value == 0) { *ptr++ = '0'; *ptr = '\0'; return; }
-    if (value < 0) { *ptr++ = '-'; value = -value; }
-    while (value > 0) { temp[i++] = (value % 10) + '0'; value /= 10; }
+    if (value < 0) { *ptr++ = '-'; u = (unsigned int)(-(long)value); } else { u = (unsigned int)value; }
+    while (u > 0) { temp[i++] = (u % 10) + '0'; u /= 10; }
+    while (i > 0) { *ptr++ = temp[--i]; }
+    *ptr = '\0';
+}
+
+// Unsigned in an arbitrary base (8/10/16).  Takes 64 bits so that %llu/%llx
+// can be printed in full — on wasm32 a long long vararg is 64 bits wide, and
+// reading only half of one would desynchronise every later conversion.
+static inline void utoa_base(unsigned long long value, char *ptr, unsigned int base, int upper) {
+    const char *digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+    char temp[24];
+    int i = 0;
+    if (value == 0) { *ptr++ = '0'; *ptr = '\0'; return; }
+    while (value > 0) { temp[i++] = digits[value % base]; value /= base; }
     while (i > 0) { *ptr++ = temp[--i]; }
     *ptr = '\0';
 }
@@ -177,10 +209,14 @@ static void itoa(int value, char *ptr) {
 void printf(const char *fmt, ...) {
     char buffer[256]; // The "baked" string buffer
     char *p = buffer;
+    /* One slot reserved for the terminator; every append is bounded against
+     * this so a long %s cannot run off the end of the stack buffer. */
+    char *const end = buffer + sizeof(buffer) - 1;
+    char scratch[24];
     va_list args;
     va_start(args, fmt);
 
-    for (const char *f = fmt; *f != '\0'; f++) {
+    for (const char *f = fmt; *f != '\0' && p < end; f++) {
         if (*f == '\n' || *f == '\r') {
             /* Skip newlines — the host logger adds its own line endings */
             continue;
@@ -190,18 +226,69 @@ void printf(const char *fmt, ...) {
             continue;
         }
         f++; // Skip '%'
+        /* Length modifiers.  On wasm32 int/long/size_t varargs are all 32 bits,
+         * so only ll (and j) widen the argument to 64. */
+        int is_ll = 0;
+        while (*f == 'l' || *f == 'h' || *f == 'z' || *f == 't' || *f == 'j') {
+            if (*f == 'j' || (*f == 'l' && f[1] == 'l')) {
+                is_ll = 1;
+            }
+            f++;
+        }
         switch (*f) {
-            case 'd': {
-                itoa(va_arg(args, int), p);
-                while (*p) p++; // Move pointer to end of number
+            case 'd':
+            case 'i': {
+                long long v = is_ll ? va_arg(args, long long) : (long long)va_arg(args, int);
+                if (v < 0) {
+                    if (p < end) *p++ = '-';
+                    utoa_base((unsigned long long)(-v), scratch, 10, 0);
+                } else {
+                    utoa_base((unsigned long long)v, scratch, 10, 0);
+                }
+                for (const char *q = scratch; *q && p < end; q++) *p++ = *q;
+                break;
+            }
+            case 'u':
+            case 'o':
+            case 'x':
+            case 'X': {
+                unsigned long long v = is_ll ? va_arg(args, unsigned long long)
+                                             : (unsigned long long)va_arg(args, unsigned int);
+                unsigned int base = (*f == 'u') ? 10u : (*f == 'o') ? 8u : 16u;
+                utoa_base(v, scratch, base, *f == 'X');
+                for (const char *q = scratch; *q && p < end; q++) *p++ = *q;
+                break;
+            }
+            case 'p': {
+                utoa_base((unsigned long long)(uintptr_t)va_arg(args, void *), scratch, 16, 0);
+                if (p < end) *p++ = '0';
+                if (p < end) *p++ = 'x';
+                for (const char *q = scratch; *q && p < end; q++) *p++ = *q;
+                break;
+            }
+            case 'c': {
+                if (p < end) *p++ = (char)va_arg(args, int);
                 break;
             }
             case 's': {
-                char *s = va_arg(args, char *);
-                while (*s) *p++ = *s++;
+                const char *s = va_arg(args, const char *);
+                if (!s) s = "(null)";
+                while (*s && p < end) *p++ = *s++;
                 break;
             }
-            default: *p++ = *f; break;
+            case '%': {
+                *p++ = '%';
+                break;
+            }
+            /* Unknown conversion: emit it literally.  The vararg it was meant
+             * to consume is deliberately left alone — guessing its width would
+             * desynchronise every later conversion in the same call. */
+            default: {
+                if (p < end) *p++ = '%';
+                if (*f == '\0') { f--; break; }
+                if (p < end) *p++ = *f;
+                break;
+            }
         }
     }
     *p = '\0';
@@ -215,6 +302,11 @@ void printf(const char *fmt, ...) {
 
 /**
  * @brief Delay execution for a specified number of microseconds
+ *
+ * delay(0) yields the CPU. The sleep ends early when the app is being
+ * stopped, so a stop never waits for an app-chosen delay.
+ *
+ * @return 0 (also when the sleep was cut short by a stop)
  */
 extern int delay(uint32_t microseconds);
 
@@ -227,6 +319,13 @@ extern int delay(uint32_t microseconds);
  * 
  * All display functions use RGB565 color format (16-bit color).
  * Coordinates start at (0,0) in the top-left corner.
+ *
+ * Any coordinate, size or radius is safe: shapes are clipped to the panel.
+ * Radii above 4096 are clamped, and display_text()/display_text_large() draw
+ * at most 4096 bytes of the string. The first app that draws owns the
+ * display; draw calls from other apps return -EBUSY until it exits. A
+ * pending auto-flush is cancelled when the app exits. Missing capability:
+ * -EPERM.
  */
 
 /**
@@ -280,6 +379,14 @@ extern int display_text(int32_t x, int32_t y, const char *text, uint32_t color);
  * @return 0 on success, negative error code on failure
  */
 extern int display_text_large(int32_t x, int32_t y, const char *text, uint32_t color);
+
+/**
+ * @brief Draw text in the 16x28 hero font — reserved for the one value being
+ * tuned/read on a screen (e.g. a frequency or clock). Requires display.write.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int display_text_huge(int32_t x, int32_t y, const char *text, uint32_t color);
 
 /**
  * @brief Flush the framebuffer to the display hardware.
@@ -364,9 +471,11 @@ extern int display_rect_outline(int32_t x, int32_t y, int32_t w, int32_t h, uint
  *
  * @param x,y        Top-left destination corner
  * @param w,h        Width and height in pixels
- * @param data       Pointer to RGB565 pixel data (row-major, w*h*2 bytes)
+ * @param data       Pointer to RGB565 pixel data (row-major, w*h*2 bytes,
+ *                   2-byte aligned)
  * @param data_size  Size of @p data in bytes (must be >= w*h*2)
- * @return 0 on success, -EINVAL if data_size is too small
+ * @return 0 on success, -EINVAL if @p data is not 2-byte aligned or
+ *         data_size is too small
  */
 extern int display_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
                            const uint16_t *data, uint32_t data_size);
@@ -382,14 +491,40 @@ extern int display_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
  * The caller must have pre-cleared any screen areas outside (x,y,w,h) with
  * a prior display_flush() call (they remain as-is in the display's GRAM).
  *
+ * The window must lie entirely on the panel; other windows are rejected.
+ *
  * @param x,y        Top-left destination corner
  * @param w,h        Width and height in pixels
- * @param data       Pointer to packed RGB565 pixel data (w*h*2 bytes, no stride)
+ * @param data       Pointer to packed RGB565 pixel data (w*h*2 bytes, no stride,
+ *                   2-byte aligned)
  * @param data_size  Size of @p data in bytes (must be >= w*h*2)
- * @return 0 on success, negative error code on failure
+ * @return 0 on success, -EINVAL if @p data is not 2-byte aligned or
+ *         data_size is too small, negative error code on other failures
  */
 extern int display_raw_write(int32_t x, int32_t y, int32_t w, int32_t h,
                               const uint16_t *data, uint32_t data_size);
+
+/**
+ * @brief Like display_raw_write() but returns immediately: the SPI transfer runs on a
+ *        system work queue while the app keeps going.
+ *
+ * NOT exported by AkiraOS 1.7 firmware yet: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function"). Use
+ * display_raw_write().
+ *
+ * The buffer must not be modified until display_raw_wait() returns. At most one
+ * transfer is in flight; a second call blocks until the first has finished.
+ * Requires the same capability as display_raw_write().
+ */
+extern int display_raw_write_async(int32_t x, int32_t y, int32_t w, int32_t h,
+                                   const uint16_t *data, uint32_t data_size);
+
+/**
+ * @brief Block until the last display_raw_write_async() transfer has completed.
+ *
+ * NOT exported by AkiraOS 1.7 firmware yet (see display_raw_write_async()).
+ */
+extern int display_raw_wait(void);
 
 /**
  * @brief Blit an RGB565 bitmap with a transparent colour key.
@@ -398,10 +533,12 @@ extern int display_raw_write(int32_t x, int32_t y, int32_t w, int32_t h,
  *
  * @param x,y        Top-left destination corner
  * @param w,h        Width and height in pixels
- * @param data       Pointer to RGB565 pixel data (row-major, w*h*2 bytes)
+ * @param data       Pointer to RGB565 pixel data (row-major, w*h*2 bytes,
+ *                   2-byte aligned)
  * @param data_size  Size of @p data in bytes (must be >= w*h*2)
  * @param key        RGB565 transparent colour value
- * @return 0 on success
+ * @return 0 on success, -EINVAL if @p data is not 2-byte aligned or
+ *         data_size is too small
  */
 extern int display_bitmap_transparent(int32_t x, int32_t y, int32_t w, int32_t h,
                                        const uint16_t *data, uint32_t data_size,
@@ -484,32 +621,51 @@ extern int display_rounded_rect_fill(int32_t x, int32_t y, int32_t w, int32_t h,
  * Required capabilities: gpio.read and/or gpio.write
  * 
  * GPIO operations allow control of digital input/output pins.
- * Pin numbers are logical and mapped by the runtime to physical pins.
+ * Pin numbers are SoC GPIO numbers (0-31 = gpio0, 32+ = gpio1).
+ *
+ * Apps may use only the pins in the board's CONFIG_AKIRA_WASM_GPIO_APP_PINS,
+ * minus every pin the devicetree gives the system, chip-reserved pins
+ * (ESP32-S3: flash/PSRAM GPIO26-37, USB GPIO19/20, UART0 GPIO43/44) and
+ * strapping pins (ESP32-S3: GPIO45/46). Any other pin returns -EACCES.
+ * On AkiraConsole Prod apps get GPIO39 and GPIO40.
+ *
+ * A pin belongs to the app that configured it: gpio_read()/gpio_write() work
+ * only on pins this app configured (-EPERM otherwise), and every pin an app
+ * configured is disconnected when it exits.
  */
 
 /**
  * @brief Configure a GPIO pin
- * 
+ *
+ * Needs "gpio.write" when @p flags include GPIO_OUTPUT, else "gpio.read".
+ *
  * @param pin GPIO pin number
  * @param flags Configuration flags (GPIO_INPUT, GPIO_OUTPUT, etc.)
- * @return 0 on success, negative error code on failure
+ * @return 0 on success, negative error code on failure:
+ *   -EPERM   capability not granted
+ *   -EACCES  pin not available to apps
+ *   -EBUSY   another app has configured this pin
+ *   -EINVAL  contradictory flags (PULL_UP with PULL_DOWN, INIT_LOW with
+ *            INIT_HIGH, OUTPUT_INIT_* without GPIO_OUTPUT)
  */
 extern int gpio_configure(uint32_t pin, uint32_t flags);
 
 /**
  * @brief Read the state of a GPIO input pin
- * 
+ *
  * @param pin GPIO pin number
  * @return Pin state (0 = low, 1 = high), negative error code on failure
+ *         (-EACCES pin not available to apps, -EPERM not configured by this app)
  */
 extern int gpio_read(uint32_t pin);
 
 /**
  * @brief Write a value to a GPIO output pin
- * 
+ *
  * @param pin GPIO pin number
  * @param value Value to write (0 = low, 1 = high)
  * @return 0 on success, negative error code on failure
+ *         (-EACCES pin not available to apps, -EPERM not configured by this app)
  */
 extern int gpio_write(uint32_t pin, uint32_t value);
 
@@ -555,21 +711,33 @@ extern int sensor_read(int32_t channel);
  * MEMORY API
  * =============================================================================
  * 
+ * Required capability: memory
+ *
  * Dynamic memory allocation within WASM module's memory quota.
  * Memory is automatically freed when the WASM app terminates.
+ *
+ * Blocks come from the app's own heap inside its linear memory, not from the
+ * system heap. Separately, everything the runtime allocates for a running app
+ * (instance, linear memory, WASM stack, each memory.grow) is capped at
+ * CONFIG_AKIRA_WASM_APP_MEM_LIMIT_KB (2048 KB on boards with PSRAM, 1024 KB
+ * without); past it memory.grow returns -1 or the app traps.
  */
 
 /**
  * @brief Allocate memory from the WASM heap
- * 
+ *
  * @param size Number of bytes to allocate
- * @return WASM address of allocated memory, 0 on failure
+ * @return WASM address of allocated memory, 0 on failure (capability not
+ *         granted, size 0 or over 16 MB, manifest memory_quota exceeded, or
+ *         the app's heap is full)
  */
 extern uint32_t mem_alloc(uint32_t size);
 
 /**
  * @brief Free previously allocated memory
- * 
+ *
+ * Pointers mem_alloc() did not return (or already freed) are ignored.
+ *
  * @param ptr WASM address returned by mem_alloc()
  */
 extern void mem_free(uint32_t ptr);
@@ -602,6 +770,12 @@ extern void mem_free(uint32_t ptr);
  *           // buf[2..3] = data_len LE, buf[4..] = data
  *       }
  *   }
+ *
+ * One app owns the app BLE layer at a time: the first app that sets anything
+ * up owns it until it calls ble_deinit() or exits; other apps get -EBUSY.
+ * When the owner exits, its advert is stopped, its GATT services removed and
+ * the device name, bonding and BT mode restored. Calls that start new work
+ * while the app is being stopped return -ECANCELED. Missing capability: -EPERM.
  */
 
 /* BLE characteristic property flags */
@@ -619,7 +793,8 @@ extern void mem_free(uint32_t ptr);
 
 /**
  * @brief Initialise BLE in app mode (lazy BT stack start).
- * Must be called before advertising. Fails with -EBUSY if HID mode active.
+ * Must be called before advertising. Fails with -EBUSY if HID mode is active
+ * or another app owns BLE.
  * @return 0 on success, negative error code on failure.
  */
 extern int ble_init(void);
@@ -632,7 +807,11 @@ extern int ble_deinit(void);
 
 /**
  * @brief Set the BLE device name visible to scanning peers.
- * @param name  Null-terminated string (max 29 bytes).
+ * A rename is persisted, so it is allowed at most once every 2 s (-EBUSY);
+ * setting the current name again is a no-op. The previous name is restored
+ * when the app exits.
+ * @param name  Null-terminated string (max 29 bytes; longer than
+ *              CONFIG_BT_DEVICE_NAME_MAX returns -ENOMEM).
  * @return 0 on success, negative error code on failure.
  */
 extern int ble_set_local_name(const char *name);
@@ -665,6 +844,8 @@ extern int ble_service_add_char(int32_t svc_h, int32_t char_h);
 /**
  * @brief Finalise and register a service with the GATT server.
  * Call once after all characteristics are added.
+ * Rate-limited (each change is a flash write): a burst of
+ * CONFIG_AKIRA_BLE_MAX_SERVICES, then one every 2 s (-EBUSY).
  * @param svc_h  Service handle.
  * @return 0 on success, negative error code on failure.
  */
@@ -680,13 +861,16 @@ extern int ble_set_advertised_service(int32_t svc_h);
 /**
  * @brief Start BLE advertising.
  * Call after ble_add_service() and ble_set_advertised_service().
- * @return 0 on success, negative error code on failure.
+ * Advertising start/stop calls share a rate limit: 8 at once, then 4 per
+ * second (-EBUSY).
+ * @return 0 on success, -EINVAL if ble_init() was not called, negative error
+ *         code on other failures.
  */
 extern int ble_advertise(void);
 
 /**
  * @brief Stop BLE advertising.
- * @return 0 on success.
+ * @return 0 on success, -EBUSY when rate-limited (see ble_advertise()).
  */
 extern int ble_stop_advertise(void);
 
@@ -700,7 +884,8 @@ extern int ble_is_connected(void);
  * @brief Write (and optionally notify) a characteristic value.
  * @param char_h   Characteristic handle.
  * @param data     Pointer to data buffer.
- * @param len      Number of bytes to write.
+ * @param len      Number of bytes to write (1..CONFIG_AKIRA_BLE_CHAR_MAX_LEN,
+ *                 -EMSGSIZE if larger).
  * @return 0 on success, negative error code on failure.
  */
 extern int ble_char_write(int32_t char_h, const uint8_t *data, uint32_t len);
@@ -729,11 +914,100 @@ extern int ble_char_read(int32_t char_h, uint8_t *buf, uint32_t len);
  */
 extern int ble_event_pop(uint8_t *buf, uint32_t len);
 
+/* Sizing for akira_ble_scan_report_t. Must stay in sync with
+ * BLE_SCAN_ADDR_LEN / BLE_SCAN_NAME_LEN / BLE_SCAN_ADV_MAX_LEN in
+ * src/connectivity/bluetooth/bt_manager.h (two separate codebases/toolchains,
+ * so the values are duplicated deliberately here rather than shared). */
+#define AKIRA_BLE_SCAN_ADDR_LEN    6
+#define AKIRA_BLE_SCAN_NAME_LEN    20
+#define AKIRA_BLE_SCAN_ADV_MAX_LEN 31
+
+/**
+ * @brief One BLE advertisement report returned by ble_scan_pop().
+ */
+typedef struct {
+    uint8_t  addr[AKIRA_BLE_SCAN_ADDR_LEN];    /**< Advertiser MAC address */
+    int8_t   rssi;                             /**< Signal strength in dBm */
+    char     name[AKIRA_BLE_SCAN_NAME_LEN];    /**< NUL-terminated local name, empty if none advertised */
+    uint8_t  adv_len;                          /**< Bytes valid in adv_data */
+    uint8_t  adv_data[AKIRA_BLE_SCAN_ADV_MAX_LEN]; /**< Raw AD payload */
+} akira_ble_scan_report_t;
+
+/**
+ * @brief Start BLE observer scanning. Requires "ble.scan" capability.
+ * @param active  1 = active scan (requests names from advertisers), 0 = passive.
+ * @return 0 on success, -EBUSY if radio busy with another BLE mode.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int ble_scan_start(int active);
+
+/**
+ * @brief Stop BLE observer scanning.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int ble_scan_stop(void);
+
+/**
+ * @brief Pop one queued advertisement report (non-blocking).
+ * @param buf  Pointer to a buffer of at least sizeof(akira_ble_scan_report_t).
+ * @param len  Buffer size in bytes.
+ * @return 1 if a report was popped, 0 if queue empty, negative errno on error.
+ *
+ * Typical usage:
+ * @code
+ *   ble_scan_start(1);
+ *   akira_ble_scan_report_t rep;
+ *   while (1) {
+ *       int r = ble_scan_pop(&rep, sizeof(rep));
+ *       if (r == 1) { // rep.addr, rep.rssi, rep.name, rep.adv_len, rep.adv_data }
+ *   }
+ * @endcode
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int ble_scan_pop(void *buf, uint32_t len);
+
+/** BLE spam/spoof presets for ble_spam_start(). */
+#define BLE_SPAM_PRESET_APPLE     0  /**< Apple Continuity proximity-pair popup */
+#define BLE_SPAM_PRESET_FASTPAIR  1  /**< Google Fast Pair */
+#define BLE_SPAM_PRESET_SWIFTPAIR 2  /**< Microsoft Swift Pair */
+#define BLE_SPAM_PRESET_RANDOM    3  /**< Randomized manufacturer-data flood */
+#define BLE_SPAM_PRESET_COUNT     (BLE_SPAM_PRESET_RANDOM + 1)
+
+/**
+ * @brief Start BLE spam/spoof rotating-advertiser mode. Requires "ble.spam"
+ * capability (elevated — broadcasts affect nearby devices).
+ * @param preset  One of BLE_SPAM_PRESET_*.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int ble_spam_start(int preset);
+
+/**
+ * @brief Stop BLE spam/spoof mode.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int ble_spam_stop(void);
+
+/**
+ * @brief Number of advertisement payloads sent since the last ble_spam_start().
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int ble_spam_packet_count(void);
+
 /*
  * =============================================================================
  * HID API
  * =============================================================================
  * Required capability: hid
+ *
+ * When the app exits, whatever it left pressed (keys, modifiers, gamepad
+ * buttons, mouse buttons, consumer keys) is released, its named actions are
+ * dropped, and the HID transport and device types it changed are restored.
  *
  * HID keyboard modifier constants (combinable with |)
  */
@@ -763,17 +1037,95 @@ extern int ble_event_pop(uint8_t *buf, uint32_t len);
 #define HID_CONSUMER_BRIGHTNESS_UP 0x006F
 #define HID_CONSUMER_BRIGHTNESS_DN 0x0070
 
-/* USB HID keyboard keycodes (HUT 1.4 table 10) */
-#define HID_KEY_A     0x04
-#define HID_KEY_B     0x05
-#define HID_KEY_C     0x06
-#define HID_KEY_S     0x16
-#define HID_KEY_GRAVE  0x35  /**< Backtick / grave; with SHIFT → tilde */
-#define HID_KEY_MINUS  0x2D  /**< - / _ */
-#define HID_KEY_PRTSCN 0x46  /**< Print Screen / SysRq */
-#define HID_KEY_ENTER  0x28
-#define HID_KEY_ESC   0x29
-#define HID_KEY_SPACE 0x2C
+/* USB HID keyboard keycodes (HUT 1.4, Usage Page 0x07) */
+/* Letters */
+#define HID_KEY_A  0x04
+#define HID_KEY_B  0x05
+#define HID_KEY_C  0x06
+#define HID_KEY_D  0x07
+#define HID_KEY_E  0x08
+#define HID_KEY_F  0x09
+#define HID_KEY_G  0x0A
+#define HID_KEY_H  0x0B
+#define HID_KEY_I  0x0C
+#define HID_KEY_J  0x0D
+#define HID_KEY_K  0x0E
+#define HID_KEY_L  0x0F
+#define HID_KEY_M  0x10
+#define HID_KEY_N  0x11
+#define HID_KEY_O  0x12
+#define HID_KEY_P  0x13
+#define HID_KEY_Q  0x14
+#define HID_KEY_R  0x15
+#define HID_KEY_S  0x16
+#define HID_KEY_T  0x17
+#define HID_KEY_U  0x18
+#define HID_KEY_V  0x19
+#define HID_KEY_W  0x1A
+#define HID_KEY_X  0x1B
+#define HID_KEY_Y  0x1C
+#define HID_KEY_Z  0x1D
+/* Numbers */
+#define HID_KEY_1  0x1E
+#define HID_KEY_2  0x1F
+#define HID_KEY_3  0x20
+#define HID_KEY_4  0x21
+#define HID_KEY_5  0x22
+#define HID_KEY_6  0x23
+#define HID_KEY_7  0x24
+#define HID_KEY_8  0x25
+#define HID_KEY_9  0x26
+#define HID_KEY_0  0x27
+/* Control */
+#define HID_KEY_ENTER      0x28
+#define HID_KEY_ESC        0x29
+#define HID_KEY_BACKSPACE  0x2A
+#define HID_KEY_TAB        0x2B
+#define HID_KEY_SPACE      0x2C
+/* Punctuation */
+#define HID_KEY_MINUS      0x2D  /**< - / _ */
+#define HID_KEY_EQUAL      0x2E  /**< = / + */
+#define HID_KEY_LBRACKET   0x2F  /**< [ / { */
+#define HID_KEY_RBRACKET   0x30  /**< ] / } */
+#define HID_KEY_BACKSLASH  0x31  /**< \ / | */
+#define HID_KEY_SEMICOLON  0x33  /**< ; / : */
+#define HID_KEY_APOSTROPHE 0x34  /**< ' / " */
+#define HID_KEY_GRAVE      0x35  /**< ` / ~ */
+#define HID_KEY_COMMA      0x36  /**< , / < */
+#define HID_KEY_DOT        0x37  /**< . / > */
+#define HID_KEY_SLASH      0x38  /**< / / ? */
+/* Lock keys */
+#define HID_KEY_CAPSLOCK   0x39
+#define HID_KEY_NUMLOCK    0x53
+#define HID_KEY_SCROLLLOCK 0x47
+/* Function keys */
+#define HID_KEY_F1   0x3A
+#define HID_KEY_F2   0x3B
+#define HID_KEY_F3   0x3C
+#define HID_KEY_F4   0x3D
+#define HID_KEY_F5   0x3E
+#define HID_KEY_F6   0x3F
+#define HID_KEY_F7   0x40
+#define HID_KEY_F8   0x41
+#define HID_KEY_F9   0x42
+#define HID_KEY_F10  0x43
+#define HID_KEY_F11  0x44
+#define HID_KEY_F12  0x45
+/* Navigation */
+#define HID_KEY_PRINTSCREEN 0x46
+#define HID_KEY_PRTSCN      0x46
+#define HID_KEY_PAUSE       0x48
+#define HID_KEY_INSERT      0x49
+#define HID_KEY_HOME        0x4A
+#define HID_KEY_PAGEUP      0x4B
+#define HID_KEY_DELETE      0x4C
+#define HID_KEY_END         0x4D
+#define HID_KEY_PAGEDOWN    0x4E
+#define HID_KEY_RIGHT       0x4F
+#define HID_KEY_LEFT        0x50
+#define HID_KEY_DOWN        0x51
+#define HID_KEY_UP          0x52
+#define HID_KEY_APP         0x65  /**< Application / Menu key */
 
 /** @brief Enable HID subsystem. Must be called before other HID functions. */
 extern int hid_enable(void);
@@ -799,8 +1151,17 @@ extern int hid_key_release_all(void);
 /**
  * @brief Type a null-terminated ASCII string as individual key events.
  * Handles uppercase via Shift automatically.
+ * At most 256 characters (-E2BIG), about 20 ms per character. Returns -EINTR
+ * if the app is stopped mid-string (nothing is left held).
  */
 extern int hid_type_string(const char *str);
+
+/**
+ * @brief Set keyboard modifier keys (does NOT release automatically).
+ * Call hid_key_release_all() to clear both keys and modifiers.
+ * @param mod_mask  Bitmask of HID_MOD_* constants.
+ */
+extern int hid_set_modifiers(int32_t mod_mask);
 
 /** @brief Press one or more gamepad buttons (bitmask). */
 extern int hid_gamepad_press(int32_t btn_mask);
@@ -816,6 +1177,20 @@ extern int hid_gamepad_set_dpad(int32_t direction);
 
 /** @brief Zero all gamepad state. */
 extern int hid_gamepad_reset(void);
+
+/**
+ * @brief Send buttons + hat + all 6 axes in a single BLE notify.
+ * Prefer this over calling hid_gamepad_set_axis()/set_dpad() several times
+ * per frame — each of those sends its own notify, and enough of them per
+ * frame can congest the BLE notification queue.
+ * @param a0-a3  Left X/Y, Right X/Y (-32768..32767)
+ * @param a4,a5  Left/Right trigger (-32768..32767)
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int hid_gamepad_send_report(int32_t buttons, int32_t hat,
+                                   int32_t a0, int32_t a1, int32_t a2,
+                                   int32_t a3, int32_t a4, int32_t a5);
 
 /** @brief Move mouse by relative dx/dy (-127..127). */
 extern int hid_mouse_move(int32_t dx, int32_t dy);
@@ -837,15 +1212,17 @@ extern int hid_consumer_send(int32_t usage_code);
 
 /**
  * @brief Send a raw HID report.
- * @param report_id  HID report identifier
+ * @param report_id  HID report identifier (0..255)
  * @param data_ptr   Pointer to report payload
- * @param len        Payload length (≤ 64 bytes)
+ * @param len        Payload length (1..64 bytes; -EINVAL otherwise)
  */
 extern int hid_send_raw_report(int32_t report_id,
                                const uint8_t *data_ptr, uint32_t len);
 
 /**
  * @brief Register a named keyboard shortcut.
+ * The action belongs to the calling app (no other app can rebind it) and is
+ * dropped when the app exits.
  * @param name      Short identifier, e.g. "copy" (max 15 chars)
  * @param modifier  Modifier bitmask (HID_MOD_* constants)
  * @param keycode   USB HID keycode of the main key
@@ -904,6 +1281,16 @@ extern int hid_init(int transport, int device_types);
  * =============================================================================
  * Required capability: app.control  (elevated — must not be granted to
  *                                    untrusted apps)
+ * app_get_status(), app_list() and app_get_self_name() also accept "app.info".
+ *
+ * app_start(), app_stop() and app_install_from_sd() run on the OS lifecycle
+ * work queue; the caller waits for the result for up to 60 s. They return
+ * -EINTR if the calling app is being stopped and -ETIMEDOUT after 60 s (the
+ * request may still complete), -EBUSY if 4 requests are already pending
+ * system-wide, and -EAGAIN past a burst of 4 requests per app, then one per
+ * 2 s (app_switch() and app_request_update() draw on the same budget).
+ * An app can't start, stop or switch to itself (-EINVAL) or reinstall
+ * itself (-EBUSY).
  *
  * App state codes returned by app_get_status():
  */
@@ -947,9 +1334,14 @@ extern int app_get_self_name(uint8_t *buf, uint32_t buf_len);
  *
  * @param name  Null-terminated app name
  * @return 0 on success, negative errno on failure
- *   -ENOENT  app not installed
- *   -EBUSY   max concurrent apps already running
- *   -EPERM   capability not granted
+ *   -ENOENT    app not installed
+ *   -EBUSY     max concurrent apps already running, or 4 lifecycle
+ *              requests already pending
+ *   -EPERM     capability not granted
+ *   -EINVAL    empty name, name of 32+ characters, or the caller itself
+ *   -EAGAIN    lifecycle request rate limit (see above)
+ *   -EINTR     the calling app is being stopped
+ *   -ETIMEDOUT no result within 60 s
  */
 extern int app_start(const char *name);
 
@@ -957,10 +1349,11 @@ extern int app_start(const char *name);
  * @brief Stop a running app by name.
  *
  * Requires capability: "app.control"
- * An app cannot stop itself; use return 0 from main() for self-exit.
+ * An app cannot stop itself (-EINVAL); use return 0 from main() for self-exit.
  *
  * @param name  Null-terminated app name
- * @return 0 on success, negative errno on failure
+ * @return 0 on success, negative errno on failure (same queueing errors as
+ *         app_start())
  */
 extern int app_stop(const char *name);
 
@@ -973,6 +1366,10 @@ extern int app_stop(const char *name);
  * return 0 from its own main() to complete the handoff.  The supervisor
  * detects both events via the "akira.lifecycle" IPC topic.
  *
+ * The start runs 200 ms later on the lifecycle work queue; a second call
+ * before then replaces the target. Rate-limited with app_start() (-EAGAIN);
+ * switching to the caller itself returns -EINVAL.
+ *
  * Typical usage:
  * @code
  *   app_switch("supervisor");
@@ -983,6 +1380,31 @@ extern int app_stop(const char *name);
  * @return 0 on success (caller must return from main), negative on error
  */
 extern int app_switch(const char *name);
+
+/**
+ * @brief Check whether a newer version of this app is available.
+ *
+ * Requires capability: "app.control"
+ * Reads cached state only — does not itself trigger a network check.
+ *
+ * @param ver_buf  Output buffer for the available version string
+ * @param buf_len  Buffer capacity
+ * @return 1 update available (ver_buf filled), 0 up to date, negative errno
+ */
+extern int app_check_update(uint8_t *ver_buf, uint32_t buf_len);
+
+/**
+ * @brief Trigger download+install of this app's own newer version.
+ *
+ * Requires capability: "app.control"
+ * Fire-and-forget — expect to be stopped and reinstalled once it lands.
+ * Needs firmware built with the cloud client (CONFIG_AKIRA_CLOUD_CLIENT,
+ * deprecated and off by default); otherwise returns -ENOTSUP.
+ *
+ * @return 0 queued, negative errno (-ENOENT no update available, -EAGAIN
+ *         lifecycle rate limit, -ENOTSUP, no connectivity)
+ */
+extern int app_request_update(void);
 
 /**
  * @brief Lifecycle event payload published on "akira.lifecycle" IPC topic.
@@ -1002,9 +1424,17 @@ typedef struct {
  * IPC PUB/SUB API
  * =============================================================================
  * Required capability: ipc
+ *
+ * Subscriptions belong to the app that made them and are freed when it
+ * exits; no app can read or remove another app's queue.
  */
 
-/** @brief Subscribe to a named topic. */
+/**
+ * @brief Subscribe to a named topic.
+ * Each app may hold MIN(CONFIG_AKIRA_IPC_MAX_TOPICS,
+ * MAX(2, CONFIG_AKIRA_IPC_MAX_TOPICS / 4)) subscriptions (6 with the default
+ * 24 topics); -ENOMEM beyond.
+ */
 extern int msg_subscribe(const char *topic);
 
 /** @brief Unsubscribe from a named topic. */
@@ -1014,8 +1444,10 @@ extern int msg_unsubscribe(const char *topic);
  * @brief Publish a message to all subscribers.
  * @param topic     Topic name
  * @param data_ptr  Pointer to payload buffer
- * @param len       Payload length (≤ CONFIG_AKIRA_IPC_MSG_MAX_SIZE = 256)
- * @return Number of subscribers that received the message
+ * @param len       Payload length, 1..CONFIG_AKIRA_IPC_MSG_MAX_SIZE (Kconfig
+ *                  default 64; 256 on the AkiraConsole boards), else -EMSGSIZE
+ * @return Number of subscribers that received the message (0 if none; a
+ *         subscriber whose queue is full misses it)
  */
 extern int msg_publish(const char *topic,
                        const uint8_t *data_ptr, uint32_t len);
@@ -1025,8 +1457,10 @@ extern int msg_publish(const char *topic,
  * @param topic       Topic name
  * @param buf_ptr     Destination buffer
  * @param buf_len     Buffer capacity
- * @param timeout_ms  0 = non-blocking, -1 = wait forever, else ms limit
- * @return Bytes received, -EAGAIN on timeout, negative on error
+ * @param timeout_ms  0 = non-blocking, -1 = wait until a message arrives or
+ *                    the app is stopped, else ms limit
+ * @return Bytes received, -EAGAIN on timeout, -EINTR if the app is being
+ *         stopped, negative on error
  */
 extern int msg_recv(const char *topic,
                     uint8_t *buf_ptr, uint32_t buf_len,
@@ -1052,6 +1486,10 @@ extern int msg_pending(const char *topic);
  * Required capability: rf.transceive
  * 
  * Functions for controlling radio frequency transceivers (e.g., LoRa, LR1121).
+ *
+ * When the app exits, TX/RX is stopped and the radio released (if the app
+ * used it). Receive waits are capped at 60 s and end early with -ECANCELED
+ * when the app is being stopped.
  */
 
 /**
@@ -1072,20 +1510,349 @@ extern int rf_set_power(int8_t dbm);
 
 /**
  * @brief Get received signal strength indicator (RSSI)
- * 
- * @param rssi Pointer to store RSSI value
- * @return 0 on success, negative error code on failure
+ *
+ * @return RSSI value in dBm, or negative error code on failure
  */
-extern int rf_get_rssi(int16_t *rssi);
+extern int rf_get_rssi(void);
 
 /**
  * @brief Send data over RF transceiver
- * 
+ *
  * @param payload_ptr Pointer to payload data
- * @param len Length of payload in bytes
+ * @param len Length of payload in bytes (1..255, -EINVAL otherwise)
  * @return 0 on success, negative error code on failure
  */
-extern int rf_send(uint32_t payload_ptr, uint32_t len);
+extern int rf_send(const uint8_t *payload, uint32_t len);
+
+/**
+ * @brief Select active RF chip.
+ * @param chip  RF chip index (AKIRA_RF_CHIP_* enum value).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_select(int chip);
+
+/**
+ * @brief Pop one packet from the background RX queue (non-blocking if timeout_ms=0).
+ * @param buf_ptr   Pointer to receive buffer.
+ * @param max_len   Size of receive buffer.
+ * @param timeout_ms  Milliseconds to wait (capped at 60000); 0 = non-blocking.
+ * @return Number of bytes copied on success (a packet is at most 255 bytes,
+ *         truncated to @p max_len), -ENOMSG if queue empty (timeout 0),
+ *         -EAGAIN if nothing arrived in time, -ECANCELED if the app is being
+ *         stopped, negative errno on error.
+ */
+extern int rf_recv_pop(void *buf_ptr, uint32_t max_len, uint32_t timeout_ms);
+
+/**
+ * @brief Blocking receive — waits up to timeout_ms for a single packet.
+ * @param buf_ptr   Pointer to receive buffer.
+ * @param max_len   Size of receive buffer.
+ * @param timeout_ms  Milliseconds to wait (capped at 60000).
+ * @return Number of bytes received on success, 0 on timeout, -ECANCELED if
+ *         the app is being stopped, negative errno on error.
+ */
+extern int rf_receive(void *buf_ptr, uint32_t max_len, uint32_t timeout_ms);
+
+/**
+ * @brief Set RF modulation mode.
+ * @param mod  Modulation type: RADIO_MOD_FSK=2, RADIO_MOD_LORA=5.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_modulation(int mod);
+
+/**
+ * @brief Set LoRa spreading factor (6..12).
+ * @param sf  Spreading factor (SF6–SF12; use SF10 for Meshtastic LongFast).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_spreading_factor(int sf);
+
+/**
+ * @brief Set LoRa bandwidth in Hz.
+ * @param bw_hz  Bandwidth in Hz (e.g. 125000, 250000, 500000).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_bandwidth(uint32_t bw_hz);
+
+/**
+ * @brief Set LoRa coding rate denominator (5..8, i.e. 4/5..4/8).
+ * @param cr  Coding rate denominator (use 8 for Meshtastic LongFast = 4/8).
+ * @return 0 on success, negative errno on failure.
+ */
+extern int rf_set_coding_rate(int cr);
+
+/**
+ * @brief Set FSK/GFSK bitrate.
+ * @param bps Bitrate in bits per second (e.g., 1200, 9600).
+ * @return 0 on success, negative errno on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int rf_set_bitrate(int bps);
+
+/* RF chip identifiers */
+#define AKIRA_RF_CHIP_NONE   0
+#define AKIRA_RF_CHIP_NRF24  1
+#define AKIRA_RF_CHIP_CC1101 2
+#define AKIRA_RF_CHIP_LR1121 3
+#define AKIRA_RF_CHIP_CC1121 4
+#define AKIRA_RF_CHIP_LR2021 5
+#define AKIRA_RF_CHIP_ESP32S3      6
+
+/* Radio modulation modes (must match radio_modulation_t enum on host) */
+#define RADIO_MOD_FSK      1
+#define RADIO_MOD_GFSK     2
+#define RADIO_MOD_OOK      3
+#define RADIO_MOD_MSK      4
+#define RADIO_MOD_LORA     5
+#define RADIO_MOD_BLE_PHY  8
+
+/*
+ * Continuous-wave (CW) TX — keys a pure carrier at the current frequency
+ * and power.  Use for jamming, range testing, and spectral analysis.
+ * Required manifest capability: "rf.transceive"
+ * Supported chips: LR2021 (returns -ENOTSUP on others).
+ */
+
+/**
+ * @brief Start a continuous-wave (CW) carrier.
+ *
+ * The RF chip must already be selected (rf_select) and frequency+power
+ * configured (rf_set_frequency, rf_set_power).  The carrier stays on
+ * until rf_tx_cw_stop() is called.
+ *
+ * @return 0 on success, negative errno on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int rf_tx_cw_start(void);
+
+/**
+ * @brief Stop a continuous-wave carrier and return chip to standby.
+ * @return 0 on success, negative errno on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int rf_tx_cw_stop(void);
+
+/**
+ * @brief Fast frequency hop while CW is active — PLL lock only, no CalibFe.
+ *
+ * Stops CW briefly, sets the new frequency (~1ms), and restarts CW.
+ * Use this after the initial rf_tx_cw_start() to hop channels at
+ * nRF24-like speeds.  The initial rf_set_frequency() (with CalibFe)
+ * must be called first to configure the band and PA.
+ *
+ * @param freq_hz  New frequency in Hz.
+ * @return 0 on success, negative errno on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int rf_tx_cw_set_freq(uint32_t freq_hz);
+
+/**
+ * @brief Set the 8-bit LoRa sync word (LR2021 only).
+ *
+ * The LoRa sync word is the correlator gate: with the wrong value the chip
+ * never locks and delivers no packets (SYNC_FAIL); with a match, packets
+ * land in the RX FIFO. Used to intercept non-default networks — cycle
+ * candidate values and keep the first that yields receptions.
+ *
+ * Common values: 0x12 (Semtech private), 0x34 (LoRaWAN public), 0x56,
+ * 0xAB. Full space is 0x00–0xFF.
+ *
+ * Re-issues LoRa config and re-arms RX immediately. Requires "rf.transceive".
+ *
+ * @param sync  Sync word byte (0–255).
+ * @return 0 on success, negative errno on failure (-ENOTSUP if not LoRa/LR2021).
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int rf_set_sync_word(uint32_t sync);
+
+/*
+ * Raw OOK/ASK signal capture and replay (CC1121 byte-stream mode).
+ * Supported chips: CC1121.  Returns -ENOTSUP on chips without raw mode.
+ *
+ * Data format: raw OOK bitstream — 8 samples per byte at sample_rate_hz.
+ *   The chip samples the OOK envelope at the given rate; each byte holds
+ *   8 consecutive 1-bit samples (MSB-first).  Mark=1, space=0.
+ *
+ * Required manifest capability: "rf.transceive"
+ */
+
+/** Maximum bytes accepted by rf_raw_capture / rf_raw_replay */
+#define RF_RAW_MAX_BYTES 8192
+
+/**
+ * @brief Capture raw OOK bitstream bytes into @p buf.
+ *
+ * Arms the chip in raw OOK RX mode at @p sample_rate_hz and streams
+ * hard-sliced bits into buf until @p max_bytes is reached or @p timeout_ms
+ * elapses. One call lasts at most 2 s; capture longer signals with several
+ * calls.
+ *
+ * @param buf            Byte buffer in WASM memory.
+ * @param max_bytes      Maximum bytes to capture (1..8192).
+ * @param sample_rate_hz OOK envelope sampling rate in Hz (1000..500000,
+ *                       -EINVAL otherwise; e.g. 38400).
+ * @param timeout_ms     Capture timeout (0, negative or over 2000 = 2000 ms).
+ * @return Bytes captured on success; 0 if no signal within timeout; -ENOTSUP
+ *         if chip doesn't support raw mode; negative errno on error.
+ */
+extern int rf_raw_capture(void *buf, uint32_t max_bytes,
+                          uint32_t sample_rate_hz, int32_t timeout_ms);
+
+/**
+ * @brief Replay a raw OOK bitstream captured by rf_raw_capture().
+ *
+ * Gates the carrier from @p buf bits at @p sample_rate_hz, repeated
+ * @p repeat times with a 10 ms gap between repetitions.
+ * The whole call, all repeats included, is capped at 2 s: @p repeat is
+ * reduced to what fits, and a single pass that doesn't fit returns -E2BIG.
+ *
+ * @param buf            Byte buffer (same format as capture output).
+ * @param len            Number of bytes in @p buf (1..8192).
+ * @param sample_rate_hz Bit rate for replay in Hz (1000..500000).
+ * @param repeat         Transmission count (1..N).
+ * @return 0 on success, -ENOTSUP if chip doesn't support raw TX, negative errno.
+ */
+extern int rf_raw_replay(const void *buf, uint32_t len,
+                         uint32_t sample_rate_hz, int32_t repeat);
+
+/*
+ * =============================================================================
+ * MESH API (AkiraMesh — multi-hop AODV networking over the RF radio)
+ * =============================================================================
+ * Required capability: "mesh"
+ *
+ * Wraps the on-device AkiraMesh stack (route discovery, per-hop ACK/retransmit,
+ * duplicate suppression). Unlike the raw rf_* calls, the OS owns the radio and
+ * does the routing — the app only sends/receives application payloads.
+ *
+ * On this hardware the mesh binds to the LR2021 (LoRa). mesh_init() releases any
+ * rf_* ownership first, so do not mix rf_* and mesh_* in the same session.
+ *
+ * The session belongs to the app that called mesh_init(): other apps get
+ * -EPERM from mesh_start/stop/send/broadcast/recv_pop/distribute_app, and the
+ * session is stopped when that app exits.
+ */
+
+/** Node ID length in bytes (last byte is the human-facing short id). */
+#define AKIRA_MESH_NODE_ID_LEN   8
+/** Max length of a node's human-readable name (incl. NUL). */
+#define AKIRA_MESH_NAME_LEN      32
+/** Max application payload bytes per send/broadcast/recv. */
+#define AKIRA_MESH_MAX_PAYLOAD   200
+
+/* Node roles (must match akira_mesh_role_t on host). */
+#define AKIRA_MESH_ROLE_NODE         0
+#define AKIRA_MESH_ROLE_GATEWAY      1
+#define AKIRA_MESH_ROLE_PROVISIONER  2
+
+/**
+ * Discovered-node record returned by mesh_get_nodes().
+ * Layout mirrors akira_mesh_node_info_t on the host (52 bytes, LE).
+ */
+typedef struct {
+    uint8_t  node_id[AKIRA_MESH_NODE_ID_LEN];
+    char     name[AKIRA_MESH_NAME_LEN];
+    int32_t  role;
+    uint8_t  hop_count;
+    int8_t   rssi;
+    uint8_t  lqi;
+    uint32_t last_seen;   /**< ms timestamp of last packet from this node */
+} akira_mesh_node_t;
+
+/**
+ * Mesh counters returned by mesh_get_stats().
+ * Layout mirrors akira_mesh_stats_t on the host (24 bytes, LE).
+ */
+typedef struct {
+    uint32_t nodes_discovered;
+    uint32_t messages_sent;
+    uint32_t messages_received;
+    uint32_t messages_forwarded;
+    uint32_t routes_active;
+    uint32_t apps_distributed;
+} akira_mesh_stats_t;
+
+/**
+ * @brief Initialize the mesh with this node's identity and start discovery.
+ * Acquires the LoRa radio (releasing any rf_* ownership first).
+ * @param node_id  Short node id, 0..255 (last byte of the 8-byte id).
+ * @param name     Human-readable name, or NULL to auto-name "akira-XX".
+ * @param role     AKIRA_MESH_ROLE_*.
+ * @param beacon_interval_ms  Discovery-beacon period (0 = default 5000 ms;
+ *                 clamped to 1000..600000 ms).
+ * @return 0 on success, -EALREADY if a mesh session already exists, negative
+ *         errno on failure.
+ */
+extern int mesh_init(int node_id, const char *name, int role,
+                     uint32_t beacon_interval_ms);
+
+/** @brief Begin beaconing / listening. @return 0 or negative errno. */
+extern int mesh_start(void);
+
+/** @brief Stop the mesh and release the radio. @return 0 or negative errno. */
+extern int mesh_stop(void);
+
+/**
+ * @brief Reliably send a payload to one node (route-discovered, ACKed).
+ * @param dest_id  Pointer to an 8-byte node id in WASM memory.
+ * @param data     Payload buffer (≤ AKIRA_MESH_MAX_PAYLOAD bytes).
+ * @param len      Payload length.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_send(const void *dest_id, const void *data, uint32_t len);
+
+/**
+ * @brief Broadcast a payload to every node within @p max_hops.
+ * @param data      Payload buffer (≤ AKIRA_MESH_MAX_PAYLOAD bytes).
+ * @param len       Payload length.
+ * @param max_hops  Flood radius in hops.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_broadcast(const void *data, uint32_t len, int max_hops);
+
+/**
+ * @brief Pop one received payload from the mesh RX queue (non-blocking at t=0).
+ * @param src_id_out  Pointer to an 8-byte buffer; filled with the sender id.
+ * @param buf         Payload output buffer.
+ * @param max_len     Size of @p buf.
+ * @param timeout_ms  0 = non-blocking; else block up to this long (capped at
+ *                    60000 ms).
+ * @return Bytes copied (≥ 0), or negative errno: -EAGAIN if nothing arrived,
+ *         -ECANCELED if the app is being stopped, -ENODEV if no session.
+ */
+extern int mesh_recv_pop(void *src_id_out, void *buf, uint32_t max_len,
+                         uint32_t timeout_ms);
+
+/**
+ * @brief Copy the discovered-node table into @p buf.
+ * @param buf        Array of akira_mesh_node_t in WASM memory.
+ * @param max_nodes  Capacity of @p buf in records.
+ * @return Number of nodes written (≥ 0), or negative errno.
+ */
+extern int mesh_get_nodes(void *buf, uint32_t max_nodes);
+
+/**
+ * @brief Copy the mesh statistics into @p buf.
+ * @param buf  Pointer to an akira_mesh_stats_t in WASM memory.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_get_stats(void *buf);
+
+/**
+ * @brief Chunk and reliably distribute a WASM app binary to one mesh node.
+ * @param dest_id   Pointer to an 8-byte node id in WASM memory.
+ * @param app_name  App name (null-terminated).
+ * @param data      App binary bytes.
+ * @param len       Binary length.
+ * @return 0 on success, negative errno on failure.
+ */
+extern int mesh_distribute_app(const void *dest_id, const char *app_name,
+                               const void *data, uint32_t len);
 
 /*
  * =============================================================================
@@ -1095,11 +1862,17 @@ extern int rf_send(uint32_t payload_ptr, uint32_t len);
  *
  * Polling-only timers backed by the OS uptime counter.
  * Values are in milliseconds. Use delay() to yield between polls.
+ *
+ * Handles belong to the app that created them (another app's handle returns
+ * -EPERM, an unknown one -EINVAL) and are freed when it exits.
  */
 
 /**
  * @brief Allocate a new timer handle.
- * @return Handle index ≥0 on success, -ENOMEM if pool is full.
+ * Each app may hold at most half of CONFIG_AKIRA_WASM_TIMER_MAX_HANDLES
+ * (default 8, so 4 per app).
+ * @return Handle index ≥0 on success, -ENOMEM if the pool or the app's share
+ *         is full.
  */
 extern int timer_create(void);
 
@@ -1140,24 +1913,34 @@ extern int timer_free(int32_t handle);
  * Required capability: uart
  *
  * Full-duplex UART access. UART0 is reserved for the system shell.
- * port_id 0 = first secondary UART (UART1).
+ * port_id 0 = first secondary UART (UART1), 1 = UART2.
  * uart_read() is non-blocking — returns 0 if no data is available.
+ *
+ * A UART the system uses (console, shell, Bluetooth HCI, mcumgr, or one with
+ * a device node on it) is refused with -EACCES. A port belongs to the app
+ * that opened it (-EPERM for other apps, -EBADF once closed) and is closed,
+ * with its previous line settings restored, when the app exits.
  */
 
 /**
- * @brief Open a secondary UART port.
- * @param port_id  0-indexed secondary UART (0 = UART1).
- * @param baud_rate Desired baud rate (e.g. 115200).
- * @return Handle index ≥0 on success, negative error code on failure.
+ * @brief Open a secondary UART port (8N1, no flow control).
+ * @param port_id  0-indexed secondary UART (0 = UART1, 1 = UART2).
+ * @param baud_rate Desired baud rate, 1200..3000000 (e.g. 115200).
+ * @return Handle index ≥0 on success, negative error code on failure:
+ *         -EINVAL bad port or baud rate, -EACCES system UART, -EBUSY already
+ *         open, -ENODEV device not ready.
  */
 extern int uart_open(int32_t port_id, int32_t baud_rate);
 
 /**
  * @brief Write bytes to an open UART.
+ * One call sends at most 4096 bytes and about 250 ms of wire time at the
+ * port's baud rate (at least 16 bytes), and stops early if the app is being
+ * stopped: loop on the returned count.
  * @param handle    Handle from uart_open().
  * @param buf       Pointer to data buffer.
  * @param len       Number of bytes to write.
- * @return Bytes written, or negative error code.
+ * @return Bytes written (may be fewer than @p len), or negative error code.
  */
 extern int uart_write(int32_t handle, const uint8_t *buf, uint32_t len);
 
@@ -1184,8 +1967,16 @@ extern int uart_close(int32_t handle);
  * =============================================================================
  * Required capability: i2c
  *
- * Stateless raw register access. The LSM6DS3 IMU is on bus 0 at address 0x6A.
- * All lengths are capped at 256 bytes; addresses must be 7-bit (≤ 0x7F).
+ * Stateless raw register access.
+ * All lengths are 1..256 bytes; addresses must be 7-bit (≤ 0x7F) and
+ * registers 8-bit (≤ 0xFF), else -EINVAL. An unknown bus returns -ENODEV, a
+ * bus that stays busy for 500 ms -EBUSY.
+ *
+ * Addresses the system uses are refused with -EACCES (reads too) before the
+ * bus is touched: every devicetree child of the bus, whatever its status,
+ * the reserved ranges 0x00-0x07 and 0x78-0x7F, and on AkiraConsole Prod also
+ * 0x2D, 0x34, 0x48 and 0x70. Devices the OS drives are read with
+ * sensor_read() instead.
  */
 
 /**
@@ -1218,7 +2009,13 @@ extern int i2c_read_reg(int32_t bus_id, int32_t dev_addr, int32_t reg_addr,
  * =============================================================================
  * Required capability: pwm
  *
- * Channel-indexed PWM control. Channel 0 is the first available PWM output.
+ * Channel-indexed PWM control.
+ *
+ * The channel number is the LEDC hardware channel (0..3). A channel is usable
+ * only if the devicetree defines it (-ENODEV otherwise), no system node uses
+ * it or shares its timer, and its output pad is a pin apps may use (-EACCES
+ * otherwise). A channel belongs to the app that set it until pwm_disable();
+ * channels an app left running are stopped when it exits.
  */
 
 /**
@@ -1226,16 +2023,167 @@ extern int i2c_read_reg(int32_t bus_id, int32_t dev_addr, int32_t reg_addr,
  * @param channel  Logical PWM channel index (0-based).
  * @param freq_hz  Frequency in Hertz (1–10,000,000).
  * @param duty_pct Duty cycle percentage (0–100).
- * @return 0 on success, negative error code on failure.
+ * @return 0 on success, negative error code on failure: -EINVAL bad
+ *         frequency or duty (also a frequency too high for the channel
+ *         clock), -EBUSY channel set by another app.
  */
 extern int pwm_set(int32_t channel, int32_t freq_hz, int32_t duty_pct);
 
 /**
- * @brief Disable a PWM channel (output held low).
+ * @brief Disable a PWM channel (output held low) and free it for other apps.
  * @param channel Logical PWM channel index.
- * @return 0 on success, negative error code on failure.
+ * @return 0 on success, negative error code on failure (-EPERM if another
+ *         app set the channel).
  */
 extern int pwm_disable(int32_t channel);
+
+/*
+ * =============================================================================
+ * ADC API
+ * Capability: "adc"
+ * =============================================================================
+ *
+ * Hardware configuration comes entirely from board overlay and .conf files:
+ *   Overlay: enable the ADC node and optionally set alias akira-adc = &adcX
+ *   Conf:    CONFIG_ADC=y, CONFIG_AKIRA_WASM_ADC=y
+ *            CONFIG_AKIRA_WASM_ADC_VREF_MV=<mV>
+ *            CONFIG_AKIRA_WASM_ADC_RESOLUTION=<bits>
+ *            CONFIG_AKIRA_WASM_ADC_CHANNEL_MASK=<channels apps may read>
+ *
+ * Only channels in CONFIG_AKIRA_WASM_ADC_CHANNEL_MASK are readable, and on
+ * ESP32 a channel whose pad is a system pin is refused whatever the mask:
+ * -EACCES. AkiraConsole Prod allows SAR ADC1 channel 1 (GPIO2, the RV1 pot).
+ * -EBUSY if the ADC stays busy for 200 ms; -EPERM without the capability.
+ */
+
+/**
+ * @brief Read a raw ADC sample from the specified channel.
+ * @param channel ADC channel index (0-based).
+ * @return Raw sample value on success, negative error code on failure.
+ */
+extern int adc_read(int channel);
+
+/**
+ * @brief Read an ADC channel and return the result in millivolts.
+ * @param channel ADC channel index (0-based).
+ * @return Voltage in millivolts on success, negative error code on failure.
+ */
+extern int adc_read_mv(int channel);
+
+/*
+ * =============================================================================
+ * NFC API
+ * Capability: "nfc"
+ * =============================================================================
+ *
+ * Chip-agnostic NFC tag access via nfc_manager — works with any registered
+ * NFC tag driver (currently ST25DV). Covers static user-memory read/write,
+ * RF field detection, and Fast Transfer Mode (FTM) mailbox exchange for
+ * dynamic content served live to an RF reader.
+ */
+
+/**
+ * @brief Read the tag's 8-byte UID.
+ * @param uid_out 8-byte destination buffer.
+ * @return 0 on success, negative error code on failure (-ENODEV if no NFC
+ *         tag is registered).
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_uid(uint8_t uid_out[8]);
+
+/**
+ * @brief Read from tag user memory.
+ * @param addr Byte address within user memory.
+ * @param buf  Destination buffer.
+ * @param len  Number of bytes to read (max 256).
+ * @return 0 on success, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_read(int addr, uint8_t *buf, unsigned int len);
+
+/**
+ * @brief Write to tag user memory.
+ * @param addr Byte address within user memory.
+ * @param buf  Source buffer.
+ * @param len  Number of bytes to write (max 256).
+ * @return 0 on success, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_write(int addr, const uint8_t *buf, unsigned int len);
+
+/**
+ * @brief Check whether an RF field is currently present.
+ * @return 1 if present, 0 if absent, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_field_present(void);
+
+/**
+ * @brief Enable/disable Fast Transfer Mode (FTM) mailbox.
+ * @param enable 1 to enable, 0 to disable.
+ * @param wdg    Watchdog setting 0-7: duration = 2^(wdg-1) x 30ms, 0 = infinite.
+ * @return 0 on success, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_mb_enable(int enable, uint8_t wdg);
+
+/**
+ * @brief Put a message in the FTM mailbox for an RF reader to read.
+ * @param buf Source buffer.
+ * @param len Message length (1-256).
+ * @return 0 on success, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_mb_put(const uint8_t *buf, unsigned int len);
+
+/**
+ * @brief Get the message an RF reader put in the FTM mailbox.
+ * @param buf Destination buffer.
+ * @param cap Destination buffer capacity.
+ * @return Number of bytes read (>=0) on success, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_mb_get(uint8_t *buf, unsigned int cap);
+
+/**
+ * @brief Query FTM mailbox control/status bits and current message length.
+ * @param ctrl_out    Set to the raw MB_CTRL_Dyn register value.
+ * @param msg_len_out Set to the current message length.
+ * @return 0 on success, negative error code on failure.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int nfc_mb_status(uint8_t *ctrl_out, unsigned int *msg_len_out);
+
+/*
+ * =============================================================================
+ * WDT API
+ * Capability: "wdt"
+ * =============================================================================
+ *
+ * The system watchdog is enabled and fed by AkiraOS when CONFIG_AKIRA_WDT=y,
+ * from a system work queue that WASM apps can't starve (app threads run at
+ * the lowest preemptible priority). A long-running app needs no watchdog
+ * calls.
+ */
+
+/**
+ * @brief Report whether the system watchdog is active.
+ *
+ * Since AkiraOS 1.7 this does NOT feed the hardware watchdog: an app that
+ * could feed it could keep a wedged system from being reset. App hangs are
+ * handled by the runtime's stop path instead.
+ *
+ * @return 0 if the watchdog is active, -ENODEV if watchdog is not active, -EPERM if capability missing.
+ */
+extern int wdt_pet(void);
 
 /*
  * =============================================================================
@@ -1254,17 +2202,340 @@ extern int pwm_disable(int32_t channel);
  * =============================================================================
  */
 
-#define EPERM           1   /**< Operation not permitted */
-#define ENOENT          2   /**< No such file or directory */
-#define EIO             5   /**< I/O error */
-#define EBADF           9   /**< Bad file descriptor */
-#define ENOMEM          12  /**< Out of memory */
-#define EACCES          13  /**< Permission denied */
-#define EFAULT          14  /**< Bad address */
-#define EBUSY           16  /**< Device or resource busy */
-#define EINVAL          22  /**< Invalid argument */
-#define ENOSPC          28  /**< No space left on device */
-#define ETIMEDOUT       110 /**< Connection timed out */
+/*
+ * AkiraOS (Zephyr / picolibc) errno values. Natives return them negated,
+ * e.g. -AKIRA_EACCES. The AKIRA_E* names are always defined; the plain E*
+ * names below are defined from them for existing apps.
+ *
+ * native_sim built with CONFIG_EXTERNAL_LIBC=y (host glibc, as AkiraOS's
+ * native_sim board config does for TFLite Micro) returns the host's numbers
+ * instead (e.g. ETIMEDOUT 110, ENOTSUP 95, ECANCELED 125).
+ */
+#define AKIRA_EPERM         1   /**< Operation not permitted (usually: capability not granted) */
+#define AKIRA_ENOENT        2   /**< No such file or directory */
+#define AKIRA_EINTR         4   /**< Interrupted: the app is being stopped */
+#define AKIRA_EIO           5   /**< I/O error */
+#define AKIRA_E2BIG         7   /**< Argument list / value too long */
+#define AKIRA_EBADF         9   /**< Bad file descriptor */
+#define AKIRA_EAGAIN        11  /**< Try again (timeout, or a rate limit) */
+#define AKIRA_ENOMEM        12  /**< Out of memory */
+#define AKIRA_EACCES        13  /**< Permission denied (system pin, address, UART, path) */
+#define AKIRA_EFAULT        14  /**< Bad address */
+#define AKIRA_EBUSY         16  /**< Device or resource busy (or owned by another app) */
+#define AKIRA_EEXIST        17  /**< File exists */
+#define AKIRA_ENODEV        19  /**< No such device */
+#define AKIRA_ENOTDIR       20  /**< Not a directory */
+#define AKIRA_EISDIR        21  /**< Is a directory */
+#define AKIRA_EINVAL        22  /**< Invalid argument */
+#define AKIRA_EMFILE        24  /**< Too many open files */
+#define AKIRA_ENOSPC        28  /**< No space left on device (or quota reached) */
+#define AKIRA_ENOMSG        35  /**< No message available */
+#define AKIRA_ENODATA       61  /**< No data available */
+#define AKIRA_ENOSYS        88  /**< Function not implemented */
+#define AKIRA_ENOTEMPTY     90  /**< Directory not empty */
+#define AKIRA_ENAMETOOLONG  91  /**< File name or key too long */
+#define AKIRA_ETIMEDOUT     116 /**< Timed out (earlier SDK headers wrongly said 110) */
+#define AKIRA_EALREADY      120 /**< Operation already in progress */
+#define AKIRA_EMSGSIZE      122 /**< Message too long */
+#define AKIRA_ENOTCONN      128 /**< Not connected */
+#define AKIRA_ENOTSUP       134 /**< Not supported */
+#define AKIRA_EOVERFLOW     139 /**< Value too large */
+#define AKIRA_ECANCELED     140 /**< Canceled: the app is being stopped */
+
+/*
+ * A libc <errno.h> included before this header (wasi-libc's EINVAL is 28)
+ * would give the plain names values the firmware never returns. Define
+ * AKIRA_API_NO_ERRNO_NAMES before including akira_api.h to skip the plain
+ * names and use only the AKIRA_E* ones.
+ */
+#ifndef AKIRA_API_NO_ERRNO_NAMES
+#if (defined(EPERM) && EPERM != AKIRA_EPERM) || (defined(ENOENT) && ENOENT != AKIRA_ENOENT) || \
+    (defined(EINTR) && EINTR != AKIRA_EINTR) || (defined(EIO) && EIO != AKIRA_EIO) || \
+    (defined(E2BIG) && E2BIG != AKIRA_E2BIG) || (defined(EBADF) && EBADF != AKIRA_EBADF) || \
+    (defined(EAGAIN) && EAGAIN != AKIRA_EAGAIN) || (defined(ENOMEM) && ENOMEM != AKIRA_ENOMEM) || \
+    (defined(EACCES) && EACCES != AKIRA_EACCES) || (defined(EFAULT) && EFAULT != AKIRA_EFAULT) || \
+    (defined(EBUSY) && EBUSY != AKIRA_EBUSY) || (defined(EEXIST) && EEXIST != AKIRA_EEXIST) || \
+    (defined(ENODEV) && ENODEV != AKIRA_ENODEV) || (defined(ENOTDIR) && ENOTDIR != AKIRA_ENOTDIR) || \
+    (defined(EISDIR) && EISDIR != AKIRA_EISDIR) || (defined(EINVAL) && EINVAL != AKIRA_EINVAL) || \
+    (defined(EMFILE) && EMFILE != AKIRA_EMFILE) || (defined(ENOSPC) && ENOSPC != AKIRA_ENOSPC) || \
+    (defined(ENOMSG) && ENOMSG != AKIRA_ENOMSG) || (defined(ENODATA) && ENODATA != AKIRA_ENODATA) || \
+    (defined(ENOSYS) && ENOSYS != AKIRA_ENOSYS) || (defined(ENOTEMPTY) && ENOTEMPTY != AKIRA_ENOTEMPTY) || \
+    (defined(ENAMETOOLONG) && ENAMETOOLONG != AKIRA_ENAMETOOLONG) || (defined(ETIMEDOUT) && ETIMEDOUT != AKIRA_ETIMEDOUT) || \
+    (defined(EALREADY) && EALREADY != AKIRA_EALREADY) || (defined(EMSGSIZE) && EMSGSIZE != AKIRA_EMSGSIZE) || \
+    (defined(ENOTCONN) && ENOTCONN != AKIRA_ENOTCONN) || (defined(ENOTSUP) && ENOTSUP != AKIRA_ENOTSUP) || \
+    (defined(EOVERFLOW) && EOVERFLOW != AKIRA_EOVERFLOW) || (defined(ECANCELED) && ECANCELED != AKIRA_ECANCELED)
+#error "akira_api.h: its error codes are AkiraOS (Zephyr) values, but a libc <errno.h> (e.g. wasi-libc, where EINVAL is 28) was included first and defines them differently. Include akira_api.h without the libc <errno.h>, or define AKIRA_API_NO_ERRNO_NAMES before including it and compare return values against the AKIRA_E* names (e.g. -AKIRA_EINVAL)."
+#endif
+
+#ifndef EPERM
+#define EPERM AKIRA_EPERM
+#endif
+#ifndef ENOENT
+#define ENOENT AKIRA_ENOENT
+#endif
+#ifndef EINTR
+#define EINTR AKIRA_EINTR
+#endif
+#ifndef EIO
+#define EIO AKIRA_EIO
+#endif
+#ifndef E2BIG
+#define E2BIG AKIRA_E2BIG
+#endif
+#ifndef EBADF
+#define EBADF AKIRA_EBADF
+#endif
+#ifndef EAGAIN
+#define EAGAIN AKIRA_EAGAIN
+#endif
+#ifndef ENOMEM
+#define ENOMEM AKIRA_ENOMEM
+#endif
+#ifndef EACCES
+#define EACCES AKIRA_EACCES
+#endif
+#ifndef EFAULT
+#define EFAULT AKIRA_EFAULT
+#endif
+#ifndef EBUSY
+#define EBUSY AKIRA_EBUSY
+#endif
+#ifndef EEXIST
+#define EEXIST AKIRA_EEXIST
+#endif
+#ifndef ENODEV
+#define ENODEV AKIRA_ENODEV
+#endif
+#ifndef ENOTDIR
+#define ENOTDIR AKIRA_ENOTDIR
+#endif
+#ifndef EISDIR
+#define EISDIR AKIRA_EISDIR
+#endif
+#ifndef EINVAL
+#define EINVAL AKIRA_EINVAL
+#endif
+#ifndef EMFILE
+#define EMFILE AKIRA_EMFILE
+#endif
+#ifndef ENOSPC
+#define ENOSPC AKIRA_ENOSPC
+#endif
+#ifndef ENOMSG
+#define ENOMSG AKIRA_ENOMSG
+#endif
+#ifndef ENODATA
+#define ENODATA AKIRA_ENODATA
+#endif
+#ifndef ENOSYS
+#define ENOSYS AKIRA_ENOSYS
+#endif
+#ifndef ENOTEMPTY
+#define ENOTEMPTY AKIRA_ENOTEMPTY
+#endif
+#ifndef ENAMETOOLONG
+#define ENAMETOOLONG AKIRA_ENAMETOOLONG
+#endif
+#ifndef ETIMEDOUT
+#define ETIMEDOUT AKIRA_ETIMEDOUT
+#endif
+#ifndef EALREADY
+#define EALREADY AKIRA_EALREADY
+#endif
+#ifndef EMSGSIZE
+#define EMSGSIZE AKIRA_EMSGSIZE
+#endif
+#ifndef ENOTCONN
+#define ENOTCONN AKIRA_ENOTCONN
+#endif
+#ifndef ENOTSUP
+#define ENOTSUP AKIRA_ENOTSUP
+#endif
+#ifndef EOVERFLOW
+#define EOVERFLOW AKIRA_EOVERFLOW
+#endif
+#ifndef ECANCELED
+#define ECANCELED AKIRA_ECANCELED
+#endif
+#endif /* AKIRA_API_NO_ERRNO_NAMES */
+
+/*
+ * =============================================================================
+ * WIFI SCAN API
+ * =============================================================================
+ * Required capability: "rf.transceive"
+ *
+ * Passive 802.11 scanner — no association, no authentication.
+ * Uses the ESP32 built-in WiFi radio via Zephyr NET_REQUEST_WIFI_SCAN.
+ *
+ * Security type codes returned in akira_wifi_ap_t.security:
+ */
+#define WIFI_SEC_OPEN 0  /**< Open / no encryption                         */
+#define WIFI_SEC_WEP  1  /**< WEP (deprecated)                             */
+#define WIFI_SEC_WPA  2  /**< WPA-Personal (TKIP)                          */
+#define WIFI_SEC_WPA2 3  /**< WPA2-Personal (CCMP) and WPA2-FT             */
+#define WIFI_SEC_WPA3 4  /**< WPA3-Personal (SAE) including SAE-H2E / auto */
+#define WIFI_SEC_ENT  5  /**< Enterprise (EAP-TLS, PEAP, TTLS, …)         */
+
+/**
+ * @brief One AP record returned by wifi_scan_aps().
+ *
+ * Fixed 48-byte wire format — layout must stay in sync with
+ * struct wifi_ap_wire in akira_rf_api.c.
+ */
+typedef struct {
+    uint8_t  ssid[33];       /**< Null-terminated SSID (max 32 chars)       */
+    uint8_t  bssid[6];       /**< BSSID (MAC address)                       */
+    uint8_t  channel;        /**< 2.4 GHz channel (1–14)                   */
+    int8_t   rssi;           /**< Signal strength in dBm                    */
+    uint8_t  security;       /**< WIFI_SEC_* constant                       */
+    uint8_t  _pad[2];        /**< Reserved, always zero                     */
+    uint32_t last_seen_ms;   /**< Host uptime (ms) when this AP was scanned */
+} akira_wifi_ap_t;           /* sizeof == 48 */
+
+/**
+ * @brief Passive 802.11 AP scan.
+ *
+ * Blocks for up to ~8 seconds while the WiFi radio sweeps all 2.4 GHz
+ * channels. Returns once scanning is complete (or times out).
+ * Deduplicates by BSSID, keeping the strongest RSSI reading per AP.
+ *
+ * @param buf      Pointer to an array of akira_wifi_ap_t in WASM memory.
+ * @param buf_len  Size of @p buf in bytes. Maximum APs = buf_len / 48.
+ * @return Number of APs written (≥ 0), or negative errno on error.
+ *         -ENODEV  WiFi interface not available
+ *         -EINVAL  buf_len < 48
+ *         -EPERM   "rf.transceive" capability not granted
+ *
+ * Typical usage:
+ * @code
+ *   akira_wifi_ap_t aps[64];
+ *   int n = wifi_scan_aps(aps, sizeof(aps));
+ *   for (int i = 0; i < n; i++) { ... aps[i].ssid ... }
+ * @endcode
+ */
+extern int wifi_scan_aps(akira_wifi_ap_t *buf, uint32_t buf_len);
+
+/**
+ * @brief Passive 802.11 spectrum scan (per-channel max RSSI).
+ *
+ * Fills @p buf with one int8_t per channel (channels 1–14, index 0–13).
+ * Values are the strongest RSSI seen on that channel, or 0x80 (INT8_MIN)
+ * if no traffic was detected.
+ *
+ * @param buf     int8_t array of at least 14 bytes.
+ * @param buf_len Must be ≥ 14.
+ * @return 14 on success, negative errno on failure.
+ */
+extern int wifi_scan_rssi(int8_t *buf, uint32_t buf_len);
+
+/**
+ * @brief Inject 802.11 deauthentication frames.
+ *
+ * Sends @p count deauthentication management frames spoofed from @p bssid
+ * to @p client_mac (or FF:FF:FF:FF:FF:FF for broadcast) on @p channel.
+ * The inter-frame delay is @p interval_ms milliseconds (minimum 10 ms).
+ *
+ * Requires manifest capability: "wifi.inject"
+ *
+ * @param bssid        6-byte AP BSSID to spoof as source/BSSID fields.
+ * @param client_mac   6-byte destination MAC (use WIFI_MAC_BROADCAST for all clients).
+ * @param channel      2.4 GHz channel (1–14).
+ * @param count        Number of frames to send (1–9999).
+ * @param interval_ms  Inter-frame gap in ms (clamped to ≥ 10 ms).
+ * @return Number of frames sent on success, negative errno on error.
+ *         -EPERM   "wifi.inject" capability not granted
+ *         -EINVAL  Invalid channel, count, or NULL pointer
+ *         -ENODEV  WiFi interface not available
+ */
+extern int wifi_deauth(const uint8_t *bssid, const uint8_t *client_mac,
+                       int32_t channel, int32_t count, int32_t interval_ms);
+
+/** Broadcast MAC — pass as client_mac to deauth all associated clients */
+#define WIFI_MAC_BROADCAST ((const uint8_t *)"\xff\xff\xff\xff\xff\xff")
+
+/** Deauth reason codes (IEEE 802.11-2020 Table 9-49) */
+#define WIFI_DEAUTH_REASON_UNSPECIFIED      1
+#define WIFI_DEAUTH_REASON_AUTH_EXPIRED     2
+#define WIFI_DEAUTH_REASON_LEAVING          3
+#define WIFI_DEAUTH_REASON_INACTIVITY       4
+#define WIFI_DEAUTH_REASON_CLASS3_NONASSOC  7  /**< Default: Class-3 from non-assoc STA */
+
+/** @brief 4-way handshake capture result — filled by wifi_capture_pmkid().
+ *
+ *  Format for hashcat mode 22000:
+ *    WPA*01*APMAC*STAMAC*SSID*ANONCE*SNONCE*MIC*EAPOLFRAME
+ */
+typedef struct {
+    uint8_t  ap_mac[6];        /**< AP BSSID */
+    uint8_t  sta_mac[6];       /**< Client MAC */
+    uint8_t  anonce[32];       /**< ANonce from EAPOL-Key M1 */
+    uint8_t  snonce[32];       /**< SNonce from EAPOL-Key M2 */
+    uint8_t  mic[16];          /**< MIC from EAPOL-Key M2 */
+    uint8_t  eapol_frame[256]; /**< raw EAPOL frame (M2) for hashcat */
+    uint16_t eapol_len;        /**< length of eapol_frame */
+    char     ssid[33];         /**< AP SSID (null-terminated) */
+    int32_t  found;            /**< 1 = handshake complete, 0 = timeout */
+} handshake_capture_result_t;
+
+/**
+ * @brief Deauth a client, then capture the 4-way handshake (M1 + M2)
+ *        triggered by reconnection.
+ *
+ * Result contains ANonce (M1), SNonce + MIC (M2) for hashcat mode 22000.
+ *
+ * @param bssid        6-byte AP BSSID.
+ * @param client_mac   6-byte client MAC to deauth (use WIFI_MAC_BROADCAST).
+ * @param channel      2.4 GHz channel (1–14).
+ * @param ssid         AP SSID.
+ * @param result       Output buffer (handshake_capture_result_t).
+ * @param timeout_ms   Max wait in ms (recommended: 12000).
+ * @return 1 if handshake complete, 0 on timeout, negative errno on error.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int wifi_capture_pmkid(const uint8_t *bssid, const uint8_t *client_mac,
+                               int32_t channel, const char *ssid,
+                               handshake_capture_result_t *result,
+                               int32_t timeout_ms);
+
+/**
+ * @brief One client record returned by wifi_scan_clients().
+ *
+ * Fixed 7-byte wire format — layout must stay in sync with
+ * struct client_wire in akira_wifi_api.c.
+ */
+typedef struct {
+    uint8_t mac[6];   /**< Client (station) MAC address */
+    int8_t  rssi;     /**< Strongest RSSI seen from this client (dBm) */
+} akira_wifi_client_t; /* sizeof == 7 */
+
+/**
+ * @brief Enumerate clients of an AP by passive sniffing its channel.
+ *
+ * Locks the radio to @p channel in promiscuous mode for @p timeout_ms and
+ * collects distinct client MACs: data frames whose BSSID matches @p bssid
+ * (both directions) plus any probe requests seen on the channel. MACs are
+ * deduplicated keeping the strongest RSSI.
+ *
+ * This is passive receive only — no frames are injected.
+ *
+ * Requires manifest capability: "wifi.inject"
+ *
+ * @param bssid       6-byte AP BSSID to correlate against.
+ * @param buf         Array of akira_wifi_client_t in WASM memory.
+ * @param buf_len     Size of @p buf in bytes. Max clients = buf_len / 7.
+ * @param channel     2.4 GHz channel (1–14) the AP is on.
+ * @param timeout_ms  Sniff window in ms (clamped to ≥ 1000; default 4000).
+ * @return Number of clients found (≥ 0), or negative errno on error.
+ *         -EPERM   "wifi.inject" capability not granted
+ *         -EINVAL  Invalid channel, NULL pointer, or buf_len < 7
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ */
+extern int wifi_scan_clients(const uint8_t *bssid, akira_wifi_client_t *buf,
+                             uint32_t buf_len, int32_t channel,
+                             int32_t timeout_ms);
 
 /*
  * =============================================================================
@@ -1272,8 +2543,19 @@ extern int pwm_disable(int32_t channel);
  * =============================================================================
  *
  * Sandboxed file I/O.  Each app is confined to its private directory:
- *   <best_mount>/apps/<app_name>/
- * Paths are relative.  ".." traversal is rejected with -EACCES.
+ *   /SD:/apps/<app_name>/ with an SD card, /lfs/apps/<app_name>/ without
+ * (the same directory the FILESYSTEM API uses).
+ * Paths are relative.  ".." traversal is rejected with -EACCES; '\\', ':' and
+ * control characters with -EINVAL; paths over 192 characters with
+ * -ENAMETOOLONG.
+ *
+ * Limits: CONFIG_AKIRA_WASM_STORAGE_MAX_FILES_PER_APP (default 2) open files
+ * per app, and all apps together, through this and the FILESYSTEM API, leave
+ * the OS two of the filesystem's file slots: -EMFILE beyond that. A write
+ * that would grow a file past CONFIG_AKIRA_WASM_STORAGE_QUOTA_BYTES (default
+ * 256 KB), or a write or create that would leave less than a quarter of the
+ * volume free (at least 64 KB, at most 8 MB kept), returns -ENOSPC. I/O runs
+ * in 4 KB steps. Files the app left open are closed when it exits.
  *
  * Required capabilities in the app manifest:
  *   "storage.read"  — storage_open(O_READ), storage_read, storage_list
@@ -1289,9 +2571,12 @@ extern int pwm_disable(int32_t channel);
 
 /**
  * @brief Open a file in the app's private sandbox.
+ * Opening for writing creates the app directory, and the file's parent
+ * directory one level deep, if missing.
  * @param path  Relative path (e.g. "log.txt", "sub/data.bin").
  * @param flags STORAGE_O_READ / STORAGE_O_WRITE / STORAGE_O_APPEND / STORAGE_O_RDWR
- * @return Non-negative fd on success; negative errno on error.
+ * @return Non-negative fd on success; negative errno on error (-EMFILE open
+ *         file limit, -ENOSPC volume reserve, -EISDIR, -ENOENT).
  */
 extern int storage_open(const char *path, int flags);
 
@@ -1300,7 +2585,9 @@ extern int storage_open(const char *path, int flags);
  * @param fd   Descriptor from storage_open().
  * @param buf  Destination buffer.
  * @param len  Max bytes to read.
- * @return Bytes read (0 = EOF); negative errno on error.
+ * @return Bytes read (0 = EOF; fewer than @p len if the app is being
+ *         stopped); negative errno on error (-EBADF: not this app's fd or
+ *         not open for reading).
  */
 extern int storage_read(int fd, void *buf, int len);
 
@@ -1309,7 +2596,8 @@ extern int storage_read(int fd, void *buf, int len);
  * @param fd   Descriptor from storage_open().
  * @param buf  Source data.
  * @param len  Number of bytes to write.
- * @return Bytes written; negative errno on error.
+ * @return Bytes written; negative errno on error (-ENOSPC per-file quota or
+ *         volume reserve, -EBADF not this app's fd or not open for writing).
  */
 extern int storage_write(int fd, const void *buf, int len);
 
@@ -1320,9 +2608,10 @@ extern int storage_write(int fd, const void *buf, int len);
 extern void storage_close(int fd);
 
 /**
- * @brief Delete a file from the app's sandbox.
+ * @brief Delete a file (or an empty directory) from the app's sandbox.
  * @param path  Relative path.
- * @return 0 on success; negative errno on error (-ENOENT if not found).
+ * @return 0 on success; negative errno on error (-ENOENT if not found,
+ *         -ENOTEMPTY for a directory that isn't empty).
  */
 extern int storage_delete(const char *path);
 
@@ -1330,7 +2619,8 @@ extern int storage_delete(const char *path);
  * @brief List files in a sandbox directory.
  *
  * Returns a newline-separated list of names, NUL-terminated.
- * Directories appear with a trailing '/'.
+ * Directories appear with a trailing '/'. At most 256 entries are looked at
+ * per call. The sandbox root lists as empty before the app creates anything.
  *
  * @param path  Relative subdirectory, or "" for sandbox root.
  * @param buf   Output buffer.
@@ -1363,12 +2653,26 @@ extern int storage_list(const char *path, char *buf, int len);
  *   Byte 0   : event type (NET_EVT_*)
  *   Byte 1   : stream handle
  *   Byte 2-3 : extra (uint16 LE) — new handle for NET_EVT_ACCEPT, errno for NET_EVT_ERROR
+ *
+ * Streams belong to the app that opened them (another app's handle returns
+ * -ENOENT) and are closed, with their rings detached and events dropped,
+ * when it exits. With more than one app slot an app may hold at most
+ * CONFIG_AKIRA_NET_MAX_STREAMS - 1 streams (default 4 - 1 = 3): -ENOSPC.
+ * The ring buffers must sit in linear memory that can't grow: link the app
+ * with --initial-memory equal to --max-memory, or net_tx_bind() and
+ * net_rx_bind() return -ENOTSUP. Sends never block the app: the poll thread
+ * sends. net_connect(), net_bind() and net_listen() go through the
+ * firmware's egress policy (-EACCES when refused; after 4 refusals within a
+ * second further requests are refused at once). Calls that start new work
+ * while the app is being stopped return -ECANCELED.
  */
 
 /** @brief Socket type: TCP stream */
 #define NET_TYPE_TCP  0
 /** @brief Socket type: UDP datagram */
 #define NET_TYPE_UDP  1
+/** @brief Socket type: TLS stream over TCP (requires firmware CONFIG_AKIRA_WASM_NET_TLS) */
+#define NET_TYPE_TLS  2
 
 /** @brief Event: no events in queue */
 #define NET_EVT_NONE         0
@@ -1474,7 +2778,7 @@ static inline int net_ring_read(uint8_t *ring_buf, int buf_size,
 
 /**
  * @brief Open a new TCP or UDP socket.
- * @param type  NET_TYPE_TCP or NET_TYPE_UDP.
+ * @param type  NET_TYPE_TCP, NET_TYPE_UDP, or NET_TYPE_TLS.
  * @return Stream handle (>=0) on success; negative errno on failure.
  */
 extern int net_open(int32_t type);
@@ -1487,9 +2791,11 @@ extern int net_open(int32_t type);
  * For UDP, sets the default peer (no handshake occurs).
  *
  * @param handle  Stream handle from net_open().
- * @param host    Null-terminated hostname or IPv4 dotted-decimal string.
+ * @param host    Null-terminated hostname or IPv4 dotted-decimal string
+ *                (at most 63 characters, -ENAMETOOLONG otherwise).
  * @param port    Remote port (1–65535).
- * @return 0 if queued; negative errno on failure.
+ * @return 0 if queued; negative errno on failure (-EALREADY if already
+ *         connecting or connected).
  */
 extern int net_connect(int32_t handle, const char *host, int32_t port);
 
@@ -1529,7 +2835,8 @@ extern int net_close(int32_t handle);
  * @param handle      Stream handle.
  * @param tx_buf      Pointer to the WASM buffer (>= NET_RING_HDR_SIZE + 1 byte).
  * @param total_size  Total buffer size in bytes.
- * @return 0 on success; negative errno on failure.
+ * @return 0 on success; negative errno on failure (-ENOTSUP if the app's
+ *         linear memory can grow).
  */
 extern int net_tx_bind(int32_t handle, void *tx_buf, int32_t total_size);
 
@@ -1542,7 +2849,8 @@ extern int net_tx_bind(int32_t handle, void *tx_buf, int32_t total_size);
  * @param handle      Stream handle.
  * @param rx_buf      Pointer to the WASM buffer (>= NET_RING_HDR_SIZE + 1 byte).
  * @param total_size  Total buffer size in bytes.
- * @return 0 on success; negative errno on failure.
+ * @return 0 on success; negative errno on failure (-ENOTSUP if the app's
+ *         linear memory can grow).
  */
 extern int net_rx_bind(int32_t handle, void *rx_buf, int32_t total_size);
 
@@ -1550,10 +2858,12 @@ extern int net_rx_bind(int32_t handle, void *rx_buf, int32_t total_size);
  * @brief Flush the TX ring immediately without waiting for the next poll tick.
  *
  * The host poll thread drains the TX ring automatically every ~10 ms.
- * Call this for lower-latency sends.
+ * Call this for lower-latency sends. It only wakes the poll thread, which
+ * sends without blocking; send errors arrive later as NET_EVT_ERROR.
  *
  * @param handle  Stream handle.
- * @return Bytes sent on success; negative errno on failure.
+ * @return 0 on success (not a byte count); -ENOTCONN if the stream is not
+ *         connected, other negative errno on failure.
  */
 extern int net_tx_flush(int32_t handle);
 
@@ -1578,7 +2888,8 @@ extern int net_event_pop(void *buf, int32_t len);
  * Writes a null-terminated dotted-decimal string into @p buf
  * (e.g. "192.168.1.42"). The buffer must be at least 16 bytes.
  *
- * Required capability: "network.*" or "network.read"
+ * Required capability: "network.*" (or "network.use" / "network.connect"),
+ * like the other net_* calls.
  *
  * @param buf  Destination buffer (>= 16 bytes).
  * @param len  Buffer capacity.
@@ -1597,7 +2908,16 @@ extern int net_get_ip(char *buf, int32_t len);
  *   "power.control"— power_set_mode, power_wake_on_gpio,
  *                    power_wake_on_timer, power_set_low_power
  *                    (elevated — only works when host has
- *                     CONFIG_AKIRA_WASM_POWER_CONTROL=y)
+ *                     CONFIG_AKIRA_WASM_POWER_CONTROL=y; -ENOTSUP otherwise)
+ * Missing capability: -EPERM.
+ *
+ * Apps can't put the device to sleep: power_set_mode() accepts only
+ * POWER_MODE_ACTIVE and POWER_MODE_IDLE and returns -ENOTSUP for light sleep,
+ * deep sleep and hibernate. power_wake_on_gpio() and power_wake_on_timer()
+ * only record the request; nothing is armed. The control calls share one rate
+ * limit for all apps, 8 at once and then one per 250 ms (-EAGAIN); repeating
+ * the current setting returns 0 without using it. Battery readings are
+ * cached for 1 s.
  */
 
 /** @brief System power modes */
@@ -1615,27 +2935,29 @@ extern int net_get_ip(char *buf, int32_t len);
  * @brief Unpack a battery status buffer filled by power_get_battery_status().
  *
  * Example:
- *   uint8_t buf[12];
+ *   uint8_t buf[16];
  *   power_get_battery_status(buf, sizeof(buf));
  *   int pct = buf[0];
  *   bool charging = buf[1] & BATT_FLAG_CHARGING;
  *   int32_t mv; memcpy(&mv, buf + 4, 4);
+ *   // Only bytes 0-11 are written (see power_get_battery_status()).
  */
 
 /**
  * @brief Return the current power mode (POWER_MODE_* constant).
- * @return Power mode, or -EACCES if permission denied.
+ * @return Power mode, or -EPERM if permission denied.
  */
 extern int power_get_mode(void);
 
 /**
  * @brief Read battery state of charge.
- * @return 0-100 %, -ENODEV if no battery present, -EACCES if denied.
+ * @return 0-100 %, -ENODEV if no battery present, -EPERM if denied.
  */
 extern int power_get_battery_level(void);
 
 /**
- * @brief Read full battery status into @p buf (12 bytes required).
+ * @brief Read full battery status into @p buf (12 bytes required, -EINVAL
+ *        if @p len is smaller).
  *
  * Buffer layout:
  *   [0]     uint8  level_percent (0-100)
@@ -1651,33 +2973,38 @@ extern int power_get_battery_status(void *buf, int len);
 /**
  * @brief Request a power mode transition.
  *
- * Deep sleep and hibernate require the host to have
- * CONFIG_AKIRA_POWER_DEEP_SLEEP=y; otherwise returns -ENOTSUP.
+ * Only POWER_MODE_ACTIVE and POWER_MODE_IDLE are available to apps. Light
+ * sleep, deep sleep and hibernate return -ENOTSUP: the OS decides when the
+ * device sleeps.
  *
  * @param mode POWER_MODE_* constant.
- * @return 0 on success.
+ * @return 0 on success, -EINVAL unknown mode, -ENOTSUP sleep mode,
+ *         -EAGAIN rate limit.
  */
 extern int power_set_mode(int mode);
 
 /**
  * @brief Register a GPIO pin as a wake source before deep sleep.
- * @param pin  GPIO pin number.
+ * Records the request only; no pin is touched.
+ * @param pin  GPIO pin number (0..63).
  * @param edge 0=low level, 1=high level, 2=any edge.
- * @return 0 on success.
+ * @return 0 on success, -EINVAL bad pin or edge, -EAGAIN rate limit.
  */
 extern int power_wake_on_gpio(int pin, int edge);
 
 /**
  * @brief Register a timer wake source before deep sleep.
+ * Records the request only.
  * @param ms Wake delay in milliseconds (must be > 0).
- * @return 0 on success, -EINVAL if ms == 0.
+ * @return 0 on success, -EINVAL if ms == 0, -EAGAIN rate limit.
  */
 extern int power_wake_on_timer(int ms);
 
 /**
  * @brief Enable or disable automatic low-power idle.
  * @param enable 1 to enable, 0 to disable.
- * @return 0 always.
+ * @return 0 on success, -EAGAIN rate limit, -ENOTSUP without
+ *         CONFIG_AKIRA_WASM_POWER_CONTROL.
  */
 extern int power_set_low_power(int enable);
 
@@ -1696,7 +3023,7 @@ extern int power_set_low_power(int enable);
  *   if (AKIRA_BTN_PRESSED(held, AKIRA_BTN_A)) { ... }
  *
  *   akira_input_event_t ev;
- *   if (input_poll_event(&ev) == 1 && ev.pressed) { ... }
+ *   if (input_poll_event(&ev, sizeof(ev)) == 1 && ev.pressed) { ... }
  */
 
 /** Packed event filled by input_poll_event(). 8 bytes, naturally aligned. */
@@ -1710,15 +3037,48 @@ typedef struct {
  * Bit N is set when the button with zephyr,code == N is pressed.
  * Cast return value to uint32_t before applying AKIRA_BTN_* masks.
  * @return int32 bitmask (WASM has no uint32 type at the ABI boundary).
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
  */
 extern int input_get_buttons(void);
 
 /**
  * @brief Drain one edge event from the ring buffer (non-blocking).
- * @param evt  Pointer to an akira_input_event_t in WASM linear memory.
+ * @param evt      Pointer to an akira_input_event_t in WASM linear memory.
+ * @param evt_len  Size of the event struct in bytes (must be ≥ 8).
  * @return 1 if an event was dequeued and written, 0 if queue is empty, <0 error.
+ * @note ABI is "(*~)i": pointer + explicit length — the len arg is required.
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
  */
-extern int input_poll_event(akira_input_event_t *evt);
+extern int input_poll_event(akira_input_event_t *evt, uint32_t evt_len);
+
+/**
+ * @brief Pressed state (1/0) of a console button given its legacy GPIO number.
+ * The button pins belong to the gpio-keys input device on AkiraOS 1.7, so
+ * gpio_read() on them fails; this reads input_get_buttons() instead.
+ * Pins: 0 HOME, 4 UP, 5 DOWN, 6 LEFT, 7 RIGHT, 15 A, 16 B, 17 X, 41 Y.
+ * Capability: "input.read".
+ */
+static inline int akira_btn_pin(int pin)
+{
+    uint32_t held = (uint32_t)input_get_buttons();
+    uint32_t bit;
+
+    switch (pin) {
+    case 0:  bit = 1U << 1;           break; /* HOME (zephyr,code 1) */
+    case 4:  bit = AKIRA_BTN_UP;      break;
+    case 5:  bit = AKIRA_BTN_DOWN;    break;
+    case 6:  bit = AKIRA_BTN_LEFT;    break;
+    case 7:  bit = AKIRA_BTN_RIGHT;   break;
+    case 15: bit = AKIRA_BTN_A;       break;
+    case 16: bit = AKIRA_BTN_B;       break;
+    case 17: bit = AKIRA_BTN_X;       break;
+    case 41: bit = AKIRA_BTN_Y;       break;
+    default: return 0;
+    }
+    return (held & bit) != 0U;
+}
 
 /*
  * =============================================================================
@@ -1731,11 +3091,12 @@ extern int input_poll_event(akira_input_event_t *evt);
  *
  * Lists filenames (not full paths) of every *.wasm file in the SD apps dir
  * into @p buf separated by newlines.  Requires "app.control" capability.
+ * At most 256 directory entries are examined per call.
  *
  * @param buf  Output buffer in WASM linear memory.
  * @param len  Size of @p buf in bytes.
  * @return Number of files found (≥ 0), or negative errno on error.
- *         -ENODEV if no SD card is mounted.  -EACCES if capability denied.
+ *         -ENODEV if no SD card is mounted.  -EPERM if capability denied.
  */
 extern int sd_scan_wasm(char *buf, int len);
 
@@ -1748,14 +3109,315 @@ extern int sd_scan_wasm(char *buf, int len);
  *
  * Requires capability: "app.control"
  *
- * @param name  App name without the .wasm extension (null-terminated).
- * @return 0 on success, negative errno on failure:
+ * In firmware with the lifecycle API it runs on the lifecycle work queue and
+ * shares app_start()'s limits: the caller waits up to 60 s and gets -EINTR,
+ * -ETIMEDOUT, -EAGAIN or -EBUSY as described in the APP LIFECYCLE API section.
+ *
+ * @param name  App name without the .wasm extension (null-terminated):
+ *              1..31 characters from [A-Za-z0-9_.-], not starting with '.'.
+ * @return Non-negative on success, negative errno on failure:
  *   -ENOENT  File not found on SD card
  *   -ENOSPC  LittleFS storage full
  *   -ENODEV  SD card not mounted
- *   -EACCES  Capability not granted
+ *   -EPERM   Capability not granted
+ *   -EINVAL  Invalid name
+ *   -EBUSY   @p name is the calling app itself (it can't reinstall itself)
  */
 extern int app_install_from_sd(const char *name);
+
+/**
+ * app_run_from_sd(name) → int
+ *
+ * NOT exported by AkiraOS 1.7 firmware: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ *
+ * Loads and runs a WASM app directly from the SD card without writing anything
+ * to flash. The app runs transiently; it disappears from memory when it exits.
+ *
+ * @param name  App name (bare name without extension, e.g. "my_game")
+ * @return 0 on success, negative errno on failure.
+ *   -ENOENT  File not found on SD card
+ *   -EEXIST  App already installed — use app_switch() instead
+ *   -EBUSY   App already running from SD
+ *   -ENOMEM  Not enough PSRAM to load binary
+ *   -ENOSPC  No free transient app slots
+ *   -EACCES  Capability not granted
+ */
+extern int app_run_from_sd(const char *name);
+
+/*
+ * =============================================================================
+ * CRYPTO API
+ * =============================================================================
+ * Required capability: "crypto" (-EPERM without it)
+ * Gate: CONFIG_AKIRA_WASM_CRYPTO=y (mbedTLS on the host; Ed25519 runs on
+ * in-tree code; random bytes come from Zephyr's sys_csrand_get())
+ *
+ * All operations are synchronous. Buffers must be in WASM linear memory.
+ * Key material is zeroed from host memory after each call.
+ * Input lengths are capped at CONFIG_AKIRA_WASM_CRYPTO_MAX_INPUT (default
+ * 64 KB): over it, crypto_sha256(), the CBC calls and crypto_hmac_sha256()
+ * return -EMSGSIZE; crypto_random(), crypto_aes256_ctr() and
+ * crypto_ed25519_sign() return -EINVAL.
+ */
+
+/**
+ * @brief SHA-256 hash.
+ * @param data     Input buffer.
+ * @param data_len Input length in bytes.
+ * @param out      32-byte output buffer.
+ * @return 0 on success, -EMSGSIZE if data_len is over the input cap, -EIO on
+ *         failure.
+ */
+extern int crypto_sha256(const void *data, uint32_t data_len, uint8_t *out);
+
+/**
+ * @brief AES-256-CBC encrypt.
+ * @param key  32-byte key.
+ * @param iv   16-byte IV.
+ * @param in   Plaintext (length must be a multiple of 16).
+ * @param len  Plaintext length.
+ * @param out  Ciphertext output buffer (same length as @p in).
+ * @return 0 on success, -EINVAL if len is 0 or not a multiple of 16,
+ *         -EMSGSIZE if len is over the input cap, -EIO on error.
+ */
+extern int crypto_aes256_encrypt(const uint8_t *key, const uint8_t *iv,
+                                  const void *in, uint32_t len, void *out);
+
+/** @brief AES-256-CBC decrypt. Same layout as crypto_aes256_encrypt(). */
+extern int crypto_aes256_decrypt(const uint8_t *key, const uint8_t *iv,
+                                  const void *in, uint32_t len, void *out);
+
+/**
+ * @brief HMAC-SHA256.
+ * @param key      Key buffer.
+ * @param key_len  Key length (1..64 bytes; -EINVAL otherwise).
+ * @param data     Input buffer.
+ * @param data_len Input length.
+ * @param out      32-byte HMAC output.
+ * @return 0 on success, -EINVAL bad key length, -EMSGSIZE if data_len is over
+ *         the input cap, -EIO on error.
+ */
+extern int crypto_hmac_sha256(const void *key, uint32_t key_len,
+                               const void *data, uint32_t data_len,
+                               uint8_t *out);
+
+/**
+ * @brief Fill buffer with cryptographically secure random bytes.
+ *
+ * Sources entropy from Zephyr's sys_csrand_get() (the board's entropy
+ * driver, e.g. the ESP32-S3 hardware RNG).
+ *
+ * @param buf  Output buffer.
+ * @param len  Number of bytes to generate (1..input cap; -EINVAL otherwise).
+ * @return 0 on success, -EIO if no random bytes could be produced.
+ */
+extern int crypto_random(void *buf, uint32_t len);
+
+/**
+ * @brief Generate a new Ed25519 key pair.
+ *
+ * The seed comes from sys_csrand_get(); the public key is derived with the
+ * in-tree Ed25519 code.
+ * Requires CONFIG_AKIRA_WASM_CRYPTO_ED25519=y on the host.
+ *
+ * The 32-byte seed is the canonical Ed25519 private key scalar. Store it
+ * (encrypted with crypto_aes256_encrypt) in NVS settings for persistence.
+ * The public key is re-derivable from the seed via the signing path, but
+ * storing it saves computation at startup.
+ *
+ * @param seed_out  32-byte output: private key seed (keep secret, store encrypted).
+ * @param pub_out   32-byte output: corresponding Ed25519 public key.
+ * @return 0 on success, -ENOTSUP if Ed25519 not compiled in, -EIO on failure.
+ */
+extern int crypto_ed25519_keygen(uint8_t *seed_out, uint8_t *pub_out);
+
+/**
+ * @brief Sign a message with an Ed25519 private key seed (pure EdDSA, no pre-hash).
+ *
+ * This matches OpenSSH `ssh-ed25519` and produces a 64-byte signature
+ * compatible with the SSH agent protocol.
+ *
+ * @param seed    32-byte private key seed (from crypto_ed25519_keygen or NVS).
+ * @param msg     Message bytes to sign.
+ * @param msg_len Message length (1..input cap; -EINVAL otherwise).
+ * @param sig_out 64-byte signature output (r ∥ s).
+ * @return 0 on success, -ENOTSUP if Ed25519 not compiled in, -EINVAL bad
+ *         length, -EIO on error.
+ */
+extern int crypto_ed25519_sign(const uint8_t *seed,
+                                const void *msg, uint32_t msg_len,
+                                uint8_t *sig_out);
+
+/**
+ * @brief Generate a new P-256 (secp256r1) key pair from hardware entropy.
+ *
+ * NOT exported by AkiraOS 1.7 firmware yet: the import stays unlinked and
+ * calling it traps the app ("failed to call unlinked import function").
+ * The description below is the planned behaviour.
+ *
+ * @param priv_out  32-byte output: private key scalar (keep secret).
+ * @param pub_out   65-byte output: uncompressed EC point (0x04 || X || Y).
+ * @return 0 on success, -ENOTSUP if not compiled in, -EIO on error.
+ */
+extern int crypto_p256_keygen(uint8_t *priv_out, uint8_t *pub_out);
+
+/**
+ * @brief Sign a message with a P-256 private key (ECDSA/SHA-256).
+ *
+ * NOT exported by AkiraOS 1.7 firmware yet (see crypto_p256_keygen()).
+ *
+ * Output is raw r||s (32+32 bytes), NOT DER-encoded — DER-encode yourself
+ * for CTAP2/U2F wire format.
+ *
+ * @param priv    32-byte private key scalar.
+ * @param msg     Message bytes to sign (hashed internally with SHA-256).
+ * @param msg_len Message length.
+ * @param sig_out 64-byte signature output (raw r ∥ s).
+ * @return 0 on success, -ENOTSUP if not compiled in, -EIO on error.
+ */
+extern int crypto_p256_sign(const uint8_t *priv,
+                             const void *msg, uint32_t msg_len,
+                             uint8_t *sig_out);
+
+/**
+ * @brief AES-256-CTR encrypt/decrypt (CTR is its own inverse).
+ *
+ * Meshtastic channel encryption uses AES-256-CTR with:
+ *   nonce[0..3]  = packet_id LE
+ *   nonce[4..7]  = 0
+ *   nonce[8..11] = from_node LE
+ *   nonce[12..15]= 0
+ * Default "LongFast" PSK "AQ==" expands to key = {0x01, 0x00×31}.
+ *
+ * Counter rule (TinyCrypt-compatible, so older ciphertexts still decrypt):
+ * bytes 12..15 of the counter block are a big-endian 32-bit block counter,
+ * incremented once per 16-byte block and wrapping without carrying into
+ * byte 11. The caller's @p nonce buffer is not modified.
+ *
+ * @param key    32-byte AES key.
+ * @param nonce  16-byte initial counter block.
+ * @param in     Input buffer (plaintext or ciphertext, no 16-byte alignment needed).
+ * @param len    Input length (1..input cap; -EINVAL otherwise).
+ * @param out    Output buffer (same length as @p in).
+ * @return 0 on success, -EINVAL bad length, -EIO on error.
+ */
+extern int crypto_aes256_ctr(const uint8_t *key, const uint8_t *nonce,
+                              const void *in, uint32_t len, void *out);
+
+/*
+ * =============================================================================
+ * FILESYSTEM API
+ * =============================================================================
+ * Required manifest capability: "fs.read" (reads) and/or "fs.write" (writes);
+ * -EPERM without it. Gate: CONFIG_AKIRA_WASM_FS=y.
+ * Apps are jailed to their sandbox directory; ".." components are rejected.
+ *
+ * File paths are relative to the app sandbox (e.g. "payloads/foo.txt"): the
+ * app's directory /SD:/apps/<app>/ with an SD card, /lfs/apps/<app>/ without,
+ * the same directory the STORAGE API uses. It is created on the first file or
+ * directory the app creates, and lists (and stats) as an empty directory
+ * before that. ".." returns -EACCES; '\\', ':' and control characters
+ * -EINVAL; paths over 192 characters -ENAMETOOLONG. The empty path (the
+ * directory itself) works only with fs_stat() and fs_readdir().
+ *
+ * Limits: CONFIG_AKIRA_WASM_FS_MAX_FILES_PER_APP (default 2) open files per
+ * app, and all apps together, through this and the STORAGE API, leave the OS
+ * two of the filesystem's file slots: -EMFILE beyond that. A write or seek
+ * that would grow a file past CONFIG_AKIRA_WASM_FS_QUOTA_BYTES (default
+ * 256 KB), and a write, create or mkdir that would leave less than a quarter
+ * of the volume free (at least 64 KB, at most 8 MB kept), return -ENOSPC.
+ * I/O runs in 4 KB steps; a read or write returns fewer bytes if the app is
+ * being stopped. Files the app left open are closed when it exits. A file
+ * descriptor of another app returns -EBADF. Missing or wrong paths fail
+ * without a log line: -ENOENT, -EEXIST, -EISDIR, -ENOTDIR, -ENOTEMPTY.
+ */
+
+/* fs_open flags */
+#define AKIRA_FS_O_READ   0x00   /**< Open for reading */
+#define AKIRA_FS_O_WRITE  0x01   /**< Open for writing (must exist) */
+#define AKIRA_FS_O_APPEND 0x02   /**< Open for appending */
+#define AKIRA_FS_O_RDWR   0x04   /**< Open for read+write */
+#define AKIRA_FS_O_CREATE 0x08   /**< Create if not exists */
+#define AKIRA_FS_O_TRUNC  0x10   /**< Truncate on open */
+
+/* fs_seek whence */
+#define AKIRA_FS_SEEK_SET 0
+#define AKIRA_FS_SEEK_CUR 1
+#define AKIRA_FS_SEEK_END 2
+
+/** File/directory stat result (little-endian, packed). */
+typedef struct __attribute__((packed)) {
+    uint32_t size;      /**< File size (0 for dirs). */
+    uint8_t  type;      /**< 0=file, 1=directory. */
+    uint8_t  _pad[3];
+    uint64_t mtime_ms;  /**< Modification time ms since epoch (0 if unknown). */
+} akira_stat_t;
+
+/**
+ * @brief Open a file. Returns a file descriptor ≥0 on success, negative errno on error.
+ * Any flag that can create, truncate or write needs "fs.write". Errors:
+ * -EINVAL unknown flag bits, -ENOENT no such file (without
+ * AKIRA_FS_O_CREATE), -EISDIR a directory, -EMFILE open file limit,
+ * -ENOSPC creating would break the volume reserve.
+ * @param path   Path relative to the app sandbox.
+ * @param flags  AKIRA_FS_O_* flags.
+ */
+extern int fs_open(const char *path, int32_t flags);
+
+/** @brief Close a file descriptor (either fs capability will do). */
+extern int fs_close(int32_t fd);
+
+/**
+ * @brief Read up to @p len bytes. Returns bytes read, 0 at EOF, negative errno on error
+ *        (-EBADF if @p fd is not open for reading).
+ */
+extern int fs_read(int32_t fd, void *buf, uint32_t len);
+
+/**
+ * @brief Write @p len bytes. Returns bytes written or negative errno
+ *        (-ENOSPC per-file quota or volume reserve, -EBADF if @p fd is not
+ *        open for writing).
+ */
+extern int fs_write(int32_t fd, const void *buf, uint32_t len);
+
+/**
+ * @brief Seek within a file. Needs "fs.read".
+ * Seeking past the end of a file open for writing counts as growth: the
+ * quota and the volume reserve apply (-ENOSPC). A negative target position
+ * returns -EINVAL.
+ * @param whence  AKIRA_FS_SEEK_SET / _CUR / _END.
+ * @return 0 on success, negative errno on error.
+ */
+extern int fs_seek(int32_t fd, int32_t offset, int32_t whence);
+
+/** @brief Return current file position (-EOVERFLOW past INT32_MAX). */
+extern int fs_tell(int32_t fd);
+
+/**
+ * @brief Stat a path. Returns 0 on success, negative errno on error.
+ * mtime_ms is always 0.
+ * @param out  Pointer to akira_stat_t to fill.
+ */
+extern int fs_stat(const char *path, akira_stat_t *out);
+
+/** @brief Delete a file or an empty directory (-ENOTEMPTY otherwise). */
+extern int fs_unlink(const char *path);
+
+/**
+ * @brief Create a directory. -EEXIST if the path exists; the parent must
+ *        exist (-ENOENT).
+ */
+extern int fs_mkdir(const char *path);
+
+/**
+ * @brief List directory entries into @p out_buf as newline-separated names.
+ * The buffer is NUL-terminated. Directory names have no trailing '/'
+ * (unlike storage_list()). At most 256 entries are looked at per call, and
+ * listing stops when the buffer is full.
+ * @return Number of entries written (not bytes), or negative errno.
+ */
+extern int fs_readdir(const char *path, char *out_buf, uint32_t out_len);
 
 /*
  * =============================================================================
@@ -1763,29 +3425,430 @@ extern int app_install_from_sd(const char *name);
  * =============================================================================
  *
  * Persistent key-value store backed by NVS flash.
- * Required manifest capability: "settings.*"
+ * Required manifest capability: "settings.*" (-EPERM without it)
  *
- * Keys use namespace/key format: "nes/frameskip", "wifi/ssid", etc.
+ * Keys are any string, e.g. "frameskip" or "nes/frameskip".
  * Values are plain NUL-terminated strings.
+ *
+ * Keys are private to the app: each app has its own namespace bound to its
+ * exact name, so an app can't read or change the OS's keys (Wi-Fi, MQTT,
+ * mesh, boot guard) or another app's. Keys saved before AkiraOS 1.7 under
+ * the old global names are no longer visible to apps. An app's keys are
+ * deleted when it is uninstalled.
+ *
+ * Limits (defaults): keys 1..26 characters (CONFIG_AKIRA_SETTINGS_MAX_KEY_LEN
+ * - 6; -ENAMETOOLONG beyond), values up to CONFIG_AKIRA_SETTINGS_MAX_VALUE_LEN
+ * - 1 = 63 bytes (-E2BIG), 40 keys per app and 64 for all apps together
+ * (-ENOSPC). Writes (set and delete) are rate-limited per app: 40 at once,
+ * then one every 2 s (-EAGAIN); restarting the app doesn't refill them.
+ * A request waits at most 4 s (-ETIMEDOUT) and returns -ECANCELED if the
+ * app is being stopped; a set or delete that returned either may still take
+ * effect. -EBUSY if too many app requests are queued.
  */
 
 /**
  * @brief Read a persistent setting into a buffer.
+ * A value longer than the buffer is truncated (always NUL-terminated).
  * @return 0 on success, -ENOENT if not found, negative errno on error.
  */
 extern int settings_get(const char *key, char *buf, int32_t len);
 
 /**
  * @brief Write (create or overwrite) a persistent setting.
- * @return 0 on success, negative errno on error.
+ * @return 0 on success, negative errno on error (-ENAMETOOLONG, -E2BIG,
+ *         -ENOSPC, -EAGAIN: see above).
  */
 extern int settings_set(const char *key, const char *value);
 
 /**
  * @brief Delete a persistent setting.
- * @return 0 on success, -ENOENT if not found.
+ * @return 0 on success, -ENOENT if not found, -EAGAIN rate limit.
  */
 extern int settings_delete(const char *key);
+
+/*
+ * =============================================================================
+ * RTC API
+ * =============================================================================
+ * Required capability: "rtc.read"
+ */
+
+/**
+ * @brief Return the current Unix timestamp (seconds since 1970-01-01 UTC).
+ * @return Unix time, or -1 if RTC is not set / available.
+ */
+extern int rtc_get_unix_time(void);
+
+/**
+ * @brief Return system uptime in milliseconds.
+ *
+ * Wraps after ~49.7 days. Cast to uint32_t for correct subtraction across
+ * a wrap boundary: (uint32_t)(now - then).
+ *
+ * @return Uptime in ms as int32 (unsigned interpretation).
+ */
+extern int rtc_get_uptime_ms(void);
+
+/* =========================================================================
+ * Edge AI Inference — AkiraClaw (requires "ai.infer" capability)
+ *
+ * Three-function API wrapping TFLite Micro on the host side.  The model
+ * must be a quantized TFLite flatbuffer; pack it with:
+ *   akira-cli pack app.wasm manifest.json --model model.tflite
+ *
+ * Error codes (negative return values):
+ *   AIINFER_ERR_NOMEM    (-1)  — tensor arena or model copy OOM
+ *   AIINFER_ERR_INVALID  (-2)  — bad pointer / schema mismatch / Invoke failed
+ *   AIINFER_ERR_SHAPE    (-3)  — input/output size mismatch
+ *   AIINFER_ERR_NOSLOT   (-4)  — all inference slots occupied
+ *
+ * A missing capability returns AIINFER_ERR_INVALID. Models are limited to
+ * 1 MB on boards with PSRAM and 256 KB without (AIINFER_ERR_NOMEM). A handle
+ * belongs to the app that loaded it: another app's handle is
+ * AIINFER_ERR_INVALID, and the app's handles are freed when it exits.
+ * ========================================================================= */
+
+/**
+ * @brief Load a TFLite Micro model into an inference slot.
+ *
+ * @param model      Pointer to model bytes in WASM memory.
+ * @param model_size Size of the model in bytes.
+ * @return Non-negative slot handle on success, negative error code on failure.
+ *
+ * Required manifest capability: "ai.infer"
+ */
+extern int aiinfer_load(const void *model, int model_size);
+
+/**
+ * @brief Run inference on a loaded model.
+ *
+ * Copies @p input into the model's input tensor, invokes the interpreter,
+ * and copies the output tensor back into @p output.
+ *
+ * @param handle      Slot handle returned by aiinfer_load.
+ * @param input       Pointer to input data; size must match the model's input tensor.
+ * @param input_size  Size of @p input in bytes.
+ * @param output      Pointer to output buffer; must be >= output tensor size.
+ * @param output_size Size of @p output buffer in bytes.
+ * @return 0 on success, negative error code on failure.
+ *
+ * Required manifest capability: "ai.infer"
+ */
+extern int aiinfer_run(int handle,
+                       const void *input, int input_size,
+                       void *output, int output_size);
+
+/**
+ * @brief Release an inference slot.
+ *
+ * @param handle Slot handle to release.
+ *
+ * Required manifest capability: "ai.infer"
+ */
+extern void aiinfer_unload(int handle);
+
+
+/* =========================================================================
+ * Matter/Thread co-processor IPC bridge (requires "matter" capability)
+ *
+ * AkiraOS communicates with a Thread/Matter co-processor (e.g. ESP32-H2)
+ * over UART. The co-processor runs the full Matter stack; WASM apps interact
+ * through this four-function API.
+ *
+ * Error codes (negative return values):
+ *   MATTER_ERR_NO_COPROC  (-1)  — co-processor not responding
+ *   MATTER_ERR_TIMEOUT    (-2)  — operation timed out
+ *   MATTER_ERR_INVALID    (-3)  — bad argument
+ *   MATTER_ERR_NOPERM     (-4)  — capability denied
+ *   MATTER_ERR_IO         (-5)  — UART transport error
+ *
+ * EUI-64 addresses are 8 bytes (IEEE 802.15.4 extended address).
+ *
+ * Polls wait in short slices: a poll returns MATTER_ERR_TIMEOUT as soon as
+ * the app is being stopped, even with timeout -1.
+ * ========================================================================= */
+
+#define MATTER_OK             0
+#define MATTER_ERR_NO_COPROC (-1)
+#define MATTER_ERR_TIMEOUT   (-2)
+#define MATTER_ERR_INVALID   (-3)
+#define MATTER_ERR_NOPERM    (-4)
+#define MATTER_ERR_IO        (-5)
+
+/**
+ * @brief Commission a Matter device into the fabric.
+ *
+ * Sends the passcode to the co-processor which performs BLE commissioning.
+ * On success, writes the 8-byte EUI-64 into eui64_out.
+ *
+ * @param passcode   NUL-terminated commission passcode string.
+ * @param eui64_out  8-byte buffer to receive the device EUI-64.
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_commission(const char *passcode, void *eui64_out);
+
+/**
+ * @brief Send a raw payload to a commissioned Matter device.
+ *
+ * @param eui64    Pointer to 8-byte device EUI-64.
+ * @param payload  Payload bytes.
+ * @param len      Payload length in bytes.
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_send(const void *eui64, const void *payload, int len);
+
+/**
+ * @brief Subscribe to attribute change events for a Matter device.
+ *
+ * Events are queued and retrieved via matter_poll().
+ *
+ * @param eui64    Pointer to 8-byte device EUI-64.
+ * @param attr_id  Matter cluster/attribute ID (16-bit).
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_subscribe(const void *eui64, int attr_id);
+
+/**
+ * @brief Poll for the next incoming Matter attribute event (blocking).
+ *
+ * @param src_eui64   8-byte buffer to receive the source device EUI-64.
+ * @param attr_id     Pointer to int to receive the attribute ID.
+ * @param buf         Buffer to receive the attribute value.
+ * @param buf_len     Size of buf in bytes.
+ * @param timeout_ms  Milliseconds to wait; -1 = wait until an event arrives
+ *                    or the app is stopped.
+ * @return Number of value bytes written on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_poll(void *src_eui64, int *attr_id,
+                       void *buf, int buf_len, int timeout_ms);
+
+
+/* =========================================================================
+ * Matter accessory API — expose THIS device's hardware as a Matter accessory
+ * that Home Assistant / Google Home / Alexa / Apple Home can adopt.
+ *
+ * Available only when the firmware is built with CONFIG_AKIRA_MATTER_ACCESSORY.
+ * All functions require manifest capability "matter".
+ * An endpoint belongs to the app that added it (at most 8 per app); another
+ * app's matter_report_attr() on it returns MATTER_ERR_NOPERM, and the
+ * ownership ends when the app exits.
+ *
+ * Standard Matter identifiers for use with these calls:
+ * ========================================================================= */
+
+/* Device type IDs (matter_endpoint_add) */
+#define MATTER_DEVTYPE_ONOFF_LIGHT     0x0100
+#define MATTER_DEVTYPE_DIMMABLE_LIGHT  0x0101
+#define MATTER_DEVTYPE_COLOR_LIGHT     0x0102
+#define MATTER_DEVTYPE_ONOFF_SWITCH    0x0103
+#define MATTER_DEVTYPE_PLUG            0x010A
+#define MATTER_DEVTYPE_TEMP_SENSOR     0x0302
+#define MATTER_DEVTYPE_OCCUPANCY       0x0107
+
+/* Cluster IDs */
+#define MATTER_CLUSTER_ONOFF           0x0006
+#define MATTER_CLUSTER_LEVEL_CONTROL   0x0008
+#define MATTER_CLUSTER_COLOR_CONTROL   0x0300
+#define MATTER_CLUSTER_TEMP_MEASUREMENT 0x0402
+#define MATTER_CLUSTER_OCCUPANCY       0x0406
+
+/* Common attribute / command IDs */
+#define MATTER_ATTR_ONOFF              0x0000  /* OnOff.OnOff (bool) */
+#define MATTER_ATTR_CURRENT_LEVEL      0x0000  /* LevelControl.CurrentLevel (u8) */
+#define MATTER_ATTR_MEASURED_VALUE     0x0000  /* Measurement clusters (i16, 0.01 units) */
+#define MATTER_CMD_OFF                 0x0000  /* OnOff.Off */
+#define MATTER_CMD_ON                  0x0001  /* OnOff.On */
+#define MATTER_CMD_TOGGLE              0x0002  /* OnOff.Toggle */
+#define MATTER_CMD_MOVE_TO_LEVEL       0x0000  /* LevelControl.MoveToLevel */
+
+/**
+ * @brief Register a local Matter endpoint (device type + server clusters).
+ *
+ * @param device_type  MATTER_DEVTYPE_* device type ID.
+ * @param clusters     Array of MATTER_CLUSTER_* server cluster IDs.
+ * @param n_clusters   Number of cluster IDs (max 8).
+ * @return Assigned endpoint ID (>= 0) on success, negative MATTER_ERR_* on
+ *         failure (MATTER_ERR_INVALID also when the app already has 8).
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_endpoint_add(int device_type, const unsigned int *clusters,
+                               int n_clusters);
+
+/**
+ * @brief Report a local attribute value outward to the fabric.
+ *
+ * @param endpoint  Local endpoint ID (from matter_endpoint_add).
+ * @param cluster   MATTER_CLUSTER_* ID.
+ * @param attr      Attribute ID.
+ * @param val       Value bytes.
+ * @param len       Value length (1..255).
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_report_attr(int endpoint, int cluster, int attr,
+                              const void *val, int len);
+
+/**
+ * @brief Poll for the next inbound command targeting a local endpoint (blocking).
+ *
+ * @param endpoint    Receives the target endpoint ID.
+ * @param cluster     Receives the cluster ID.
+ * @param cmd         Receives the command ID (MATTER_CMD_*).
+ * @param buf         Buffer to receive the command payload.
+ * @param buf_len     Size of buf in bytes.
+ * @param timeout_ms  Milliseconds to wait; -1 = wait until a command arrives
+ *                    or the app is stopped.
+ * @return Number of payload bytes on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_cmd_poll(int *endpoint, int *cluster, int *cmd,
+                           void *buf, int buf_len, int timeout_ms);
+
+/**
+ * @brief Open this device's commissioning window so a controller can adopt it.
+ *
+ * @param timeout_sec  Window timeout in seconds (0 = firmware default).
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_open_pairing(int timeout_sec);
+
+/**
+ * @brief Fetch this device's onboarding payload (QR string + manual code).
+ *
+ * @param qr          Buffer for the "MT:..." QR string.
+ * @param qr_len      Size of qr buffer.
+ * @param manual      Buffer for the 11-digit manual pairing code.
+ * @param manual_len  Size of manual buffer.
+ * @return 0 on success, negative MATTER_ERR_* on failure.
+ *
+ * Required manifest capability: "matter"
+ */
+extern int matter_get_pairing(char *qr, int qr_len, char *manual, int manual_len);
+
+
+/* =========================================================================
+ * MQTT / Home Assistant (requires "mqtt" capability)
+ *
+ * Publish this device's hardware to Home Assistant over MQTT. The firmware
+ * owns the broker connection (configured via the `mqtt` shell command / NVS);
+ * apps publish/subscribe and declare Home Assistant entities.
+ *
+ * Limits per app: published topics 1..128 bytes and payloads up to 1024
+ * bytes (-EMSGSIZE). Topics must be well-formed UTF-8 without control
+ * characters; wildcards are allowed only in subscription filters, where MQTT
+ * allows them ('+' a whole level, '#' last): -EINVAL otherwise. Publishes,
+ * including ha_light_register() and ha_light_report(), are rate-limited: 20
+ * at once, then 10 per second (-EBUSY). -EBUSY also means a lock on the
+ * shared broker connection wasn't free in time: the MQTT API lock (2 s, in
+ * mqtt_subscribe() and ha_light_register()) or the client lock (3 s, on any
+ * publish or subscribe). At most 4 subscription filters (up
+ * to 79 bytes each) and 4 HA lights per app (-ENOSPC). Inbound messages
+ * carry topics up to 79 bytes and payloads up to 160 bytes. Subscriptions
+ * and HA light records are dropped when the app exits. Missing capability:
+ * -EPERM.
+ *
+ * Fields present in a parsed HA light command (ha_light_poll return bitmask):
+ * ========================================================================= */
+#define HA_CMD_STATE       (1 << 0)
+#define HA_CMD_BRIGHTNESS  (1 << 1)
+#define HA_CMD_COLOR       (1 << 2)
+
+/**
+ * @brief Publish a raw MQTT message.
+ * @param topic   NUL-terminated topic.
+ * @param payload Payload bytes.
+ * @param len     Payload length.
+ * @param qos     0 or 1.
+ * @param retain  Non-zero to set the retain flag.
+ * @return 0 on success, negative errno on failure (e.g. -ENOTCONN; -EMSGSIZE,
+ *         -EINVAL topic, -EBUSY rate limit or connection lock busy).
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int mqtt_publish(const char *topic, const void *payload, int len,
+                        int qos, int retain);
+
+/**
+ * @brief Subscribe to a topic filter (QoS 0). Survives reconnects.
+ * Returns -ENOTCONN while not connected; the filter is remembered and
+ * subscribed when the connection comes up. -ENOSPC past 4 filters per app,
+ * -ECANCELED if the app is being stopped, -EBUSY if a connection lock is busy.
+ * Required manifest capability: "mqtt"
+ */
+extern int mqtt_subscribe(const char *topic);
+
+/**
+ * @brief Wait for the next inbound message.
+ * The topic is truncated to @p topic_cap - 1 bytes and the payload to
+ * @p payload_cap bytes.
+ * @param topic        Buffer receiving the NUL-terminated topic.
+ * @param topic_cap    Size of @p topic.
+ * @param payload      Buffer receiving the payload.
+ * @param payload_cap  Size of @p payload.
+ * @param timeout_ms   Milliseconds to wait; -1 = until a message arrives or
+ *                     the app is stopped.
+ * @return Number of payload bytes on success, -EAGAIN on timeout,
+ *         -ECANCELED if the app is being stopped, negative errno on failure.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int mqtt_poll(char *topic, int topic_cap, void *payload,
+                     int payload_cap, int timeout_ms);
+
+/** @brief 1 if connected to the broker, 0 otherwise. Cap: "mqtt". */
+extern int mqtt_connected(void);
+
+/**
+ * @brief Announce a Home Assistant light entity (MQTT discovery) and
+ *        subscribe to its command topic. RGB + brightness, JSON schema.
+ * Counts as a publish for the rate limit.
+ * @param object_id  Stable id (e.g. "rgb"): 1..32 characters from
+ *                   [A-Za-z0-9_-].
+ * @param name       Friendly name shown in HA: 1..48 bytes, no '"' or '\\'.
+ * @return 0 on success, negative errno on failure (-EINVAL bad id or name,
+ *         -ENOSPC past 4 lights per app, -EBUSY rate limit or lock busy).
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int ha_light_register(const char *object_id, const char *name);
+
+/**
+ * @brief Publish the light's current state to Home Assistant (retained).
+ * Counts as a publish for the rate limit (-EBUSY).
+ * @param on         Non-zero = ON.
+ * @param brightness 0..255.
+ * @param r,g,b      0..255.
+ * @return 0 on success, negative errno on failure.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int ha_light_report(const char *object_id, int on, int brightness,
+                           int r, int g, int b);
+
+/**
+ * @brief Wait for and decode the next command for this light.
+ * Fills only the fields present in the command. A negative @p timeout_ms
+ * does not wait.
+ * @return bitmask of HA_CMD_* (>0), 0 on timeout, -ECANCELED if the app is
+ *         being stopped, negative errno on error.
+ *
+ * Required manifest capability: "mqtt"
+ */
+extern int ha_light_poll(const char *object_id, int *on, int *brightness,
+                         int *r, int *g, int *b, int timeout_ms);
 
 
 #ifdef __cplusplus

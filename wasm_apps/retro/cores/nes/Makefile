@@ -19,7 +19,7 @@ WASM_MEMORY ?= 262144
 
 TARGET  = $(GAME).wasm
 
-SRCS    = main.c nes.c cpu6502.c ppu.c mapper.c $(ROM_DATA)
+SRCS    = main.c nes.c cpu6502.c ppu.c mapper.c save_state.c $(ROM_DATA)
 
 CFLAGS  = -O3 -flto -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unknown-attributes

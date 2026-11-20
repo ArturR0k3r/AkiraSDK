@@ -1,6 +1,0 @@
-{
-  "name": "inclinometer",
-  "version": "1.0.0",
-  "capabilities": ["display.write", "sensor.read"],
-  "memory_quota": 32768
-}

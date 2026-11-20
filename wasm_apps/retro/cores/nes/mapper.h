@@ -135,3 +135,9 @@ void    mapper_scanline   (Mapper *m);
  * @return 1 if the mapper was asserting /IRQ (flag cleared), 0 otherwise.
  */
 int     mapper_irq_pending(Mapper *m);
+
+/**
+ * Recompute prg_page/chr_page pointer caches from current bank-select
+ * state. Call after restoring a save state (see save_state.h).
+ */
+void    mapper_resync    (Mapper *m);

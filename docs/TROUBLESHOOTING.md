@@ -15,6 +15,7 @@ Common issues and solutions when building and running WASM apps on AkiraOS.
 - [Storage Problems](#storage-problems)
 - [Network Issues](#network-issues)
 - [Memory Problems](#memory-problems)
+- [AkiraOS 1.7 Limits](#akiraos-17-limits)
 - [General Debugging](#general-debugging)
 
 ---
@@ -214,15 +215,21 @@ gpio_configure(LED_PIN, GPIO_OUTPUT | GPIO_OUTPUT_INIT_LOW);
 gpio_write(LED_PIN, 1);
 ```
 
+If a GPIO call returns `-EACCES`, `-EPERM` or `-EBUSY`, see [`gpio_configure()` returns `-EACCES`](#gpio_configure-returns--eacces).
+
 ---
 
 ## BLE Issues
 
 ### `ble_init()` returns `-EBUSY`
 
-**Cause:** HID mode is already active on the BLE stack.
+**Cause 1:** HID mode is already active on the BLE stack.
 
 **Fix:** Only one BLE mode can be active at a time. Disable HID first (`hid_disable()`) or design the app to use one or the other.
+
+**Cause 2:** Another app owns the app BLE layer. The first app that sets up BLE owns it until it calls `ble_deinit()` or exits.
+
+**Cause 3 (other BLE calls):** a rate limit. `ble_advertise()`/`ble_stop_advertise()` allow 8 calls at once then 4 per second, `ble_add_service()` one per 2 s after the first few, `ble_set_local_name()` one rename per 2 s.
 
 ### No `BLE_EVT_CONNECTED` event
 
@@ -316,11 +323,13 @@ storage_open("config.txt", STORAGE_O_READ);
 storage_open("logs/app.log", STORAGE_O_APPEND);
 ```
 
+**Cause 4:** `-EMFILE` (too many open files) or `-ENOSPC` (volume reserve). See [AkiraOS 1.7 Limits](#akiraos-17-limits).
+
 ### `storage_write()` returns `-ENOSPC`
 
-**Cause:** Storage partition is full.
+**Cause:** The file would grow past the per-file quota (256 KB by default), or the write would leave less than a quarter of the volume free. See [`fs_*` or `storage_*` returns `-ENOSPC` with free space left](#fs_-or-storage_-returns--enospc-with-free-space-left).
 
-**Fix:** Delete old files:
+**Fix:** Delete old files, or split data across several files:
 ```c
 storage_delete("old_data.bin");
 storage_delete("logs/app.log");  // implement log rotation
@@ -328,7 +337,7 @@ storage_delete("logs/app.log");  // implement log rotation
 
 ### Forgetting to close a file descriptor
 
-Always close after use — the platform has a limited number of file descriptors:
+Always close after use — an app may hold only 2 open files (storage and FS APIs each), and all apps together leave the OS two filesystem slots. The next open returns `-EMFILE`. Files still open when the app exits are closed for it:
 
 ```c
 int fd = storage_open("x.txt", STORAGE_O_READ);
@@ -356,6 +365,10 @@ net_tx_bind(h, tx_buf, sizeof(tx_buf));   // must bind before connecting
 net_rx_bind(h, rx_buf, sizeof(rx_buf));
 net_connect(h, "example.com", 80);
 ```
+
+**Cause 4:** `net_tx_bind()` / `net_rx_bind()` returned `-ENOTSUP`: the app's linear memory can grow. Link with `-Wl,--initial-memory=N -Wl,--max-memory=N` (the same N).
+
+**Cause 5:** `net_connect()` returned `-EACCES`: the firmware's egress policy refused the host or port.
 
 ### Data sent but never received on the other end
 
@@ -395,9 +408,65 @@ void process(void) {
 
 ### `mem_alloc()` returns 0
 
-**Cause:** WASM heap exhausted. The entire memory budget is 64 KB (or `memory_quota` in the manifest), shared by stack, static data, and heap.
+**Cause 1:** WASM heap exhausted. The entire memory budget is 64 KB (or `memory_quota` in the manifest), shared by stack, static data, and heap.
 
-**Fix:** Use static buffers and reduce heap allocations.
+**Cause 2:** The manifest lacks the `memory` capability.
+
+**Fix:** Use static buffers and reduce heap allocations. Everything the runtime allocates for one app is also capped at `CONFIG_AKIRA_WASM_APP_MEM_LIMIT_KB` (2048 KB with PSRAM, 1024 KB without); past that, `memory.grow` fails and the log shows "hit its N KB memory limit".
+
+---
+
+## AkiraOS 1.7 Limits
+
+AkiraOS 1.7 applies fixed limits to every app. The full list is in [API_REFERENCE.md](API_REFERENCE.md#limits-and-error-codes-akiraos-17).
+
+### Settings I saved before 1.7 are gone
+
+**Cause:** Each app now has a private settings namespace bound to its exact name. Keys saved under the old global names (for example `"nes/frameskip"` written by an older firmware) are no longer visible to apps, and OS keys such as Wi-Fi credentials can't be read at all.
+
+**Fix:** Save the values again with `settings_set()`. Keep keys to 26 characters (`-ENAMETOOLONG`) and values to 63 bytes (`-E2BIG`) with the default configuration. An app has 40 keys (`-ENOSPC`), and writes are limited to 40 at once, then one every 2 s (`-EAGAIN`): don't save state on every frame.
+
+### `gpio_configure()` returns `-EACCES`
+
+**Cause:** The pin is a system pin (used by a devicetree node, chip-reserved, or a strapping pin) or not in the board's `CONFIG_AKIRA_WASM_GPIO_APP_PINS`. On AkiraConsole Prod apps get GPIO39 and GPIO40 only.
+
+**Related:** `-EBUSY` means another app configured the pin; `-EPERM` from `gpio_read()`/`gpio_write()` means this app didn't configure it first. The same kind of rule refuses system I2C addresses, ADC channels, UARTs and PWM channels with `-EACCES`.
+
+### `fs_*` or `storage_*` returns `-ENOSPC` with free space left
+
+**Cause 1:** A write, create or mkdir would leave less than a quarter of the volume free (at least 64 KB, at most 8 MB is kept for the OS and installed apps).
+
+**Cause 2:** The file would grow past the per-file quota, 256 KB by default (`CONFIG_AKIRA_WASM_FS_QUOTA_BYTES` / `CONFIG_AKIRA_WASM_STORAGE_QUOTA_BYTES`). For the FS API, seeking past the end of a file open for writing counts too.
+
+**Fix:** Keep files small, rotate logs, delete what you no longer need.
+
+### `fs_open()` / `storage_open()` returns `-EMFILE`
+
+**Cause:** The app already has 2 files open, or all apps together hold every file slot apps may use. Close files as soon as you're done.
+
+### My app gets `-EINTR` or `-ECANCELED`
+
+**Cause:** The app is being stopped (`app stop`, an app switch, or another app's `app_stop()`). Waiting calls end early so the stop doesn't have to wait for them: `msg_recv()`, `app_start()`, `app_stop()` and `app_install_from_sd()` return `-EINTR`; settings, RF, mesh, MQTT, BLE and network calls return `-ECANCELED`. `delay()` returns early too, but still returns `0`.
+
+**Fix:** Treat these codes as "exit now": clean up and return from `main()`. An app still running WASM code 1.5 s after the stop is aborted.
+
+### `printf()` output is missing
+
+**Cause:** App output is rate-limited per app: a 2 KB burst, then 1 KB/s, each line costing its length plus 32 bytes. Dropped lines show up as `N line(s) of output dropped (rate limit)`. Lines longer than 160 characters are cut.
+
+**Fix:** Don't print inside tight loops; print on state changes or once per second.
+
+### `power_set_mode()` returns `-ENOTSUP`
+
+**Cause:** Apps can't select light sleep, deep sleep or hibernate. Only `POWER_MODE_ACTIVE` and `POWER_MODE_IDLE` are accepted. `-EAGAIN` means the power-control rate limit (8 calls, then one per 250 ms, shared by all apps).
+
+### `wdt_pet()` no longer keeps the device from resetting
+
+**Cause:** `wdt_pet()` doesn't feed the hardware watchdog any more; it only reports whether one is running. The OS feeds the watchdog itself and apps can't starve it, so a long-running app needs no watchdog calls.
+
+### `app_start()` / `app_stop()` returns `-EAGAIN`, `-EINVAL` or `-ETIMEDOUT`
+
+**Cause:** Lifecycle requests are queued and rate-limited: 4 at once per app, then one per 2 s (`-EAGAIN`). An app can't start, stop or switch to itself (`-EINVAL`) or reinstall itself with `app_install_from_sd()` (`-EBUSY`). The caller waits at most 60 s for the result (`-ETIMEDOUT`; the request may still complete).
 
 ---
 
@@ -527,6 +596,12 @@ from that same commit:
 cd modules/wasm-micro-runtime
 git log --oneline -1   # shows the commit
 ```
+
+If the log says `AOT binary refused: '<app>' is not attested`, the firmware was built with `CONFIG_AKIRA_REFUSE_UNATTESTED_AOT=y` and runs AOT only for attested apps: install a signed package (`akira-cli sign`, verified against the firmware's `CONFIG_AKIRA_APP_PUBKEY`) or the `.wasm` build.
+
+### AOT app logs "is unattested AOT native code"
+
+This is a warning, not an error: the app still runs. An `.aot` file is native code, and the WASM sandbox only confines it if `wamrc` built it from a source you trust; the loader can't tell. AkiraOS loads unattested AOT apps with this warning and an audit record, so installing one is your choice and risk. To get rid of the warning, install the app as a package signed with `akira-cli sign` for a key the firmware trusts (`CONFIG_AKIRA_APP_PUBKEY`; it is then attested), or use the `.wasm` build.
 
 ### AOT binary is larger than .wasm
 

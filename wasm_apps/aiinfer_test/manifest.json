@@ -1,0 +1,9 @@
+{
+  "name": "aiinfer_test",
+  "version": "1.0.0",
+  "description": "AkiraClaw end-to-end inference test: sine approximation via hello_world_float model",
+  "capabilities": [
+    "ai.infer"
+  ],
+  "memory_quota": 65536
+}

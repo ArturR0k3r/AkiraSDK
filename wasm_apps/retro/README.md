@@ -5,8 +5,8 @@ into a self-contained `.aot` binary (Ahead-Of-Time compiled native code)
 that can be deployed like any other AkiraOS app — via USB, BLE, or SD card.
 
 > **WASM vs AOT** — ROM files can also be compiled to `.wasm` for interpreter
-> execution, but AOT binaries run **10–50× faster** and are the recommended
-> format for real hardware.
+> execution, but AOT binaries run as machine code and are the recommended format
+> for real hardware (speed-up [not yet measured](https://docs.akiraos.dev/resources/performance.html#webassembly-execution-speed)).
 
 ## Quick Start
 

@@ -1,0 +1,20 @@
+[package]
+name = "hello_world"
+version = "1.0.0"
+edition = "2021"
+# src/main.rs is the cdylib below; do not also build it as a binary.
+autobins = false
+
+# cdylib produces hello_world.wasm — the correct output for a WASM app
+[lib]
+crate-type = ["cdylib"]
+path = "src/main.rs"
+
+[dependencies]
+akira_sdk = { path = "../../../rust/akira_sdk" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true

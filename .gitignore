@@ -106,3 +106,13 @@ build_nrf53/
 
 # WebAssembly apps 
 *.wasm
+# MicroPython build output (stray gitlink caused recursive submodule checkout to fail)
+python/runtime/_build/
+
+# Cargo build output
+target/
+
+# Windows "mark of the web" sidecars and accidental copies
+*:Zone.Identifier
+*Zone.Identifier
+* - Copy.*

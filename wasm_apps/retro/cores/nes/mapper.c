@@ -561,6 +561,18 @@ static uint8_t m66_ppu_read(Mapper *m, uint16_t addr)
  * Public API                                                           *
  * ════════════════════════════════════════════════════════════════════ */
 
+/**
+ * Recompute the cached prg_page/chr_page pointer tables from the current
+ * bank-select state. Call this after restoring a save state (bank-select
+ * registers are restored, but the derived pointer caches are not part of
+ * the save format and must be rebuilt against this run's rom/chr pointers).
+ */
+void mapper_resync(Mapper *m)
+{
+    update_prg_pages(m);
+    update_chr_pages(m);
+}
+
 int mapper_init(Mapper *m, const uint8_t *rom, int rom_size)
 {
     if (parse_ines(m, rom, rom_size) != 0) return -1;

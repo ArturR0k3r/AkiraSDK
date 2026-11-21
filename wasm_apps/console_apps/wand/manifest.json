@@ -1,0 +1,9 @@
+{
+  "name": "wand",
+  "display_name": "Wand",
+  "version": "1.0.0",
+  "description": "Teach the console your own motion gestures with a few examples each, then cast spells. Few-shot learning on the 6-axis IMU with dynamic time warping, a leave-one-out self-test, per-spell 'not sure' limits and a motion gate. Gestures are saved in the app's storage sandbox.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto", "sensor.read", "storage.read", "storage.write"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "mind_reader",
+  "display_name": "Mind Reader",
+  "version": "1.0.0",
+  "description": "Rock-paper-scissors against a machine that learns your habits on the console: six online experts (frequencies, Markov chains, win/lose habits, history matching) blended by how well each predicts you. It commits its move before you press, shows its reasoning, and remembers you between sessions.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto", "storage.read", "storage.write"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

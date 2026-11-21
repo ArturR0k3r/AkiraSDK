@@ -1,0 +1,9 @@
+{
+  "name": "reversi",
+  "display_name": "Reversi",
+  "version": "1.0.0",
+  "description": "Reversi against the CPU: Easy, Normal and Hard (bitboard alpha-beta, time-boxed so it answers in about a second; Hard solves the endgame exactly). Undo, move hints, play either colour. Wins/losses/draws per level saved to NVS.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto", "settings.*"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

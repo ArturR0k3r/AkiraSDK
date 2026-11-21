@@ -41,6 +41,13 @@ simulator, so those apps run but can't talk to real peripherals — use a device
 | `logic_analyzer` | `gpio.read`, `display.write`, `timer` | GPIO logic analyser |
 | `supervisor` | `display.write`, `app.control`, `ipc` | App launcher UI |
 | `tetris` | `display.write`, `gpio.read`, `timer` | Tetris game |
+| `reroute` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Rotate cable tiles to power every terminal; endless generated levels plus a date-seeded daily puzzle |
+| `solitaire` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Klondike patience: draw 1 or 3, undo, quick moves, auto-finish, saved stats |
+| `reversi` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Reversi against a time-boxed alpha-beta CPU (Easy / Normal / Hard) |
+| `nardy` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Long Nardy (long backgammon) against the CPU: full rules (head, no hitting, six-point walls, forced dice, mars), undo and hints |
+| `bard` | `display.write`, `input.read`, `rtc.read`, `crypto` | Pocket Bard: a character-level GRU language model (int8, trained on public-domain Shakespeare) writing live on the console |
+| `mind_reader` | `display.write`, `input.read`, `rtc.read`, `crypto`, `storage.*` | Rock-paper-scissors against an online-learning ensemble that predicts your habits and shows its reasoning |
+| `wand` | `display.write`, `input.read`, `rtc.read`, `crypto`, `sensor.read`, `storage.*` | Teach your own IMU gestures from a few examples (DTW few-shot matching), then cast spells |
 
 ---
 

@@ -1,0 +1,14 @@
+{
+    "name": "rf_bruteforcer",
+    "abi": "1.0",
+    "min_akiraos_version": "1.6.0",
+    "version": "1.0.0",
+    "author": "Akira Security Lab",
+    "capabilities": [
+        "rf.transceive",
+        "display.write",
+        "timer"
+    ],
+    "memory_quota": 65536,
+    "description": "Sub-GHz code and frequency brute-forcer for authorized access-control testing"
+}

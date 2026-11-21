@@ -1,0 +1,9 @@
+{
+  "name": "reroute",
+  "display_name": "Reroute",
+  "version": "1.0.0",
+  "description": "Rotate cable tiles until power from the core reaches every terminal. Endless generated levels that grow (and wrap around from level 16), plus a date-seeded daily puzzle with a streak. Progress and stars saved to NVS.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto", "settings.*"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

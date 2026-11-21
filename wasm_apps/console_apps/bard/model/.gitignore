@@ -1,0 +1,3 @@
+*.pt
+tinyshakespeare.txt
+*.golden.npy

@@ -1,0 +1,9 @@
+{
+  "name": "bard",
+  "display_name": "Pocket Bard",
+  "version": "1.0.0",
+  "description": "A neural language model running on the console: a character-level GRU with int8 weights, trained on Shakespeare's plays (public domain), writes new scenes live, one sampled character at a time. Pick the speaker and the temperature, and watch the network's next-character guesses.",
+  "capabilities": ["display.write", "input.read", "rtc.read", "crypto"],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

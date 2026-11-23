@@ -1,10 +1,11 @@
 {
   "name": "pixel_dungeon",
-  "version": "2.1.3",
+  "display_name": "Pixel Dungeon",
+  "version": "3.0.0",
+  "description": "Pixel-art roguelike. Pick a Warrior, Rogue or Mage and descend twenty floors through the Cellars, Fungal Caverns, Frozen Crypt and Molten Depths. Four bosses telegraph their attacks; level-up perks, unidentified flasks, scrolls, bombs, vaults with keys, shops, shrines and blood altars. Claim the Akira Crystal on B20. Best score saved to NVS.",
   "capabilities": [
     "display.write",
     "input.read",
-    "gpio.read",
     "app.switch",
     "crypto",
     "rtc.read",

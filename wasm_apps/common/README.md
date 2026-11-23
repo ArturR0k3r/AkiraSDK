@@ -73,3 +73,19 @@ Route these through the kit, delete the hand-rolled equivalents:
 
 Bespoke screens (spectrum waterfall, `rf.dial-radio` hero value) keep their
 custom body but should still adopt the shared status bar and dialogs.
+
+## akira_spr.h — pixel-art sprites for games
+
+Colour games (Crystal Lair, Pixel Angler) use `akira_spr.h` instead of the 1-bit kit. Art
+is written one character per pixel (`'.'` = clear) against a shared palette, expanded once
+into RGB565 caches with `spr_build()`, and drawn with `display_bitmap_transparent()` —
+one native call per sprite. Every palette entry also carries a black/white value, so the
+same art renders on the 1-bit 400x240 Sharp panel. Also: `spr_mirror()`,
+`spr_blit_scaled()`, `spr_blit_tint()` (silhouettes and hit flashes), `spr_dither16()`
+veils, outlined text and a small colour UI theme (`spr_panel`, `spr_sel_row`, `spr_bar`).
+
+```c
+#include "akira_api.h"
+#include "../../common/akira_game.h"
+#include "../../common/akira_spr.h"
+```

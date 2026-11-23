@@ -1,0 +1,17 @@
+{
+  "name": "angler",
+  "display_name": "Pixel Angler",
+  "version": "1.0.0",
+  "description": "Tilt-to-fight fishing. Cast, wait for the bobber to dive, then reel while tilting the console against each run the fish makes. 24 species across a pond, a mountain river, a coral coast and the abyss, each with its own hours by the real clock and its own depth. Rods, reels, line and lures; a Fishdex of record sizes saved to NVS.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "sensor.read",
+    "app.switch",
+    "crypto",
+    "rtc.read",
+    "settings.*"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

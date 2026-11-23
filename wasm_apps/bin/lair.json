@@ -1,0 +1,16 @@
+{
+  "name": "lair",
+  "display_name": "Crystal Lair",
+  "version": "1.0.0",
+  "description": "The other side of Pixel Dungeon: you are the lair. Spend souls on monsters and traps in a twisting maze, then watch the heroes try to steal the Akira Crystal. Rogues disarm traps, thieves sneak around guards, a Champion every fifth wave. Monsters rank up, dark boons every third wave. Hold out for 20 waves.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "crypto",
+    "rtc.read",
+    "settings.*"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

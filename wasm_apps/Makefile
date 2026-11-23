@@ -52,7 +52,7 @@ GENERIC_APPS = ble_led gpio hello_world net_echo net_server storage_test
 
 CONSOLE_APPS = akira_pet akira_shell altimeter card_crawl compass cube3d cyberdeck \
                display_test file_viewer glasses_mystery gravity_dash i2c_scanner \
-               image_viewer imu_3d imu_timer_test inclinometer \
+               image_viewer imu_3d imu_timer_test inclinometer lair \
                logic_analyzer macro_pad pixel_dungeon pixel_farmer \
                space_invaders supervisor tetris
 

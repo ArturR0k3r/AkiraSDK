@@ -46,6 +46,7 @@ simulator, so those apps run but can't talk to real peripherals — use a device
 | `reversi` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Reversi against a time-boxed alpha-beta CPU (Easy / Normal / Hard) |
 | `nardy` | `display.write`, `input.read`, `rtc.read`, `crypto`, `settings.*` | Long Nardy (long backgammon) against the CPU: full rules (head, no hitting, six-point walls, forced dice, mars), undo and hints |
 | `pixel_dungeon` | `display.write`, `input.read`, `app.switch`, `rtc.read`, `crypto`, `settings.*` | Pixel-art roguelike: three heroes, 20 floors in four regions, four bosses with telegraphed attacks, perks, unidentified flasks, vaults and keys |
+| `lair` | `display.write`, `input.read`, `app.switch`, `rtc.read`, `crypto`, `settings.*` | Crystal Lair: the reverse of Pixel Dungeon. Build monsters and traps in a maze, then watch heroes try to steal the crystal; ranks, boons, 20 waves |
 | `bard` | `display.write`, `input.read`, `rtc.read`, `crypto` | Pocket Bard: a character-level GRU language model (int8, trained on public-domain Shakespeare) writing live on the console |
 | `mind_reader` | `display.write`, `input.read`, `rtc.read`, `crypto`, `storage.*` | Rock-paper-scissors against an online-learning ensemble that predicts your habits and shows its reasoning |
 | `wand` | `display.write`, `input.read`, `rtc.read`, `crypto`, `sensor.read`, `storage.*` | Teach your own IMU gestures from a few examples (DTW few-shot matching), then cast spells |

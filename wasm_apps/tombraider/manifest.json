@@ -1,0 +1,12 @@
+{
+  "name": "tombraider",
+  "version": "0.1.0",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "rtc.read",
+    "fs.read",
+    "fs.write"
+  ],
+  "min_akiraos_version": "1.7.0"
+}

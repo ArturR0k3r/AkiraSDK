@@ -3,10 +3,12 @@
 #   make            -> build/tombraider.wasm (manifest embedded)
 #   make aot        -> build/tombraider.aot  (xtensa / esp32s3)
 #   make host       -> host/out/tr_host      (native 32-bit test build)
+#   make data       -> data/                 (level files from the OpenLara repo)
 #
 # Level data (packed GBA levels: TITLE/GYM/LEVEL1/LEVEL2.PKD and TITLE.SCR)
 # goes in the app's SD directory: /SD:/apps/tombraider/data/. It is
-# copyrighted game data: never commit or ship it.
+# copyrighted game data: `make data` downloads it from upstream OpenLara;
+# never commit or ship it.
 
 WASI_SDK  ?= $(HOME)/wasi-sdk
 WAMRC     ?= wamrc
@@ -21,6 +23,9 @@ BUILD      = build
 WASM       = $(BUILD)/tombraider.wasm
 AOT        = $(BUILD)/tombraider.aot
 HOST       = host/out/tr_host
+
+OPENLARA   = https://raw.githubusercontent.com/XProger/OpenLara/3b268ca4bf986c380f44a26ffd9218bf6d376249/src/platform/gba/data
+DATA       = $(addprefix data/,TITLE.PKD GYM.PKD LEVEL1.PKD LEVEL2.PKD TITLE.SCR)
 
 SRCS       = akira_main.cpp openlara/common.cpp openlara/render.cpp
 
@@ -59,10 +64,16 @@ $(HOST): $(SRCS) host/host_natives.c akira_natives.h $(wildcard openlara/*.h)
 	gcc -m32 -O2 -g -c host/host_natives.c -o host/out/host_natives.o
 	g++ -m32 -o $@ host/out/*.o
 
+data: $(DATA)
+
+data/%:
+	@mkdir -p data
+	curl -fsSL -o $@.part $(OPENLARA)/$* && mv $@.part $@
+
 $(BUILD):
 	mkdir -p $@
 
 clean:
 	rm -rf $(BUILD) host/out
 
-.PHONY: all aot host clean
+.PHONY: all aot host data clean

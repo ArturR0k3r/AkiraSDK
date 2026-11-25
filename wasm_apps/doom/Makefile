@@ -2,6 +2,7 @@
 #
 #   make            -> build/doom.wasm (manifest embedded)
 #   make aot        -> build/doom.aot  (xtensa / esp32s3)
+#   make wad        -> build/freedoom1.wad (Freedoom Phase 1, checksum-verified)
 #
 # Put the IWAD (freedoom1.wad) in the app's SD directory: /SD:/apps/doom/.
 
@@ -36,8 +37,8 @@ LDFLAGS += -Wl,--allow-undefined-file=natives.syms -Wl,--strip-all -Wl,--gc-sect
 LDFLAGS += -z stack-size=65536
 # Fixed-size memory: WAMR reallocates (copies) linear memory on every
 # memory.grow, which would briefly need twice the ~4 MB Doom uses.
-# Host measurement (all 36 Freedoom maps, -mb 3): heap peak ~3.3 MB, plus
-# at most 0.64 MB static data/BSS and stack (~3.96 MB in total).
+# Host measurement (all 36 Freedoom maps): zone + ~0.16 MB other heap, plus
+# ~0.6 MB static data/BSS and stack.
 LDFLAGS += -Wl,--initial-memory=$(MEMORY) -Wl,--max-memory=$(MEMORY)
 
 all: $(WASM)
@@ -52,10 +53,26 @@ $(AOT): $(WASM)
 	$(WAMRC) --target=xtensa --cpu=esp32s3 --opt-level=3 --size-level=0 \
 		--bounds-checks=0 --emit-custom-sections=.akira.manifest -o $@ $<
 
+# Game data: Freedoom (BSD-licensed), from the official release.
+FREEDOOM_VER    = 0.13.0
+FREEDOOM_ZIP    = freedoom-$(FREEDOOM_VER).zip
+FREEDOOM_URL    = https://github.com/freedoom/freedoom/releases/download/v$(FREEDOOM_VER)/$(FREEDOOM_ZIP)
+FREEDOOM_SHA256 = 3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59
+
+wad: $(BUILD)/freedoom1.wad
+
+$(BUILD)/freedoom1.wad: | $(BUILD)
+	curl -fL -o $(BUILD)/$(FREEDOOM_ZIP) $(FREEDOOM_URL)
+	echo "$(FREEDOOM_SHA256)  $(BUILD)/$(FREEDOOM_ZIP)" | sha256sum -c -
+	python3 -c "import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))" \
+		$(BUILD)/$(FREEDOOM_ZIP) freedoom-$(FREEDOOM_VER)/freedoom1.wad > $@.tmp
+	mv $@.tmp $@
+	rm -f $(BUILD)/$(FREEDOOM_ZIP)
+
 $(BUILD):
 	mkdir -p $@
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all aot clean
+.PHONY: all aot wad clean

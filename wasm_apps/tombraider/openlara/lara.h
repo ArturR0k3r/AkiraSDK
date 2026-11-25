@@ -2786,6 +2786,12 @@ struct Lara : ItemObj
                 input |= IN_WALK;
             }
         }
+    #elif defined(__AKIRA__)
+        // Four face buttons; Y alone walks and modifies B (roll) and X (look).
+        if (keys & IK_A) input |= IN_ACTION;
+        if (keys & IK_B) input |= (keys & IK_Y) ? (IN_UP | IN_DOWN) : IN_JUMP;
+        if (keys & IK_X) input |= (keys & IK_Y) ? IN_LOOK : IN_WEAPON;
+        if ((keys & IK_Y) && !(keys & (IK_B | IK_X))) input |= IN_WALK;
     #elif defined(__NDS__)
         if (keys & IK_A) input |= IN_UP | IN_DOWN;
         if (keys & IK_B) input |= IN_ACTION;

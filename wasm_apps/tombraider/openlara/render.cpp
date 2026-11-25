@@ -33,6 +33,8 @@ ViewportRel viewportRel;
     uint16 fb[FRAME_WIDTH * FRAME_HEIGHT];
 #elif defined(__DOS__)
     uint16 fb[FRAME_WIDTH * FRAME_HEIGHT];
+#elif defined(__AKIRA__)
+    uint16 fb[FRAME_WIDTH * FRAME_HEIGHT / 2]; // 8bpp, two pixels per uint16
 #endif
 
 enum FaceType {

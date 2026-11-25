@@ -106,6 +106,25 @@
     #include <conio.h>
     #include <dos.h>
     #include <mem.h>
+#elif defined(__AKIRA__)
+    // AkiraConsole (and its host test build): the GBA 8bpp C rasterizer
+    // (MODE4) into a byte framebuffer, packed GBA levels loaded from SD.
+    #define USE_DIV_TABLE
+
+    #define MODE4
+    #ifndef FRAME_WIDTH
+        #define FRAME_WIDTH  240
+    #endif
+    #ifndef FRAME_HEIGHT
+        #define FRAME_HEIGHT 160
+    #endif
+
+    #define USE_FMT     (LVL_FMT_PKD)
+
+    #include <stdlib.h>
+    #include <stddef.h>
+    #include <stdint.h>
+    #include <new>
 #elif defined(__3DO__)
     #define USE_DIV_TABLE   // 4k of DRAM
     #define CPU_BIG_ENDIAN
@@ -301,10 +320,12 @@ typedef uint16             divTableInt;
 #define ADDR_ALIGN4(x)  ((uint8*)x += ((intptr_t(x) + 3) & ~3) - intptr_t(x))
 
 //#include <new>
+#if !defined(__AKIRA__) // gets placement new from <new>
 inline void* operator new(size_t, void *ptr)
 {
     return ptr;
 }
+#endif
 
 #if defined(__3DO__) || defined(__32X__)
 X_INLINE int32 abs(int32 x) {
@@ -318,6 +339,8 @@ X_INLINE int32 abs(int32 x) {
     #define int2str(x,str) sprintf(str, "%d", x)
 #elif defined(__TNS__)
     #define int2str(x,str) __itoa(x, str, 10)
+#elif defined(__AKIRA__)
+    #define int2str(x,str) sprintf(str, "%d", (int)(x))
 #else
     #define int2str(x,str) _itoa(x, str, 10)
 #endif
@@ -350,6 +373,8 @@ X_INLINE int32 abs(int32 x) {
     extern uint16 fb[FRAME_WIDTH * FRAME_HEIGHT];
 #elif defined(__DOS__)
     extern uint16 fb[FRAME_WIDTH * FRAME_HEIGHT];
+#elif defined(__AKIRA__)
+    extern uint16 fb[FRAME_WIDTH * FRAME_HEIGHT / 2];
 #endif
 
 #define STATIC_MESH_FLAG_NO_COLLISION   1
@@ -408,7 +433,7 @@ extern uint8* vramPtr;
     #define SND_DECODE(x)    ((x) - 128)
     #define SND_MIN          -128
     #define SND_MAX          127
-#elif defined(__DOS__)
+#elif defined(__DOS__) || defined(__AKIRA__)
     #define SND_SAMPLES      1024
     #define SND_OUTPUT_FREQ  11025
     #define SND_SAMPLE_FREQ  11025
@@ -2807,7 +2832,7 @@ void matrixFrame_c(const void* pos, const void* angles);
 void matrixFrameLerp(const void* pos, const void* anglesA, const void* anglesB, int32 delta, int32 rate);
 void matrixSetView(const vec3i &pos, int32 angleX, int32 angleY);
 
-#if defined(__GBA__) || defined(__GBA_WIN__)
+#if defined(__GBA__) || defined(__GBA_WIN__) || defined(__AKIRA__)
 #define renderInit()
 #define renderFree()
 #define renderSwap()

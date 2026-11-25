@@ -1,0 +1,28 @@
+#include <stdio.h>
+
+#include "m_argv.h"
+
+#include "doomgeneric.h"
+
+pixel_t* DG_ScreenBuffer = NULL;
+
+void M_FindResponseFile(void);
+void D_DoomMain (void);
+
+
+void doomgeneric_Create(int argc, char **argv)
+{
+	// save arguments
+    myargc = argc;
+    myargv = argv;
+
+	M_FindResponseFile();
+
+	/* AkiraOS: size by pixel_t (1 byte with CMAP256) instead of a fixed 4. */
+	DG_ScreenBuffer = malloc(DOOMGENERIC_RESX * DOOMGENERIC_RESY * sizeof(pixel_t));
+
+	DG_Init();
+
+	D_DoomMain ();
+}
+

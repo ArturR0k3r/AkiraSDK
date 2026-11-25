@@ -1,0 +1,13 @@
+{
+  "name": "doom",
+  "version": "0.1.0",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "rtc.read",
+    "timer",
+    "fs.read",
+    "fs.write"
+  ],
+  "min_akiraos_version": "1.7.0"
+}

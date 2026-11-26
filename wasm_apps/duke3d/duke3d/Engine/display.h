@@ -13,8 +13,8 @@
 #include "esp_attr.h"
 
 /* set these in your _platform_init() implementation. */
-int _argc;
-char  **_argv;
+extern int _argc;
+extern char  **_argv;
 
 /* !!! gads, look at all the namespace polution... */
 extern int32_t xres, yres, bytesperline, imageSize, maxpages;

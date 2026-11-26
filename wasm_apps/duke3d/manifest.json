@@ -1,0 +1,13 @@
+{
+  "name": "duke3d",
+  "version": "0.1.0",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "rtc.read",
+    "fs.read",
+    "fs.write"
+  ],
+  "stack_kb": 11,
+  "min_akiraos_version": "1.7.0"
+}

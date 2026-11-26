@@ -46,7 +46,7 @@
 
     #define Z_AvailHeap() ((4 * 1024) * 1024)
 
-    #define mkdir(X) mkdir(X,0777)
+    /* AkiraOS: mkdir(X) is mapped to akira_mkdir() in akira_shim.h. */
     //#define PLATFORM_UNIX 1
     #define PLATFORM_ESP32 1
 

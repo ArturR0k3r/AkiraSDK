@@ -272,6 +272,10 @@ int loadpics(char  *filename, char * gamedir)
     heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 
     cachesize = max(artsize,1048576);
+#ifdef DUKE_CACHE_MAX
+    /* AkiraOS: fixed linear memory; leave the rest for level data. */
+    cachesize = min(cachesize, DUKE_CACHE_MAX);
+#endif
     while ((pic = (uint8_t  *)kkmalloc(cachesize)) == NULL)
     {
         cachesize -= 65536L;

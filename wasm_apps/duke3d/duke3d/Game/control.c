@@ -28,6 +28,10 @@ Prepared for public release: 03/21/2003 - Charlie Wiederhold, 3D Realms
 #include "mouse.h"
 #include "joystick.h"
 
+struct _KeyMapping KeyMapping[MAXGAMEBUTTONS];
+int32 MouseMapping[MAXMOUSEBUTTONS];
+int32 MouseDigitalAxeMapping[MAXMOUSEAXES][2];
+
 //***************************************************************************
 //
 // GLOBALS

@@ -8127,7 +8127,8 @@ static int load_duke3d_groupfile(void)
 	return(initgroupfile(groupfilefullpath) != -1);
 }
 
-int main(int argc,char  **argv)
+/* AkiraOS: the runtime calls main(void) in akira_sdl.c. */
+int duke_main(int argc,char  **argv)
 {
     int32_t i, j;
 	int32_t filehandle;

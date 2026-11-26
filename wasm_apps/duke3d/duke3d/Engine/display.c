@@ -39,6 +39,9 @@
 #include "SDL.h"
 #include "build.h"
 #include "display.h"
+
+int _argc;
+char  **_argv;
 #include "fixedPoint_math.h"
 #include "engine.h"
 #include "network.h"

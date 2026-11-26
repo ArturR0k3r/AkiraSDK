@@ -72,6 +72,8 @@ Changes:
   the screen (`fillpolygon`), no `sector[-1]`/`sprite[-1]` reads (`parascan`, `WATERDRIP`)
 - `faketimerhandler`: at most 4 queued moves, so a game tick slower than real time gives slow
   motion instead of an endless catch-up without drawing
+- `gamedef.c`: a CON `if` runs the statement it guards in `parse()`'s own frame instead of a
+  nested `parse()`, so long if/else chains do not overrun the 11 KB native stack
 
 ESP-IDF headers are stubbed in `stubs/`. `akira_sdl.c` replaces the port's SDL and LCD code,
 `akira_nosound.c` its audiolib and joystick code, and `akira_shim.c` routes stdio, POSIX files

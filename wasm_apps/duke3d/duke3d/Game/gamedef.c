@@ -2028,7 +2028,34 @@ void move()
 
 uint8_t  parse(void);
 
+/* AkiraOS: this only selects the statement an if guards and flags it;
+ * parse() runs it in the same frame. Running it as a nested parse() here
+ * costs one C call level per if, so long "ifA ifB ..." and "else if" chains
+ * in GAME.CON overrun the 11 KB app stack. Every caller ends its case right
+ * after this call, and the guarded statement's result is ignored. */
+static uint8_t parse_guarded;
+
 void parseifelse(int32_t condition)
+{
+    if( condition )
+    {
+        insptr+=2;
+        parse_guarded = 1;
+    }
+    else
+    {
+        insptr = (int32_t *) *(insptr+1);
+        if(*insptr == 10)
+        {
+            insptr+=2;
+            parse_guarded = 1;
+        }
+    }
+}
+
+/* The original recursive form, for the callers that still run code after the
+ * guarded statement. */
+static void parseifelse_nested(int32_t condition)
 {
     if( condition )
     {
@@ -2048,7 +2075,22 @@ void parseifelse(int32_t condition)
 
 // int32_t *it = 0x00589a04;
 
+static uint8_t parse_one(void);
+
 uint8_t  parse(void)
+{
+    uint8_t ret = parse_one();
+
+    while (parse_guarded)
+    {
+        parse_guarded = 0;
+        parse_one(); /* result ignored, as when it was parse() in parseifelse */
+        ret = 0;     /* an if statement always returned 0 */
+    }
+    return ret;
+}
+
+static uint8_t parse_one(void)
 {
     int32_t j, l, s;
 
@@ -2119,7 +2161,7 @@ uint8_t  parse(void)
             break;
         case 91:
             j = cansee(g_sp->x,g_sp->y,g_sp->z-((TRAND&41)<<8),g_sp->sectnum,ps[g_p].posx,ps[g_p].posy,ps[g_p].posz/*-((TRAND&41)<<8)*/,sprite[ps[g_p].i].sectnum);
-            parseifelse(j);
+            parseifelse_nested(j);
             if( j ) hittype[g_i].timetosleep = SLEEPTIME;
             break;
 
@@ -2213,13 +2255,13 @@ uint8_t  parse(void)
 
         case 8:
             insptr++;
-            parseifelse(g_x < *insptr);
+            parseifelse_nested(g_x < *insptr);
             if(g_x > MAXSLEEPDIST && hittype[g_i].timetosleep == 0)
                 hittype[g_i].timetosleep = SLEEPTIME;
             break;
         case 9:
             insptr++;
-            parseifelse(g_x > *insptr);
+            parseifelse_nested(g_x > *insptr);
             if(g_x > MAXSLEEPDIST && hittype[g_i].timetosleep == 0)
                 hittype[g_i].timetosleep = SLEEPTIME;
             break;

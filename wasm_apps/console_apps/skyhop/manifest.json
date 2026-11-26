@@ -1,0 +1,17 @@
+{
+  "name": "skyhop",
+  "display_name": "Skyhop",
+  "version": "1.0.0",
+  "description": "Endless vertical jumper. Steer Hopbot, a robot on a pogo spring, from ledge to ledge and climb from the garden through the skies, dusk and night into space. Drifting, bobbing, vanishing and crumbling ledges, springs, balloons, rockets, a bubble shield, critters to stomp or zap. Steer by tilting the console (a one-time set-up learns how the motion sensor is mounted; the D-pad works too); best score saved to NVS.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "sensor.read",
+    "app.switch",
+    "crypto",
+    "rtc.read",
+    "settings.*"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

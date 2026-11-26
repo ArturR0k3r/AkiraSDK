@@ -1,0 +1,16 @@
+{
+  "name": "rollo",
+  "display_name": "Rollo",
+  "version": "1.0.0",
+  "description": "A rubber-ball platformer. Roll and bounce Rollo through ten hand-built levels across a meadow, a flooded grotto and a dusk fort: light every spark to open the gate, dodge spikes and patrolling urchins, ride springs, and puff up with pumps to float on water before a pin lets you squeeze through narrow gaps. Beacons save your spot; best times and fewest falls are saved.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "app.switch",
+    "rtc.read",
+    "crypto",
+    "settings.*"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

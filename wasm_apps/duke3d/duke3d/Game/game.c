@@ -4424,7 +4424,7 @@ short spawn( short j, short pn )
                 break;
 
             case WATERDRIP:
-                if((j >= 0 && sprite[j].statnum == 10) || sprite[j].statnum == 1)
+                if(j >= 0 && (sprite[j].statnum == 10 || sprite[j].statnum == 1)) /* AkiraOS: no sprite[-1] read */
                 {
                     sp->shade = 32;
                     if(sprite[j].pal != 1)

@@ -1280,10 +1280,10 @@ IRAM_ATTR static void wallscan(int32_t x1, int32_t x2,
 
         bufplce[0] = lwal[x] + globalxpanning;
         
-        if (bufplce[0] >= tileWidth)
+        if ((uint32_t)bufplce[0] >= (uint32_t)tileWidth) /* AkiraOS: also wrap negative columns */
         {
             if (xnice == 0)
-                bufplce[0] %= tileWidth;
+                bufplce[0] = (bufplce[0] % tileWidth + tileWidth) % tileWidth;
             else
                 bufplce[0] &= tileWidth;
         }
@@ -1314,8 +1314,8 @@ IRAM_ATTR static void wallscan(int32_t x1, int32_t x2,
             }
 
             i = lwal[x+z] + globalxpanning;
-            if (i >= tileWidth) {
-                if (xnice == 0) i %= tileWidth;
+            if ((uint32_t)i >= (uint32_t)tileWidth) /* AkiraOS: also wrap negative columns */ {
+                if (xnice == 0) i = (i % tileWidth + tileWidth) % tileWidth;
                 else i &= tileWidth;
             }
             if (ynice == 0)
@@ -1394,9 +1394,9 @@ IRAM_ATTR static void wallscan(int32_t x1, int32_t x2,
         palookupoffse[0] = fpalookup+(getpalookup((int32_t)mulscale16(swal[x],globvis),globalshade)<<8);
 
         bufplce[0] = lwal[x] + globalxpanning;
-        if (bufplce[0] >= tileWidth) {
+        if ((uint32_t)bufplce[0] >= (uint32_t)tileWidth) /* AkiraOS: also wrap negative columns */ {
             if (xnice == 0)
-                bufplce[0] %= tileWidth;
+                bufplce[0] = (bufplce[0] % tileWidth + tileWidth) % tileWidth;
             else
                 bufplce[0] &= tileWidth;
         }
@@ -1468,8 +1468,8 @@ IRAM_ATTR static void maskwallscan(int32_t x1, int32_t x2,
         palookupoffse[0] = fpalookup+(getpalookup((int32_t)mulscale16(swal[x],globvis),globalshade)<<8);
 
         bufplce[0] = lwal[x] + globalxpanning;
-        if (bufplce[0] >= tileWidth) {
-            if (xnice == 0) bufplce[0] %= tileWidth;
+        if ((uint32_t)bufplce[0] >= (uint32_t)tileWidth) /* AkiraOS: also wrap negative columns */ {
+            if (xnice == 0) bufplce[0] = (bufplce[0] % tileWidth + tileWidth) % tileWidth;
             else bufplce[0] &= tileWidth;
         }
         if (ynice == 0)
@@ -1495,8 +1495,8 @@ IRAM_ATTR static void maskwallscan(int32_t x1, int32_t x2,
             }
 
             i = lwal[dax] + globalxpanning;
-            if (i >= tileWidth) {
-                if (xnice == 0) i %= tileWidth;
+            if ((uint32_t)i >= (uint32_t)tileWidth) /* AkiraOS: also wrap negative columns */ {
+                if (xnice == 0) i = (i % tileWidth + tileWidth) % tileWidth;
                 else i &= tileWidth;
             }
             
@@ -1560,8 +1560,8 @@ IRAM_ATTR static void maskwallscan(int32_t x1, int32_t x2,
         palookupoffse[0] = fpalookup+(getpalookup((int32_t)mulscale16(swal[x],globvis),globalshade)<<8);
 
         bufplce[0] = lwal[x] + globalxpanning;
-        if (bufplce[0] >= tileWidth) {
-            if (xnice == 0) bufplce[0] %= tileWidth;
+        if ((uint32_t)bufplce[0] >= (uint32_t)tileWidth) /* AkiraOS: also wrap negative columns */ {
+            if (xnice == 0) bufplce[0] = (bufplce[0] % tileWidth + tileWidth) % tileWidth;
             else bufplce[0] &= tileWidth;
         }
         if (ynice == 0)
@@ -1637,7 +1637,9 @@ IRAM_ATTR static void parascan(int32_t dax1, int32_t dax2, int32_t sectnum,uint8
         wallnum = pvWalls[z].worldWallId;
         nextsectnum = wall[wallnum].nextsector;
 
-        if (dastat == 0) j = sector[nextsectnum].ceilingstat;
+        /* AkiraOS: no sector[-1] read for a wall without a next sector. */
+        if (nextsectnum < 0) j = 0;
+        else if (dastat == 0) j = sector[nextsectnum].ceilingstat;
         else j = sector[nextsectnum].floorstat;
 
         if ((nextsectnum < 0) || (wall[wallnum].cstat&32) || ((j&1) == 0))
@@ -8357,6 +8359,10 @@ static void fillpolygon(int32_t npoints)
             ptr[day1] = ptr[z];
             x2 = ptr2[day2]-1;
             ptr2[day2] = ptr2[z];
+            /* AkiraOS: clip the span to the screen; x1 = -1 on row 0 would
+             * write before the frame buffer. */
+            if (x1 < 0) x1 = 0;
+            if (x2 > xdim-1) x2 = xdim-1;
             if (x1 > x2) continue;
 
             if (globalpolytype < 1)

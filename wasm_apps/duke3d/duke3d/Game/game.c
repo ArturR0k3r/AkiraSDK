@@ -802,6 +802,18 @@ IRAM_ATTR void faketimerhandler()
     if ((totalclock < ototalclock+TICSPERFRAME) || (ready2send == 0)) 
 		return; // Returns here when playing a demo.
     
+    /* AkiraOS: at most 4 queued moves. moveloop() runs domovethings() until
+     * the queue is empty, and this handler also runs inside game ticks
+     * (loadtile on a tile-cache miss). When a tick takes longer than
+     * TICSPERFRAME of real time, the queue then grows faster than it drains
+     * and the game spins without drawing. Dropping the tick runs the game
+     * in slow motion instead. */
+    if (numplayers < 2 && movefifoend[myconnectindex] - movefifoplc >= 4)
+    {
+        ototalclock = totalclock;
+        return;
+    }
+
     //YES : Add 120tick
     ototalclock += TICSPERFRAME;
   

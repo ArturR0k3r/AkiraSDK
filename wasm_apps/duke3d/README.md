@@ -70,6 +70,8 @@ Changes:
 - `esp32_compat.h`: its `mkdir` macro removed (`akira_shim.h` maps it)
 - out-of-bounds accesses: negative texture columns wrapped (`engine.c`), automap spans clipped to
   the screen (`fillpolygon`), no `sector[-1]`/`sprite[-1]` reads (`parascan`, `WATERDRIP`)
+- `faketimerhandler`: at most 4 queued moves, so a game tick slower than real time gives slow
+  motion instead of an endless catch-up without drawing
 
 ESP-IDF headers are stubbed in `stubs/`. `akira_sdl.c` replaces the port's SDL and LCD code,
 `akira_nosound.c` its audiolib and joystick code, and `akira_shim.c` routes stdio, POSIX files

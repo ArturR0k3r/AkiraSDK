@@ -1,0 +1,17 @@
+{
+  "name": "agent_guard",
+  "display_name": "Agent Guard",
+  "version": "1.0.0",
+  "description": "A physical approve button for AI agents. When an agent wants to push, deploy, delete or pay, the request appears on the console: hold A+B to approve or press X to deny. The answer is signed by a key that never leaves the SE050 secure element, so the system that runs the action can check a human said yes. Works with Claude Code hooks, MCP clients and any HTTP client over Wi-Fi; host tools in AkiraSDK/tools/agent_guard.",
+  "capabilities": [
+    "display.write",
+    "input.read",
+    "network.*",
+    "crypto",
+    "settings.*",
+    "rtc.read",
+    "app.switch"
+  ],
+  "memory_quota": 131072,
+  "min_akiraos_version": "1.7.0"
+}

@@ -1,6 +1,6 @@
 {
   "name": "hub_rgb",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Drive the PWM RGB LED from AkiraHub or the phone companion app.cmd bridge",
   "capabilities": [
     "ipc",

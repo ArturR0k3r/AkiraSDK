@@ -157,9 +157,12 @@ int main(void)
     rgb_state_t state = { .on = 0, .r = 255, .g = 255, .b = 255, .bri = 255 };
     apply_output(&state);
 
+    char evt_buf[EVT_BUF_LEN];
+    /* Publish the start state so whoever watches EVT_TOPIC (the fleet) knows it. */
+    msg_publish(EVT_TOPIC, (const uint8_t *)evt_buf, (uint32_t)build_evt(evt_buf, &state));
+
     /* ---- 3. Command loop ---- */
     char cmd_buf[CMD_BUF_LEN];
-    char evt_buf[EVT_BUF_LEN];
 
     while (1) {
         int len = msg_recv(CMD_TOPIC, (uint8_t *)cmd_buf, sizeof(cmd_buf) - 1, 2000);
